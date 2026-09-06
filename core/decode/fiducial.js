@@ -1,0 +1,462 @@
+import { sampleBilinear } from './transform.js';
+
+/**
+ * PSKT decode -- corner marker detection.
+ *
+ * The page carries four square markers: three solid and one hollow at bottom
+ * right, which fixes orientation as well as position. Detection is deliberately
+ * independent of scale: a phone photo of a plate has no notion of dpi, so the
+ * markers are found by *shape* (square, high fill ratio, similar size to each
+ * other) and the page scale is then derived from their spacing.
+ *
+ * Stages: ink mask -> connected components -> square filter -> size cluster ->
+ * rectangle validation with the hollow one at bottom right.
+ */
+
+/** Per-pixel "how much ink" against the substrate, 0..255-ish. */
+export function inkness(bitmap) {
+  const { pixels, width, height } = bitmap;
+  const sub = bitmap.substrate || [255, 255, 255];
+  const out = new Float64Array(width * height);
+  let max = 0;
+  for (let i = 0, p = 0; i < out.length; i++, p += 4) {
+    const dr = pixels[p] - sub[0];
+    const dg = pixels[p + 1] - sub[1];
+    const db = pixels[p + 2] - sub[2];
+    // luminance-weighted: a dark plate under red ink still reads as ink
+    const v = Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11);
+    out[i] = v;
+    if (v > max) max = v;
+  }
+  return { values: out, max };
+}
+
+/**
+ * Global Otsu threshold on the inkness channel.
+ * Returns 0 when the image has no ink at all (blank scan), so callers can fail
+ * loudly instead of detecting nothing and reporting "not found".
+ */
+export function otsu(ink, samples = 40000) {
+  const hist = new Uint32Array(64);
+  const step = Math.max(1, Math.floor(ink.values.length / samples));
+  let n = 0;
+  let peak = 1;
+  for (let i = 0; i < ink.values.length; i += step) {
+    const v = ink.values[i];
+    if (v > peak) peak = v;
+    n++;
+  }
+  for (let i = 0; i < ink.values.length; i += step) {
+    let bin = Math.floor((ink.values[i] / peak) * 63);
+    if (bin < 0) bin = 0;
+    else if (bin > 63) bin = 63;
+    hist[bin]++;
+  }
+  let sum = 0;
+  for (let b = 0; b < 64; b++) sum += b * hist[b];
+  let sumB = 0;
+  let wB = 0;
+  let best = -1;
+  let thr = 0;
+  for (let b = 0; b < 64; b++) {
+    wB += hist[b];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumB += b * hist[b];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) {
+      best = between;
+      thr = b;
+    }
+  }
+  return (thr / 63) * peak;
+}
+
+/** Binary ink mask from an image. */
+export function binarize(bitmap, opts = {}) {
+  const ink = inkness(bitmap);
+  const thr = opts.threshold ?? otsu(ink);
+  const { width, height } = bitmap;
+  const mask = new Uint8Array(width * height);
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (ink.values[i] > thr) {
+      mask[i] = 1;
+      count++;
+    }
+  }
+  return { mask, width, height, threshold: thr, inkness: ink, inkCount: count };
+}
+
+/**
+ * 8-connected components with bbox, area and a "has hole" probe.
+ * Iterative flood fill (no recursion): a scanned page can produce components of
+ * hundreds of thousands of pixels and recursion would blow the stack.
+ */
+export function components(bin) {
+  const { mask, width, height } = bin;
+  const seen = new Uint8Array(mask.length);
+  const stack = new Int32Array(mask.length);
+  const out = [];
+  const minArea = Math.max(9, bin.minArea || 9);
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || seen[start]) continue;
+    let sp = 0;
+    stack[sp++] = start;
+    seen[start] = 1;
+    let x0 = width;
+    let y0 = height;
+    let x1 = 0;
+    let y1 = 0;
+    let area = 0;
+    while (sp > 0) {
+      const p = stack[--sp];
+      const py = (p / width) | 0;
+      const px = p - py * width;
+      area++;
+      if (px < x0) x0 = px;
+      if (py < y0) y0 = py;
+      if (px > x1) x1 = px;
+      if (py > y1) y1 = py;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = py + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = px + dx;
+          if (nx < 0 || nx >= width) continue;
+          const q = ny * width + nx;
+          if (mask[q] && !seen[q]) {
+            seen[q] = 1;
+            stack[sp++] = q;
+          }
+        }
+      }
+    }
+    if (area < minArea) continue;
+    const bw = x1 - x0 + 1;
+    const bh = y1 - y0 + 1;
+    out.push({
+      area,
+      seed: start,
+      x0,
+      y0,
+      x1,
+      y1,
+      w: bw,
+      h: bh,
+      cx: (x0 + x1 + 1) / 2,
+      cy: (y0 + y1 + 1) / 2,
+      fill: area / (bw * bh),
+      aspect: bw / bh,
+    });
+  }
+  return out;
+}
+
+/** True when the centre of the bbox is background while the ring around it is ink. */
+function hasHole(comp, bin) {
+  const { mask, width } = bin;
+  const cx = Math.round(comp.cx);
+  const cy = Math.round(comp.cy);
+  // the hole is one data cell across, i.e. ~1/3 of the marker side, so the probe
+  // must stay well inside that: 0.12 of the short edge, never the ring itself
+  const probe = Math.max(1, Math.round(Math.min(comp.w, comp.h) * 0.12));
+  let inside = 0;
+  let total = 0;
+  for (let dy = -probe; dy <= probe; dy++) {
+    for (let dx = -probe; dx <= probe; dx++) {
+      total++;
+      if (mask[(cy + dy) * width + cx + dx]) inside++;
+    }
+  }
+  return inside / total < 0.35;
+}
+
+/**
+ * Locate the page itself by taking the largest *non-ink* region.
+ *
+ * A photo of a plate on a dark bed inverts the problem: everything outside the
+ * page reads as ink, the page border becomes one giant blob, and the corner
+ * markers merge into it. Cropping to the light region first removes that whole
+ * class of failure, and on a scanner (where the frame is all paper) the region
+ * is simply the whole image, so the crop costs nothing.
+ */
+export function pageRegion(bin) {
+  const { mask, width, height } = bin;
+  const light = new Uint8Array(mask.length);
+  for (let i = 0; i < mask.length; i++) light[i] = mask[i] ? 0 : 1;
+  const comps = components({ mask: light, width, height, minArea: Math.max(64, (width * height) / 400) });
+  if (!comps.length) return { x0: 0, y0: 0, x1: width - 1, y1: height - 1, cropped: false, pixels: null };
+  let best = comps[0];
+  for (const c of comps) if (c.area > best.area) best = c;
+  if (best.area < width * height * 0.08) return { x0: 0, y0: 0, x1: width - 1, y1: height - 1, cropped: false, pixels: null };
+  return { x0: best.x0, y0: best.y0, x1: best.x1, y1: best.y1, cropped: true, area: best.area, pixels: null };
+}
+
+/**
+ * Keep only the ink inside the page's own bounding box, so the photo background
+ * cannot form one huge blob.
+ *
+ * The box is then pulled in by a hair: resampling a rotated page against a dark
+ * backdrop leaves a couple of pixels of dark *rim* along the paper edge, and that
+ * rim is what glues a corner marker to a background wedge and ruins its aspect
+ * ratio. The inset stays far below the ~one-cell clearance between the paper
+ * edge and the markers, so it removes the rim without touching them.
+ */
+function cropMask(bin, region) {
+  const { mask, width, height } = bin;
+  if (!region.cropped) return mask;
+  // The rim is a couple of pixels; the markers sit ~one cell inside the paper
+  // edge. Inset far less than that clearance, or the crop eats a marker and its
+  // centroid moves -- which then skews the whole homography.
+  const inset = Math.max(2, Math.min(24, Math.round(0.008 * Math.min(region.x1 - region.x0, region.y1 - region.y0))));
+  region.cropInset = inset;
+  const x0 = Math.max(0, region.x0 + inset);
+  const y0 = Math.max(0, region.y0 + inset);
+  const x1 = Math.min(width - 1, region.x1 - inset);
+  const y1 = Math.min(height - 1, region.y1 - inset);
+  const out = new Uint8Array(mask.length);
+  for (let y = y0; y <= y1; y++) {
+    const row = y * width;
+    for (let x = x0; x <= x1; x++) out[row + x] = mask[row + x];
+  }
+  return out;
+}
+
+/**
+ * Drop structures that cannot be corner markers.
+ *
+ * Two things swallow a marker if left in: the background wedge that leaks into
+ * the corners of a rotated page's bounding box (it always touches that box's
+ * border and it is large), and the data lattice itself, which under real blur
+ * bridges into one page-scale mesh. Markers are neither: they are a few percent
+ * of the page area and sit inside it.
+ */
+export function keepCandidateSquares(comps, region) {
+  const rw = region.x1 - region.x0 + 1;
+  const rh = region.y1 - region.y0 + 1;
+  const area = rw * rh;
+  const out = [];
+  for (const c of comps) {
+    const rel = c.area / area;
+    if (rel > 0.08) continue; // page-scale structure (mesh, border frame)
+    if (c.w > 0.35 * rw || c.h > 0.35 * rh) continue; // spans the page in one axis
+    const pad = (region.cropInset || 0) + 1;
+    const touchesBorder = c.x0 <= region.x0 + pad || c.y0 <= region.y0 + pad || c.x1 >= region.x1 - pad || c.y1 >= region.y1 - pad;
+    if (touchesBorder && rel > 0.01) continue; // a wedge, not a marker
+    if (c.aspect < SQUARE_ASPECT || c.aspect > 1 / SQUARE_ASPECT) continue;
+    if (c.fill < SQUARE_FILL) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+const SQUARE_ASPECT = 0.78;
+const SQUARE_FILL = 0.5;
+
+/**
+ * Find the four corner markers.
+ *
+ * The threshold matters more than it should: at Otsu the faint antialias tail
+ * between two adjacent rings counts as ink, the lattice becomes one mesh, and
+ * the markers disappear inside it. Retrying at progressively stricter cut-offs
+ * keeps only the dark cores, which is exactly what a real photo of a printed
+ * plate needs too (ink is dense, bridging haze is not).
+ *
+ * @returns {{ok:boolean, quad?:{tl:{x:number,y:number},tr:{x:number,y:number},br:{x:number,y:number},bl:{x:number,y:number}}, markerPx?:number, candidates?:number, reason?:string, threshold?:number}}
+ */
+export function findMarkers(bitmap, opts = {}) {
+  const base = binarize(bitmap, opts);
+  if (base.inkCount < 32) return { ok: false, reason: 'blank-image', threshold: base.threshold };
+  const factors = opts.thresholds || [1, 1.35, 1.7, 2.1];
+  let last = null;
+  for (const f of factors) {
+    const bin = f === 1 ? base : rethreshold(base, f);
+    const r = detectIn(bin, opts);
+    if (r.ok) return { ...r, thresholdFactor: f };
+    last = { ...r, thresholdFactor: f };
+  }
+  return last;
+}
+
+function rethreshold(base, factor) {
+  const thr = base.threshold * factor;
+  const mask = new Uint8Array(base.mask.length);
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (base.inkness.values[i] > thr) {
+      mask[i] = 1;
+      count++;
+    }
+  }
+  return { ...base, mask, threshold: thr, inkCount: count };
+}
+
+function detectIn(bin, opts) {
+  if (bin.inkCount < 32) return { ok: false, reason: 'blank-image', threshold: bin.threshold };
+  const region = pageRegion(bin);
+  const page = { ...bin, mask: cropMask(bin, region) };
+  const squares = keepCandidateSquares(components(page), region);
+  if (squares.length < 4) {
+    return { ok: false, reason: 'no-square-candidates', candidates: squares.length, threshold: bin.threshold };
+  }
+  // the four markers share one physical size; among size clusters that have at
+  // least four members, the *largest* cluster wins -- the corner markers are by
+  // construction the biggest isolated squares on the page, whereas the echo
+  // strip produces many small ones and would otherwise outvote them
+  squares.sort((a, b) => b.w - a.w);
+  const sizeTol = opts.sizeTol ?? 0.3;
+  let group = null;
+  for (let i = 0; i < squares.length && !group; i++) {
+    const anchor = squares[i].w;
+    // skip duplicates of an anchor already tested (cheap: only the first of each cluster)
+    if (i > 0 && Math.abs(anchor - squares[i - 1].w) <= squares[i - 1].w * sizeTol) continue;
+    const members = squares.filter((c) => Math.abs(c.w - anchor) <= anchor * sizeTol);
+    if (members.length >= 4) group = members;
+  }
+  if (!group) {
+    return { ok: false, reason: 'no-marker-size-cluster', candidates: squares.length, threshold: bin.threshold, sizes: squares.slice(0, 8).map((c) => c.w) };
+  }
+  const quad = buildQuad(group, page, region);
+  if (!quad.ok) {
+    return { ...quad, candidates: squares.length, threshold: bin.threshold, sizes: group.map((c) => c.w).slice(0, 8) };
+  }
+  return { ...quad, candidates: squares.length, threshold: bin.threshold };
+}
+
+/**
+ * Pick the four corner markers out of same-size candidates and label them.
+ * Validation is geometric: the four centres must form a convex quad whose
+ * opposite sides agree within tolerance, and exactly one corner must be hollow
+ * at the bottom right of that ordering (which is what fixes rotation).
+ */
+export function buildQuad(list, bin, region) {
+  if (list.length < 4) return { ok: false, reason: 'too-few-candidates', need: 4, have: list.length };
+  const ranked = list.slice().sort((a, b) => b.area - a.area).slice(0, 14);
+  // Rectangularity is invariant under cyclic relabelling, so it cannot by itself
+  // choose which of the four corners is "br" -- and the hollow corner is what
+  // fixes rotation. Therefore the hollowness pattern has to gate the enumeration,
+  // not merely validate its winner: a winner chosen on geometry alone can put a
+  // solid block at br and report "hollow-corner-missing" over a perfectly good
+  // set of markers.
+  const hollow = new Set(ranked.filter((c) => hasHole(c, bin)));
+  let bestScore = Infinity;
+  let bestQuad = null;
+  let bestMirror = Infinity;
+  let bestMirrored = null;
+  for (const tl of ranked) {
+    if (hollow.has(tl)) continue;
+    for (const tr of ranked) {
+      if (tr === tl || hollow.has(tr)) continue;
+      for (const br of ranked) {
+        if (br === tl || br === tr || !hollow.has(br)) continue;
+        for (const bl of ranked) {
+          if (bl === tl || bl === tr || bl === br || hollow.has(bl)) continue;
+          const q = evaluateQuad(tl, tr, br, bl);
+          if (q.mirrored) {
+            if (q.score < bestMirror) {
+              bestMirror = q.score;
+              bestMirrored = { tl, tr, br, bl };
+            }
+            continue;
+          }
+          if (q.score < bestScore) {
+            bestScore = q.score;
+            bestQuad = { tl, tr, br, bl, score: q.score };
+          }
+        }
+      }
+    }
+  }
+  if (!bestQuad || bestScore > 0.6) {
+    if (bestMirrored && bestMirror <= 0.6) {
+      // The only consistent labelling is the mirror image: the page is face down
+      // (or the scan was flipped). Say so -- the fix is to turn the sheet over,
+      // not to retake the photo.
+      return { ok: false, reason: 'mirrored-image', score: bestMirror };
+    }
+    // distinguish "no rectangle at all" from "no corner is hollow" so the caller
+    // learns whether to fix exposure or to move the phone
+    return { ok: false, reason: hollow.size === 0 ? 'no-hollow-corner' : 'no-rectangular-quad', score: bestScore, hollowCount: hollow.size };
+  }
+  // Orientation is carried by the hollow corner; the enumeration above already
+  // required exactly that pattern (hollow at br, solid at the other three).
+  // The four markers sit near the page corners, so the quad they span must cover
+  // most of the page region. Echo-strip blobs fail this immediately.
+  if (region && region.cropped) {
+    const quadArea = polyArea([bestQuad.tl, bestQuad.tr, bestQuad.br, bestQuad.bl]);
+    const regionArea = (region.x1 - region.x0 + 1) * (region.y1 - region.y0 + 1);
+    const cover = quadArea / regionArea;
+    if (cover < 0.45) return { ok: false, reason: 'quad-too-small-for-page-region', cover };
+  }
+  return {
+    ok: true,
+    quad: {
+      tl: { x: bestQuad.tl.cx, y: bestQuad.tl.cy },
+      tr: { x: bestQuad.tr.cx, y: bestQuad.tr.cy },
+      br: { x: bestQuad.br.cx, y: bestQuad.br.cy },
+      bl: { x: bestQuad.bl.cx, y: bestQuad.bl.cy },
+    },
+    markerPx: (bestQuad.tl.w + bestQuad.tr.w + bestQuad.br.w + bestQuad.bl.w) / 4,
+    geometry: { score: bestScore, cover: region && region.cropped ? polyArea([bestQuad.tl, bestQuad.tr, bestQuad.br, bestQuad.bl]) / ((region.x1 - region.x0 + 1) * (region.y1 - region.y0 + 1)) : null },
+  };
+}
+
+/** Shoelace area of an ordered quad. */
+function polyArea(q) {
+  let a = 0;
+  for (let i = 0; i < q.length; i++) {
+    const p = q[i];
+    const n = q[(i + 1) % q.length];
+    a += p.cx * n.cy - n.cx * p.cy;
+  }
+  return Math.abs(a / 2);
+}
+
+/** Rectangularity score of an ordered quad: 0 = perfect rectangle. */
+function evaluateQuad(tl, tr, br, bl) {
+  const d = (a, b) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+  const top = d(tl, tr);
+  const bottom = d(bl, br);
+  const left = d(tl, bl);
+  const right = d(tr, br);
+  if (Math.min(top, bottom, left, right) < 8) return { score: Infinity };
+  const sideErr = (Math.abs(top - bottom) + Math.abs(left - right)) / (top + bottom + left + right);
+  // diagonals of a parallelogram are equal; a perspective skew breaks this only
+  // mildly, so the tolerance is generous but rejects scrambled labellings
+  const d1 = d(tl, br);
+  const d2 = d(tr, bl);
+  const diagErr = Math.abs(d1 - d2) / Math.max(d1, d2);
+  // the ordered walk must be convex and consistently oriented
+  const turns = [
+    [tl, tr, br],
+    [tr, br, bl],
+    [br, bl, tl],
+    [bl, tl, tr],
+  ].map(([a, b, c]) => (b.cx - a.cx) * (c.cy - b.cy) - (b.cy - a.cy) * (c.cx - b.cx));
+  if (turns.some((t) => t === 0)) return { score: Infinity };
+  const positive = turns.filter((t) => t > 0).length;
+  // tl -> tr -> br -> bl turns *left-to-right then down* on the canvas, which in
+  // image coordinates (y down) is a fixed sign. Equal signs alone are not enough:
+  // the mirrored walk is equally convex and equally "hollow at br", and accepting
+  // it labels the corners one rotation away from where they are.
+  if (positive !== 4 && positive !== 0) return { score: Infinity };
+  return { score: sideErr * 1.5 + diagErr, mirrored: positive === 0 };
+}
+
+/** Resample an arbitrary point of an image (used by the rectifier). */
+export function sampleInk(bitmap, x, y) {
+  const s = sampleBilinear(bitmap.pixels, bitmap.width, bitmap.height, 4, x, y);
+  const sub = bitmap.substrate || [255, 255, 255];
+  const dr = s.values[0] - sub[0];
+  const dg = s.values[1] - sub[1];
+  const db = s.values[2] - sub[2];
+  return {
+    rgb: [s.values[0], s.values[1], s.values[2]],
+    inkness: Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11),
+    inside: s.inside,
+  };
+}

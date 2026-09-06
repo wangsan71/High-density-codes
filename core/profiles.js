@@ -17,6 +17,7 @@
 
 import { getNozzle, pitchFor, quantizePitch, UNIVERSAL_PITCH_MM } from './nozzles.js';
 import { QUIET_CELLS } from './render/constants.js';
+import { minCellEwFor } from './render/glyphs.js';
 
 export const MEDIUM = { PAPER: 'paper', PLATE: 'plate' };
 
@@ -121,6 +122,21 @@ export function planPage(profileId, opts = {}) {
     pitchMm = quantizePitch(pitchMm, nozzleId).mm;
   }
 
+  // A glyph drawn finer than one extrusion width does not survive FDM, and the
+  // ring-to-ring gap has to stay printable too. If the nominal pitch is too fine
+  // for this profile's shape alphabet, the pitch is raised to the smallest whole
+  // number of EW that works -- capacity drops, but the plate can actually be read.
+  let pitchRaisedFrom = null;
+  if (nozzleId && p.medium === MEDIUM.PLATE) {
+    const shapeCh = p.channels.find((c) => c.name !== 'colour') || p.channels[0];
+    const need = minCellEwFor(shapeCh.levels);
+    const ew = getNozzle(nozzleId).ewMm;
+    if (pitchMm / ew < need) {
+      pitchRaisedFrom = pitchMm;
+      pitchMm = round4(quantizePitch(need * ew, nozzleId).mm);
+    }
+  }
+
   const sheet = p.medium === MEDIUM.PAPER ? SHEETS[opts.sheet || 'A4'] : { w: opts.plateMm || 200, h: opts.plateMm || 200 };
   const marginMm = opts.marginMm ?? (p.medium === MEDIUM.PAPER ? 9 : 6);
   const region = { w: sheet.w - 2 * marginMm, h: sheet.h - 2 * marginMm };
@@ -133,7 +149,9 @@ export function planPage(profileId, opts = {}) {
   const rows = Math.floor(region.h / pitchMm) - 2 * QUIET_CELLS;
   if (cols < 4 || rows < 4) {
     throw new RangeError(
-      `profile ${p.id}: only ${cols}x${rows} cells fit ${sheet.w}x${sheet.h}mm once the ${QUIET_CELLS}-cell quiet zone is paid for`,
+      cols < 0 || rows < 0
+        ? `profile ${p.id}: no room for a lattice in ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch (the ${QUIET_CELLS}-cell quiet zone alone fills it)`
+        : `profile ${p.id}: only ${cols}x${rows} cells fit ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch once the ${QUIET_CELLS}-cell quiet zone is paid for`,
     );
   }
   const totalCells = cols * rows;
@@ -160,6 +178,7 @@ export function planPage(profileId, opts = {}) {
     sheetMm: sheet,
     marginMm,
     pitchMm,
+    pitchRaisedFrom,
     cols,
     rows,
     totalCells,

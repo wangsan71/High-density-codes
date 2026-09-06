@@ -1,5 +1,7 @@
-import { mmToPx, pxToMm } from './units.js';
+import { mmToPx, pxToMm, ewPx } from './units.js';
 import { HEADER_LEN } from '../frame.js';
+import { getNozzle } from '../nozzles.js';
+import { glyphGeometry } from './glyphs.js';
 import { QUIET_CELLS, FID_CELLS, ECHO_COLS, MIN_CELL_PX } from './constants.js';
 
 export { QUIET_CELLS, FID_CELLS, ECHO_COLS, MIN_CELL_PX };
@@ -37,28 +39,55 @@ export function pageLayout(geom, dpi, opts = {}) {
       `pageLayout: ${geom.pitchMm}mm pitch is only ${cellPx}px at ${dpi}dpi (min ${MIN_CELL_PX}). Raise the dpi or coarsen the nozzle profile.`,
     );
   }
-  // The echo strip is a *micro* lattice: 1 bit per cell, high contrast, so it can
-  // be half the data pitch without becoming fragile, and being visibly finer is
-  // what keeps the decoder from ever reading it as data.
-  const echoPx = Math.max(2, Math.floor(cellPx / 2));
+  // The glyph has to be drawable in whole extrusion widths, so the geometry is
+  // derived from the cell size measured in EW -- not from an ideal circle.
+  const shapeChannel = (geom.channels || []).find((c) => c.name !== 'colour') || (geom.channels || [])[0];
+  const shapeLevels = shapeChannel ? shapeChannel.levels : 2;
+  const ewMm = geom.nozzle ? getNozzle(geom.nozzle).ewMm : null;
+  const cellEw = ewMm ? geom.pitchMm / ewMm : Infinity;
+  const glyph = glyphGeometry(cellEw, shapeLevels);
+  if (!glyph.ok) throw new RangeError(`pageLayout: ${glyph.reason} at ${geom.pitchMm}mm / ${geom.nozzle}mm nozzle`);
+  // The echo strip is a *micro* lattice: 1 bit per cell, high contrast. Half the
+  // data pitch is fine on paper, but on a coarse plate 56 bits at half pitch can
+  // be wider than the plate, so the strip shrinks -- never below one extrusion
+  // width, and never below what fits the canvas.
+  const ewPxGuess = geom.nozzle ? ewPx(geom.nozzle, dpi) : 2;
+  const latticeW0 = geom.cols * cellPx;
+  const quietGuess = QUIET_CELLS * cellPx;
+  let echoPx = 0;
+  for (const div of [2, 3, 4, 5, 6, 8, 10, 12]) {
+    const cand = Math.floor(cellPx / div);
+    if (cand < Math.max(2, ewPxGuess)) break;
+    if (ECHO_COLS * cand + 2 * quietGuess <= latticeW0 + 2 * quietGuess) {
+      echoPx = cand;
+      break;
+    }
+  }
+  if (!echoPx) echoPx = Math.max(2, Math.floor(cellPx / 16));
   const echoW = ECHO_COLS * echoPx;
   const echoH = ECHO_ROWS * echoPx;
 
-  // Quiet zone: 6 cells, of which the outer 4 are empty in every direction and
-  // the top 6 also carry the echo strip immediately above the lattice.
+  // Quiet zone: QUIET_CELLS cells all round; the top band also carries the echo
+  // strip immediately above the lattice.
   const quietPx = QUIET_CELLS * cellPx;
   const latticeW = geom.cols * cellPx;
   const latticeH = geom.rows * cellPx;
-  const width = latticeW + quietPx * 2;
+  // A coarse profile can have fewer data cells across than the echo strip has
+  // bits (56), so the canvas takes the wider of the two and the lattice centres
+  // inside it. The plate is bigger than both; there is nothing to gain from
+  // refusing.
+  const width = Math.max(latticeW, echoW) + quietPx * 2;
   const height = latticeH + quietPx * 2;
-  const originX = quietPx;
+  const originX = Math.round((width - latticeW) / 2);
   const originY = quietPx;
 
   if (echoW + 2 * quietPx > width) throw new RangeError(`pageLayout: echo strip ${echoW}px does not fit in ${width}px`);
   const echoTop = originY - echoH - Math.floor(cellPx / 2);
   if (echoTop < 0) throw new RangeError(`pageLayout: no room for the echo strip in the top quiet zone (need ${echoH}px)`);
   const echo = {
-    x: originX,
+    // left-aligned to the quiet zone, not to the (possibly centred) lattice, so a
+    // strip wider than the lattice cannot run under the right-hand markers
+    x: quietPx,
     y: echoTop,
     cellPx: echoPx,
     cols: ECHO_COLS,
@@ -76,6 +105,8 @@ export function pageLayout(geom, dpi, opts = {}) {
     { role: 'bl', solid: true, x: inset, y: height - inset, half: fidHalf },
     { role: 'br', solid: false, x: width - inset, y: height - inset, half: fidHalf },
   ];
+  const fidRing = Math.max(1, Math.max(cellPx, Math.ceil(ewPxGuess)));
+  for (const f of fiducials) f.ringPx = fidRing;
   for (const f of fiducials) {
     if (f.x - f.half < 0 || f.y - f.half < 0 || f.x + f.half > width || f.y + f.half > height) {
       throw new RangeError(`pageLayout: ${f.role} fiducial falls outside the canvas`);
@@ -109,6 +140,9 @@ export function pageLayout(geom, dpi, opts = {}) {
     width,
     height,
     pitchMm: geom.pitchMm,
+    cellEw,
+    glyph,
+    shapeLevels,
     originPx: { x: originX, y: originY },
     originMm: { x: pxToMm(originX, dpi), y: pxToMm(originY, dpi) },
     quietPx,

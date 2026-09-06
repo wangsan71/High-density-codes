@@ -1,5 +1,5 @@
 import { getPalette, BACKGROUND } from '../palette.js';
-import { rhoFor, glyphMask, MEASURE } from './glyphs.js';
+import { glyphMaskForLevel, idealGeometry, MEASURE } from './glyphs.js';
 import { splitCellLevel } from '../protocol.js';
 import { HEADER_LEN } from '../frame.js';
 
@@ -53,11 +53,11 @@ function fillRect(pixels, width, height, x0, y0, x1, y1, rgb) {
 }
 
 /** Coverage tile (cellPx x cellPx, 0..255) for one shape level. Shared by every cell. */
-export function buildCoverageTiles(cellPx, shapeLevels) {
+export function buildCoverageTiles(cellPx, shapeLevels, glyph = null) {
+  const geo = glyph || idealGeometry(shapeLevels);
   const tiles = [];
   const s2 = SUPERSAMPLE * SUPERSAMPLE;
   for (let level = 0; level < shapeLevels; level++) {
-    const rho = rhoFor(level, shapeLevels);
     const tile = new Uint8Array(cellPx * cellPx);
     for (let py = 0; py < cellPx; py++) {
       for (let px = 0; px < cellPx; px++) {
@@ -66,7 +66,7 @@ export function buildCoverageTiles(cellPx, shapeLevels) {
           const dy = (py + (sy + 0.5) / SUPERSAMPLE) / cellPx - 0.5;
           for (let sx = 0; sx < SUPERSAMPLE; sx++) {
             const dx = (px + (sx + 0.5) / SUPERSAMPLE) / cellPx - 0.5;
-            if (glyphMask(dx, dy, rho)) hits++;
+            if (glyphMaskForLevel(dx, dy, level, geo)) hits++;
           }
         }
         tile[py * cellPx + px] = Math.round((hits / s2) * 255);
@@ -112,7 +112,9 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
     if (f.solid) {
       fillRect(pixels, width, height, f.x - half, f.y - half, f.x + half, f.y + half, MACHINE_INK);
     } else {
-      const t = Math.max(1, Math.round(half / 4));
+      // one data cell thick: thinner than that does not survive an extrusion
+      // width, and the decoder predicts this exact ring from layout.ringPx
+      const t = Math.max(1, Math.round(f.ringPx ?? half / 4));
       fillRect(pixels, width, height, f.x - half, f.y - half, f.x + half, f.y + half, MACHINE_INK);
       fillRect(pixels, width, height, f.x - half + t, f.y - half + t, f.x + half - t, f.y + half - t, substrate);
     }
@@ -132,7 +134,7 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
 
   // A mono print has no colour channel, so the shape alphabet widens to carry
   // everything it can; a colour print uses the profile's own split.
-  const tiles = buildCoverageTiles(cellPx, shapeLevels);
+  const tiles = buildCoverageTiles(cellPx, shapeLevels, layout.glyph);
   const inkCache = new Map();
   const inkFor = (colourLevel) => {
     const key = mono ? 0 : colourLevel;
@@ -182,8 +184,9 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
  * instead of eating the bias as margin -- this is the same loop that
  * `pskit calibrate` closes with a real scan, run here against the renderer.
  */
-export function measureTargets(cellPx, shapeLevels) {
-  const tiles = buildCoverageTiles(cellPx, shapeLevels);
+export function measureTargets(cellPx, shapeLevels, glyph = null) {
+  const tiles = buildCoverageTiles(cellPx, shapeLevels, glyph);
+  const m = (glyph && glyph.measure) || MEASURE;
   const out = [];
   for (let level = 0; level < shapeLevels; level++) {
     const tile = tiles[level];
@@ -195,11 +198,11 @@ export function measureTargets(cellPx, shapeLevels) {
         const ny = (py + 0.5) / cellPx - 0.5;
         const rr = Math.hypot(nx, ny);
         const a = tile[py * cellPx + px] / 255;
-        if (rr <= MEASURE.dotR) dot += a;
-        else if (rr >= MEASURE.bandIn && rr <= MEASURE.bandOut) band += a;
+        if (rr <= m.dotR) dot += a;
+        else if (rr >= m.bandIn && rr <= m.bandOut) band += a;
       }
     }
-    out.push(band > 0 ? dot / (band * MEASURE.bandScale) : 0);
+    out.push(band > 0 ? dot / (band * m.bandScale) : 0);
   }
   return out;
 }
@@ -216,10 +219,9 @@ export function echoBitsOf(headerBytes) {
 
 /** Physical ink coverage of a rendered page, for the print-pack estimate. */
 export function coverageStats({ geom, levels, layout, palette = 'INK2', mono = false }) {
-  const shapeChannel = geom.channels.find((c) => c.name === 'shape');
-  const colourChannel = geom.channels.find((c) => c.name === 'colour');
-  const shapeLevels = mono && colourChannel ? colourChannel.levels * shapeChannel.levels : shapeChannel.levels;
-  const tiles = buildCoverageTiles(layout.cellPx, shapeLevels);
+  const shapeChannel = geom.channels.find((c) => c.name !== 'colour') || geom.channels[0];
+  const shapeLevels = shapeChannel.levels;
+  const tiles = buildCoverageTiles(layout.cellPx, shapeLevels, layout.glyph);
   let sum = 0;
   const perCell = layout.cellPx * layout.cellPx;
   for (let i = 0; i < levels.length; i++) {

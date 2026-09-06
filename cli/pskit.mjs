@@ -112,7 +112,10 @@ async function cmdSend(args) {
   console.log(`  profile   ${profileId}${nozzle ? ` @ ${nozzle}mm nozzle` : ''}  palette ${paletteId}${args.mono ? '  [mono render]' : ''}`);
   console.log(`  page      ${geom.cols}x${geom.rows} cells @ ${geom.pitchMm}mm = ${geom.totalCells} cells, ${geom.bitsPerCell} bit/cell`);
   console.log(`  ECC       intra ${geom.ecc.mode} k=${geom.ecc.intra.k}+${geom.ecc.intra.nsym} x${geom.ecc.intra.blocks}  monoSafe=${geom.ecc.monoSafe}`);
-  console.log(`  net       ${geom.ecc.netBytesPerPage} B/page -> ${plan.dataPages}+${plan.parityPages} = ${plan.totalPages} pages`);
+  // planTransfer works on the uncompressed size, which is the *upper bound*: a
+  // payload that compresses well needs fewer pages than this. Say so, or the
+  // actual count below reads like pages went missing.
+  console.log(`  net       ${geom.ecc.netBytesPerPage} B/page -> up to ${plan.dataPages}+${plan.parityPages} = ${plan.totalPages} pages (before compression)`);
 
   if (args['dry-run']) {
     console.log('  (dry run: nothing written)');
@@ -201,7 +204,7 @@ async function cmdSend(args) {
     note: 'Print at 100% scale (no "fit to page"). Verify the plate fits: ' + layout.physicalMm.wMm.toFixed(1) + 'x' + layout.physicalMm.hMm.toFixed(1) + 'mm',
   };
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  console.log(`  wrote      ${files.length} image(s) + manifest.json in ${outDir}`);
+  console.log(`  wrote      ${files.length} image(s) (${t.dataPages} data + ${t.parityPages} parity) + manifest.json in ${outDir}`);
   console.log(`  render     ${(layout.width)}x${layout.height}px @ ${dpi}dpi, printed area ${(inkSum * 100).toFixed(1)}%`);
   console.log(`  timings    encode ${Math.round(t1 - t0)}ms  render+write ${Math.round(t2 - t1)}ms`);
   return { outDir, manifest, t, raw, layout, dpi, paletteId, args };

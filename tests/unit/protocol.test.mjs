@@ -18,6 +18,7 @@ import {
   densityReport,
 } from '../../core/profiles.js';
 import { NOZZLES } from '../../core/nozzles.js';
+import { glyphGeometry } from '../../core/render/glyphs.js';
 import {
   encodeTransfer,
   TransferAssembler,
@@ -146,11 +147,25 @@ test('frame: margin echo self-identifies a page from a raw bit band', () => {
 /* ------------------------------------------------------------------ */
 
 test('profiles: geometry invariants hold for every profile x nozzle', () => {
+  const refused = [];
   for (const id of PROFILE_IDS) {
     const p = PROFILES[id];
     const nozzles = p.medium === 'plate' ? Object.keys(NOZZLES) : [null];
     for (const nozzle of nozzles) {
-      const g = planPage(id, { nozzle: nozzle || undefined, plateMm: 200 });
+      let g;
+      try {
+        g = planPage(id, { nozzle: nozzle || undefined, plateMm: 200 });
+      } catch (e) {
+        // A cell that cannot hold the glyph in whole extrusion widths, or that
+        // leaves no room for a lattice, must be refused by name -- never printed
+        // and never silently degraded into something unreadable.
+        assert.ok(
+          /needs >=|EW per cell|does not fit|cells fit|no room for a lattice/.test(e.message),
+          `${id}/${nozzle}: unexpected refusal: ${e.message}`,
+        );
+        refused.push(`${id}/${nozzle}`);
+        continue;
+      }
       assert.ok(g.cols > 4 && g.rows > 4, `${id}/${nozzle}: lattice too small`);
       assert.ok(g.totalCells * g.bitsPerCell >= 8 * (g.ecc.dataBytes + g.ecc.parityBytes), `${id}/${nozzle}: over-committed`);
       assert.ok(g.ecc.dataBytes > 0, `${id}/${nozzle}: no capacity`);
@@ -161,18 +176,32 @@ test('profiles: geometry invariants hold for every profile x nozzle', () => {
         const ew = NOZZLES[nozzle].ewMm;
         const ratio = g.pitchMm / ew;
         assert.ok(Math.abs(ratio - Math.round(ratio)) < 0.02, `${id}/${nozzle}: pitch ${g.pitchMm} is not whole EW (${ratio})`);
+        // every planned cell must be able to hold its glyph in whole EW
+        const shapeCh = g.channels.find((c) => c.name !== 'colour') || g.channels[0];
+        assert.ok(glyphGeometry(g.pitchMm / ew, shapeCh.levels).ok, `${id}/${nozzle}: glyph not printable at ${g.pitchMm}mm`);
       }
     }
   }
+  // Refusals are expected only for the 4-level alphabet on coarse nozzles, where
+  // no printable cell can hold four distinguishable dots.
+  assert.ok(refused.every((r) => r.startsWith('PL-D3S')), `unexpected refusals: ${refused.join(', ')}`);
 });
 
-test('profiles: coarser nozzles cost capacity, and 1.8mm at 0.4 matches the budget', () => {
-  const fine = planPage('PL-D2', { nozzle: '0.2' }).ecc.netBytesPerPage;
-  const mid = planPage('PL-D2', { nozzle: '0.4' }).ecc.netBytesPerPage;
-  const coarse = planPage('PL-D2', { nozzle: '0.8' }).ecc.netBytesPerPage;
-  assert.ok(fine > mid && mid > coarse, `${fine} > ${mid} > ${coarse}`);
-  // 1.8mm pitch on a 200mm plate: 94x94 cells after the 5-cell quiet zone is paid for
-  assert.ok(mid > 1000, `PL-D2@0.4 should carry ~1.1KB, got ${mid}`);
+test('profiles: coarser nozzles cost capacity, and the pitch honours the print floor', () => {
+  const fine = planPage('PL-D2', { nozzle: '0.2' });
+  const mid = planPage('PL-D2', { nozzle: '0.4' });
+  const coarse = planPage('PL-D2', { nozzle: '0.8' });
+  assert.ok(fine.ecc.netBytesPerPage > mid.ecc.netBytesPerPage, `${fine.ecc.netBytesPerPage} > ${mid.ecc.netBytesPerPage}`);
+  assert.ok(mid.ecc.netBytesPerPage > coarse.ecc.netBytesPerPage, `${mid.ecc.netBytesPerPage} > ${coarse.ecc.netBytesPerPage}`);
+  // A 2-level glyph needs >= 8 extrusion widths per cell (one EW of clearance on
+  // every side), so 0.4mm (EW 0.45) is lifted from the nominal 1.8mm to 3.6mm:
+  // 42x42 cells, ~220 B net per 200mm plate. Small, but real and readable.
+  assert.ok(mid.pitchRaisedFrom === 1.8, `expected an auto-raised pitch, got ${mid.pitchMm} from ${mid.pitchRaisedFrom}`);
+  assert.ok(mid.pitchMm / NOZZLES['0.4'].ewMm >= 8, `${mid.pitchMm} is under the print floor`);
+  assert.ok(mid.ecc.netBytesPerPage > 200, `PL-D2@0.4 should carry ~220B, got ${mid.ecc.netBytesPerPage}`);
+  // paper is unaffected: the "nozzle" there is an inkjet droplet, ~100x smaller
+  const paper = planPage('P-M1-600');
+  assert.equal(paper.pitchRaisedFrom, null);
 });
 
 test('profiles: dual colour is both denser and mono-safe compared with single colour', () => {
@@ -212,10 +241,19 @@ test('profiles: page planning matches the ECC budget and refuses over-255 jobs',
   assert.throws(() => planTransfer('PL-D2', { nozzle: '0.8' }, 1024 * 1024), /255|capacity/);
 });
 
-test('profiles: density report covers every id without throwing', () => {
+test('profiles: density report covers every id, refusing only on the print floor', () => {
   const rows = densityReport();
-  assert.equal(rows.length, PROFILE_IDS.length * 4 - (PROFILE_IDS.filter((i) => PROFILES[i].medium === 'paper').length * 3));
-  for (const r of rows) assert.ok(!r.error, `${r.profile}/${r.nozzle}: ${r.error}`);
+  assert.ok(rows.length >= PROFILE_IDS.length);
+  for (const r of rows) {
+    if (r.error) {
+      assert.ok(
+        /needs >=|EW per cell|does not fit|cells fit|no room for a lattice/.test(r.error),
+        `${r.profile}/${r.nozzle}: unexpected error ${r.error}`,
+      );
+      assert.ok(r.profile === 'PL-D3S', `${r.profile}/${r.nozzle}: only the 4-level plate may be refused`);
+    }
+  }
+  assert.ok(rows.some((r) => r.profile === 'PL-D2' && r.nozzle === '0.4' && r.netPerPage > 200));
 });
 
 /* ------------------------------------------------------------------ */

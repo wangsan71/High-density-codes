@@ -40,6 +40,9 @@ export function analyseCell(bitmap, layout, c, r) {
   const x0 = layout.originPx.x + c * cellPx;
   const y0 = layout.originPx.y + r * cellPx;
   const sub = bitmap.substrate;
+  // measurement windows come from the page geometry, so an EW-quantised plate and
+  // an ideal-circle paper page are read by the same code
+  const m = (layout.glyph && layout.glyph.measure) || MEASURE;
 
   // pass 1: find the pixel furthest from the substrate -> this cell's ink direction
   let best = -1;
@@ -100,9 +103,9 @@ export function analyseCell(bitmap, layout, c, r) {
       }
       const [nx, ny] = norm(px, py, cellPx);
       const rr = Math.sqrt(nx * nx + ny * ny);
-      if (rr <= MEASURE.dotR) {
+      if (rr <= m.dotR) {
         dot += a;
-      } else if (rr >= MEASURE.bandIn && rr <= MEASURE.bandOut) {
+      } else if (rr >= m.bandIn && rr <= m.bandOut) {
         band += a;
       }
       if (rr <= 0.5) total += a;
@@ -111,7 +114,7 @@ export function analyseCell(bitmap, layout, c, r) {
   // Coverage sums are areas normalised by the cell area; the guard band is a
   // subset of the annulus, so scale it back up before taking the ratio.
   const dotA = dot / n;
-  const bandA = (band / n) * MEASURE.bandScale;
+  const bandA = (band / n) * m.bandScale;
   const rho = bandA > 1e-4 ? dotA / bandA : NaN;
   const ink = strongW > 0 ? [strong[0] / strongW, strong[1] / strongW, strong[2] / strongW] : bestRGB;
   return { rho, ink, alphaMax, printed, total, band: bandA, dot: dotA, mean, blank: false };
@@ -131,7 +134,7 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   const shapeChannel = geom.channels.find((ch) => ch.name === 'shape');
   const colourChannel = geom.channels.find((ch) => ch.name === 'colour');
   const thresholds = shapeThresholds(shapeChannel.levels, {
-    targets: measureTargets(layout.cellPx, shapeChannel.levels),
+    targets: measureTargets(layout.cellPx, shapeChannel.levels, layout.glyph),
   });
   const levels = new Uint16Array(geom.totalCells);
   const quality = new Float32Array(geom.totalCells);

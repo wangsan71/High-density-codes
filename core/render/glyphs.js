@@ -136,3 +136,123 @@ export function glyphMask(dx, dy, rho) {
 export function printedAreaFraction(rho) {
   return ANNULUS_AREA + Math.PI * dotRadiusForRho(rho) ** 2;
 }
+
+/**
+ * Glyph geometry as a function of cell size **measured in extrusion widths**.
+ *
+ * The unit-circle design above is what a 600 dpi sheet produces. On an FDM plate
+ * nothing smaller than about one extrusion width (EW) survives the process, and
+ * the phone has to resolve the result: a ring 0.09 cells thick on a 4-EW cell is
+ * 0.36 EW, and the 0.25-EW gap between neighbouring rings bridges under any real
+ * blur -- in simulation the whole lattice merges into one blob. So on plates
+ * every radius below is a whole number of EW:
+ *
+ *     printed-to-printed gap   >= 1 EW      (cell >= 2*outer + 1)
+ *     ring thickness           >= 1 EW      (outer - inner)
+ *     dot-to-ring clearance    >= 1 EW      (inner - maxDot)
+ *     smallest printable dot   = 1 EW radius
+ *
+ * Because levels are linear in *area*, the k-th dot radius is
+ * maxDot*sqrt(k/(L-1)), so a L-level alphabet needs maxDot >= sqrt(L-1) EW.
+ * That works out to >= 7 EW per cell for 2 levels and >= 9 for 4. When the cell
+ * is too small we return ok:false with the requirement instead of emitting a
+ * plate that cannot be read -- and the caller can raise the pitch by exactly
+ * that many EW.
+ *
+ * @param {number} cellEw cell pitch in extrusion widths (0/NaN = unknown = ideal)
+ * @param {number} shapeLevels size of the shape alphabet
+ */
+export function glyphGeometry(cellEw, shapeLevels) {
+  const L = Math.max(2, shapeLevels | 0);
+  const ideal = { ok: true, quantised: false, cellEw: cellEw || Infinity, shapeLevels: L, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
+  if (!Number.isFinite(cellEw) || cellEw <= 0) return ideal;
+  if (cellEw >= 24) return ideal; // inkjet/laser: EW quantisation is below the process floor anyway
+  const minDotEw = Math.ceil(Math.sqrt(L - 1));
+  // One full EW of *unprinted* clearance on every side. Half an EW is what the
+  // antialias tails of adjacent rings sit in, and under any real blur they
+  // bridge: the lattice then reads as one connected mesh and the corner markers
+  // merge into it (observed in simulation with a 1px blur).
+  for (let outerEw = Math.floor((cellEw - 2) / 2); outerEw >= 2; outerEw--) {
+    const ringEw = Math.max(1, Math.round(outerEw * 0.18));
+    const innerEw = outerEw - ringEw;
+    if (innerEw < 2) continue;
+    const maxDotEw = innerEw - 1;
+    if (maxDotEw < minDotEw) continue;
+    const radii = [];
+    for (let k = 0; k < L; k++) radii.push(k === 0 ? 0 : Math.max(1, Math.round(maxDotEw * Math.sqrt(k / (L - 1)))));
+    if (new Set(radii).size !== L) continue; // two levels collapsing onto one radius is unresolvable
+    const outer = outerEw / cellEw;
+    const inner = innerEw / cellEw;
+    const dot = radii.map((r) => r / cellEw);
+    // Guard band: a wide ring is read a fraction of an EW in from each edge so
+    // soft antialias never enters the ratio; a 1-EW ring has no room for that,
+    // and taking a fixed 0.5 EW guard would leave a zero-area measurement window.
+    const guardEw = Math.min(0.5, ringEw / 4);
+    const bandIn = (innerEw + guardEw) / cellEw;
+    const bandOut = (outerEw - guardEw) / cellEw;
+    const area = Math.PI * (outer ** 2 - inner ** 2);
+    // The reference ring must stay the dominant reflector: rho is dot/annulus, and
+    // a dot larger than the ring pushes it past 1, where the "this cell is a blob"
+    // cut correctly rejects the reading. Keep the quantised geometry inside the
+    // same contract as the ideal one (RHO_HI ~= 0.97).
+    if (!((Math.PI * dot[L - 1] ** 2) / area > 0) || (Math.PI * dot[L - 1] ** 2) / area > 0.95) continue;
+    const guard = Math.PI * (bandOut ** 2 - bandIn ** 2);
+    const measure = {
+      dotR: Math.min(Math.max(dot[L - 1] + guardEw / cellEw, inner - guardEw / cellEw), 0.49),
+      bandIn,
+      bandOut,
+      bandGuardArea: guard,
+      bandScale: guard > 0 ? area / guard : 1,
+    };
+    return {
+      ok: true,
+      quantised: true,
+      cellEw,
+      shapeLevels: L,
+      outer,
+      inner,
+      outerEw,
+      innerEw,
+      dot,
+      dotEw: radii,
+      area,
+      measure,
+      rhoHi: (Math.PI * dot[L - 1] ** 2) / area,
+    };
+  }
+  const needed = 2 * (1 + 1 + 1 + minDotEw) + 2; // per-side gap + ring + dot clearance + dot, doubled, plus both cell gaps
+  return { ok: false, reason: `a ${L}-level shape alphabet needs >= ${needed} EW per cell (this cell is ${cellEw.toFixed(2)} EW)`, neededCellEw: needed, ideal };
+}
+
+/** Smallest cell (in EW) that can carry a given alphabet. */
+export function minCellEwFor(shapeLevels) {
+  for (let ew = 3; ew <= 64; ew++) if (glyphGeometry(ew, shapeLevels).ok) return ew;
+  return 64;
+}
+
+/**
+ * Is (dx, dy) printed for this *level* under this geometry?
+ * Level-based rather than rho-based so EW-quantised radii are exact.
+ */
+export function glyphMaskForLevel(dx, dy, level, geo) {
+  const r2 = dx * dx + dy * dy;
+  const outer = geo ? geo.outer : ANNULUS_OUTER;
+  const inner = geo ? geo.inner : ANNULUS_INNER;
+  if (r2 <= inner * inner) {
+    const rd = geo && geo.dot ? geo.dot[level] : dotRadiusForRho(rhoFor(level, geo ? geo.shapeLevels : 0));
+    return rd > 0 && r2 <= rd * rd;
+  }
+  return r2 <= outer * outer;
+}
+
+/** Fraction of the cell that ends up printed at this level (ink budget). */
+export function cellInkFraction(level, geo) {
+  const g = geo || idealGeometry();
+  const dotR = g.dot ? g.dot[level] : dotRadiusForRho(rhoFor(level, g.shapeLevels));
+  return g.area + Math.PI * dotR * dotR;
+}
+
+/** The unit-cell geometry, for callers that have no nozzle information (paper, previews). */
+export function idealGeometry(shapeLevels = 2) {
+  return { ok: true, quantised: false, cellEw: Infinity, shapeLevels, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
+}

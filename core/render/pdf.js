@@ -20,7 +20,7 @@
  *   3  Page             -> /MediaBox [0 0 w_pt h_pt], /Resources /XObject /Im0,
  *                          /Contents 5 0 R
  *   4  Image XObject    -> /DeviceRGB, /BitsPerComponent 8, /FlateDecode with
- *                          /DecodeParms /Predictor 15 /Colors 3 /Columns width
+ *                          /DecodeParms /Predictor 15 /Colors 3 /Columns width*3
  *   5  Content stream   -> substrate background fill + `cm` scaling /Im0 to the
  *                          whole MediaBox
  *   xref table (classic, one 20-byte entry per object) + trailer + startxref
@@ -231,6 +231,8 @@ export function encodePDFPage(img) {
     ascii(
       `4 0 obj\n` +
         `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height}\n` +
+        // Interpolate false: a viewer that resamples the bitmap blurs the ink
+        // edges, and edge position is exactly what the decoder measures.
         `   /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false\n` +
         `   /Filter /FlateDecode\n` +
         `   /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${width * 3} >>\n` +
@@ -287,7 +289,11 @@ export function encodePDFPage(img) {
   for (const off of offsets) {
     // Every entry is exactly 20 bytes: 10-digit offset, SP, 5-digit generation,
     // SP, type, then the 2-byte EOL (" \n"). Readers seek by these bytes, so a
-    // short entry silently shifts every object after it.
+    // short entry silently shifts every object after it -- refuse rather than
+    // write a table that points anywhere but at its object.
+    if (off > 9999999999) {
+      throw new RangeError(`encodePDFPage: offset ${off} does not fit the 10-digit xref field`);
+    }
     xref += `${String(off).padStart(10, '0')} 00000 n \n`;
   }
   const digest = sha256(body).subarray(0, 16); // deterministic: no clock, no salt
