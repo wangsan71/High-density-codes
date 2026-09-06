@@ -12,7 +12,7 @@
 | M0 | 骨架 / git / ESM 约定 / CLI 壳 | — | **完成** | 仓库+package.json+docs 就位 | — |
 | M1 | 编码核心 gf256/rs/hash/chacha20/crc/pack/deflate/frame/profiles/nozzles/protocol | G0 | **完成** | 105/105 单元绿 | `M1` |
 | M2 | 版面渲染 + PNG/TIFF（读写）+ 回显带 + CLI send/receive | G1 | **完成**（最小 PDF 缺，见风险） | 136/136；G1 7档×6次 **269万格 0 误读**；磁盘文件→PNG→文件 sha256 相同 | `M2` |
-| M3 | 解码全链路（真实图像：标定→单应→采样） | G1,G2 | 未开始 | 理想采样器已有（`core/decode/ideal.js`） | — |
+| M3 | 解码全链路（真实图像：标记检测→单应→透视采样） | G1,G2 | **进行中** | `core/decode/transform.js` 完成（4 点 DLT + 残差自校验 + 逆矩阵 + 格心双线性，5 例绿）；`ideal.js` 理想采样器已有 | — |
 | M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | 未开始 | — | — |
 | M5 | STL + 3MF 双色产物 | G8 | 未开始 | — | — |
 | M6 | 双色优先·单色兜底 | G7 | **完成（图像层）** | `pskit verify --gate G7`：PL-D2@0.2/0.4 单色渲染 3/3 页判死色道 → 完整复原；PL-D3(off) 干净拒绝 | — |
