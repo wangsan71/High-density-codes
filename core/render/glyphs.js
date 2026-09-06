@@ -23,6 +23,13 @@
 
 /** Outer radius of the reference annulus (fraction of the cell edge). */
 export const ANNULUS_OUTER = 0.47;
+/**
+ * Cell width (in extrusion widths) at or above which the ideal fractional
+ * geometry is used as-is: the extrusion is now so fine relative to the cell that
+ * rounding to whole EWs costs less than the process noise already present, so
+ * quantising would be theatre. Also the ceiling of the quantisation search.
+ */
+export const IDEAL_CROSSOVER_EW = 24;
 /** Inner radius of the reference annulus. */
 export const ANNULUS_INNER = 0.38;
 /** Annulus area as a fraction of the cell area: pi*(R^2 - r^2), cell = 1 unit^2. */
@@ -162,11 +169,7 @@ export function printedAreaFraction(rho) {
  * @param {number} cellEw cell pitch in extrusion widths (0/NaN = unknown = ideal)
  * @param {number} shapeLevels size of the shape alphabet
  */
-export function glyphGeometry(cellEw, shapeLevels) {
-  const L = Math.max(2, shapeLevels | 0);
-  const ideal = { ok: true, quantised: false, cellEw: cellEw || Infinity, shapeLevels: L, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
-  if (!Number.isFinite(cellEw) || cellEw <= 0) return ideal;
-  if (cellEw >= 24) return ideal; // inkjet/laser: EW quantisation is below the process floor anyway
+function quantise(cellEw, L) {
   const minDotEw = Math.ceil(Math.sqrt(L - 1));
   // One full EW of *unprinted* clearance on every side. Half an EW is what the
   // antialias tails of adjacent rings sit in, and under any real blur they
@@ -195,7 +198,8 @@ export function glyphGeometry(cellEw, shapeLevels) {
     // a dot larger than the ring pushes it past 1, where the "this cell is a blob"
     // cut correctly rejects the reading. Keep the quantised geometry inside the
     // same contract as the ideal one (RHO_HI ~= 0.97).
-    if (!((Math.PI * dot[L - 1] ** 2) / area > 0) || (Math.PI * dot[L - 1] ** 2) / area > 0.95) continue;
+    const rhoHi = (Math.PI * dot[L - 1] ** 2) / area;
+    if (!(rhoHi > 0) || rhoHi > 0.95) continue;
     const guard = Math.PI * (bandOut ** 2 - bandIn ** 2);
     const measure = {
       dotR: Math.min(Math.max(dot[L - 1] + guardEw / cellEw, inner - guardEw / cellEw), 0.49),
@@ -217,17 +221,87 @@ export function glyphGeometry(cellEw, shapeLevels) {
       dotEw: radii,
       area,
       measure,
-      rhoHi: (Math.PI * dot[L - 1] ** 2) / area,
+      rhoHi,
     };
   }
-  const needed = 2 * (1 + 1 + 1 + minDotEw) + 2; // per-side gap + ring + dot clearance + dot, doubled, plus both cell gaps
-  return { ok: false, reason: `a ${L}-level shape alphabet needs >= ${needed} EW per cell (this cell is ${cellEw.toFixed(2)} EW)`, neededCellEw: needed, ideal };
+  return null;
 }
 
-/** Smallest cell (in EW) that can carry a given alphabet. */
+/**
+ * The narrowest cell (in EW) that `quantise` can build an alphabet into. Derived
+ * by searching the same routine the renderer uses, because an analytical estimate
+ * of it overstated the requirement (it said 10 EW where 8 works) and that number
+ * goes into a refusal message a user is expected to act on.
+ *
+ * Half-EW steps, not integers: the real cell width is pitchMm/ewMm and is almost
+ * never an integer, and quantisation success is sensitive to that fraction (10.4
+ * admits a 4-level alphabet where neither 10 nor 11 does). Searching integers only
+ * would report a floor the renderer then contradicts.
+ */
+function searchCellEw(L, limit = IDEAL_CROSSOVER_EW) {
+  for (let ew = 3; ew <= limit + 1e-9; ew += 0.5) if (quantise(ew, L)) return ew;
+  return null;
+}
+
+export function glyphGeometry(cellEw, shapeLevels) {
+  const L = Math.max(2, shapeLevels | 0);
+  const ideal = { ok: true, quantised: false, cellEw: Number.isFinite(cellEw) ? cellEw : null, shapeLevels: L, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
+  if (!Number.isFinite(cellEw) || cellEw <= 0) return ideal;
+  if (cellEw >= IDEAL_CROSSOVER_EW) return ideal; // inkjet/laser: EW quantisation is below the process floor anyway
+  const hit = quantise(cellEw, L);
+  if (hit) return hit;
+  const needed = searchCellEw(L) ?? IDEAL_CROSSOVER_EW;
+  return {
+    ok: false,
+    reason: `a ${L}-level shape alphabet needs >= ${needed} EW per cell (this cell is ${cellEw.toFixed(2)} EW)`,
+    neededCellEw: needed,
+    ideal,
+  };
+}
+
+/**
+ * A JSON-safe projection of a glyph geometry, for anything that has to *prove*
+ * two sides agree on the printed geometry rather than silently recompute it
+ * (the manifest records this; the receiver compares it).
+ *
+ * Recomputing from profile+nozzle would usually work, but "usually" is the wrong
+ * word for a system that must fail loudly: if the renderer's quantisation changes
+ * between printing a plate and scanning it back, the two sides read different
+ * circles and the transfer just does not work, with nothing to point at. A
+ * mismatch here names the field.
+ */
+export function glyphSignature(glyph) {
+  if (!glyph) return null;
+  return {
+    cellEw: glyph.cellEw ?? null,
+    shapeLevels: glyph.shapeLevels,
+    quantised: !!glyph.quantised,
+    outer: glyph.outer,
+    inner: glyph.inner,
+    dot: glyph.dot ? Array.from(glyph.dot) : null,
+    measure: glyph.measure ? { ...glyph.measure } : null,
+  };
+}
+
+/** @returns {string[]} the field paths that differ, empty when they agree. */
+export function glyphSignatureDiff(a, b) {
+  const bad = [];
+  const seen = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const k of seen) {
+    const x = JSON.stringify(a ? a[k] : undefined);
+    const y = JSON.stringify(b ? b[k] : undefined);
+    if (x !== y) bad.push(`${k}: ${x} vs ${y}`);
+  }
+  return bad;
+}
+
+/** The smallest cell width (in EW) at which an L-level shape alphabet is printable. */
 export function minCellEwFor(shapeLevels) {
-  for (let ew = 3; ew <= 64; ew++) if (glyphGeometry(ew, shapeLevels).ok) return ew;
-  return 64;
+  const L = Math.max(2, shapeLevels | 0);
+  // Same search the refusal message quotes, so the two can never disagree:
+  // if nothing below the crossover quantises, the crossover *is* the floor
+  // (at that width the ideal geometry applies and is printable by definition).
+  return searchCellEw(L) ?? IDEAL_CROSSOVER_EW;
 }
 
 /**
@@ -254,5 +328,5 @@ export function cellInkFraction(level, geo) {
 
 /** The unit-cell geometry, for callers that have no nozzle information (paper, previews). */
 export function idealGeometry(shapeLevels = 2) {
-  return { ok: true, quantised: false, cellEw: Infinity, shapeLevels, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
+  return { ok: true, quantised: false, cellEw: null, shapeLevels, outer: ANNULUS_OUTER, inner: ANNULUS_INNER, area: ANNULUS_AREA, measure: MEASURE, dot: null };
 }

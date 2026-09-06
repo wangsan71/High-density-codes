@@ -240,6 +240,10 @@ async function cmdSend(args) {
       netBytesPerPage: t.geom.ecc.netBytesPerPage,
     },
     pageLayout: mod.layoutMod.describeLayout(layout),
+    // The glyph geometry the printer actually produced. Recomputing it at the
+    // receiver works only while both sides run the same quantisation rules; this
+    // turns a silent disagreement into a named mismatch.
+    glyph: (await import('../core/render/glyphs.js')).glyphSignature(layout.glyph),
     dpi,
     pages: t.pages.length,
     dataPages: t.dataPages,
@@ -280,6 +284,18 @@ async function cmdReceive(args) {
   const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
   const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
   const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });
+  if (manifest?.glyph) {
+    const { glyphSignature, glyphSignatureDiff } = await import('../core/render/glyphs.js');
+    const diff = glyphSignatureDiff(glyphSignature(layout.glyph), manifest.glyph);
+    if (diff.length) {
+      console.log('receive: REFUSED -- the printed geometry does not match what this build would read');
+      for (const d of diff) console.log(`  ${d}`);
+      console.log('  the pages were rendered by a different build (or a different nozzle/pitch than the manifest says).');
+      console.log('  Nothing was decoded, because reading the wrong circles produces plausible-looking garbage.');
+      process.exitCode = 3;
+      return;
+    }
+  }
   const asm = new mod.protocol.TransferAssembler({ passphrase: args.passphrase });
 
   const opts = {

@@ -44,7 +44,10 @@ export function pageLayout(geom, dpi, opts = {}) {
   const shapeChannel = (geom.channels || []).find((c) => c.name !== 'colour') || (geom.channels || [])[0];
   const shapeLevels = shapeChannel ? shapeChannel.levels : 2;
   const ewMm = geom.nozzle ? getNozzle(geom.nozzle).ewMm : null;
-  const cellEw = ewMm ? geom.pitchMm / ewMm : Infinity;
+  // null, not Infinity: paper has no extrusion width to quantise against, and an
+  // Infinity in a returned object silently becomes `null` the moment anybody
+  // serialises it -- which is how it first escaped into tests/conformance.json.
+  const cellEw = ewMm ? geom.pitchMm / ewMm : null;
   const glyph = glyphGeometry(cellEw, shapeLevels);
   if (!glyph.ok) throw new RangeError(`pageLayout: ${glyph.reason} at ${geom.pitchMm}mm / ${geom.nozzle}mm nozzle`);
   // The echo strip is a *micro* lattice: 1 bit per cell, high contrast. Half the

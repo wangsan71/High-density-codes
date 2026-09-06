@@ -13,7 +13,7 @@
 | M1 | 编码核心 gf256/rs/hash/chacha20/crc/pack/deflate/frame/profiles/nozzles/protocol | G0 | **完成** | 105/105 单元绿 | `M1` |
 | M2 | 版面渲染 + PNG/TIFF（读写）+ 回显带 + CLI send/receive | G1 | **完成** | 136/136；G1 7档×6次 0 误读；磁盘文件→PNG→文件 sha256 相同 | `M2` |
 | M3 | 解码全链路（标记检测→单应→透视矫正→读格） | G1,G2 | **完成（合成图像层）**；真实相机照片待 M4 信道 | 156/156；`warp.test.mjs` 6/6：倾斜+模糊+噪声照片角标误差 <2.5px、90° 旋转页靠空心角纠正、空白/乱码图干净拒绝、PL-G@0.8 79 页照片往返复原 | — |
-| M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | 未开始 | — | — |
+| M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | **进行中**：解码入口/advice/G3/G5/交叉校验向量已完成；`sim/channel.py`+`selfcheck.py` 与 `ref/decode.py` 由子代理在写 | `--gate G3` `--gate G5` 绿；`conformance.test.mjs` 11 例活断言 | — |
 | M5 | STL + 3MF 双色产物 | G8 | 未开始 | — | — |
 | M6 | 双色优先·单色兜底 | G7 | **完成（图像层）** | `--gate G7`：PL-D2@0.2/0.4 单色渲染判死色道 → 完整复原；PL-D3(off) 干净拒绝 | — |
 | M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | 未开始 | ρ 自标定已在理想层跑通；喷嘴地板已改为 EW 量化（见决策 6） | — |
@@ -25,15 +25,15 @@
 
 | Gate | 判据摘要 | 状态 |
 |---|---|---|
-| G0 | RS/ChaCha20/SHA/CRC/帧/压缩 单元+属性全绿 | **通过**（156 例；GF(2⁸) 全域穷举、RS (t,e) 穷举 200/200、ChaCha20/SHA-256/PBKDF2 对拍 node:crypto 与 RFC 向量、deflate 双向对拍 node:zlib） |
+| G0 | RS/ChaCha20/SHA/CRC/帧/压缩 单元+属性全绿 | **通过**（174 例；GF(2⁸) 全域穷举、RS (t,e) 穷举 200/200、ChaCha20/SHA-256/PBKDF2 对拍 node:crypto 与 RFC 向量、deflate 双向对拍 node:zlib；本环新增 advice 映射覆盖 3 例、conformance 活复算 11 例、PDF 多页 4 例） |
 | G1 | 理想往返 0 符号错 | **图像层通过**：`verify --gate G1` 7 档 × 3 次 = 725,913 格 0 误读（含 600dpi 纸面 620,136 格），全部还原；STL 往返部分待 M5 |
 | G2 | 纸面 300/600dpi 200 seed 100% | 未开始（需 M4 仿真信道） |
-| G3 | 缺页/乱序/重复 ≤parity 100%，超出干净拒绝 | 协议层通过；图像层待 M4 |
-| G4 | 手机压力档 ≥99% + 失败分类 | 未开始 |
-| G5 | 误接受实测 0（1 万次篡改全拒）+ 变异测试 | 协议层 mini 探针 300 轻损 + 40 重损，误接受 0；正式 1 万次待 M4 |
+| G3 | 缺页/乱序/重复 ≤parity 100%，超出干净拒绝 | **协议层通过**（`verify --gate G3`，3 档 × 丢 0..parity 页 + 乱序喂入全部精确还原；丢 parity+1 → `result=null` 且不写文件；每页喂两次 → 计入 duplicate 且字节不变；异会话页 → `other-session` 拒绝）。图像层丢页（真的删掉 PNG 文件）待 `sim/channel.py` 落地后跑 |
+| G4 | 手机压力档 ≥99% + 失败分类 | 未开始（信道在写）。失败分类侧已就绪：`core/decode/advice.js` 20 个成因→重拍指令 + 防腐测试 |
+| G5 | 误接受实测 0（1 万次篡改全拒）+ 变异测试 | **通过**：`verify --gate G5 --trials 10000` → 9200 次被 ECC 纠正回原值、800 次拒绝（全部由明文 SHA-256 闸拦下）、**0 误接受**；7 种损坏模式混合（位翻、整格擦除、丢页、头 CRC 破、头字段伪造后重算 CRC、异会话整页替换、>40% 重损）。变异检验两项：① 试验组合必须真的触发帧 CRC/magic 闸（否则混合太弱）；② **摘要是承重的**——伪造页带正确 sessionId + 新鲜合法 CRC + 合法码字，所有结构闸全部放行，只有摘要拦住它；若删掉摘要检查仍出字节，这条就红（第一版此测试因"一页就装完全部数据"而假通过，已修成先短一页再塞伪造页） |
 | G6 | 性能 + 30–60min soak 无泄漏 | 部分：SHA-256 269 MB/s、deflate 1.1MB/35ms、600dpi 整页 (4530×6590px) 渲染 192ms + 读回 430ms、PNG 617ms/TIFF 181ms、**单应矫正 362ms（2236×2236 画布）**、50 次连跑 heap Δ 0.0MiB |
 | G7 | 色道塌陷下单色兜底 100% | **图像层通过**（单色渲染图被判 `colourAlive=false` → 整道擦除复原；`monoSafe:'off'` 档 → 拒绝而非猜） |
-| G8 | 3MF/STL 被 Python 独立解析且水密/schema 正确 | 未开始（PNG/TIFF 已过 pillow 校验；PDF 编码器已绿） |
+| G8 | 3MF/STL 被 Python 独立解析且水密/schema 正确 | 未开始（PNG/TIFF 已过 pillow 校验；PDF 编码器支持 N 页打包 `pack.pdf`，3 页板材包 548 KB/161ms） |
 | G9 | Web 产物零外部 origin + 离线 + selftest | 未开始 |
 | G10 | 喷嘴×参数×拍摄矩阵（PL-G 全 100%） | 未开始 |
 
@@ -57,6 +57,9 @@
    - 四边形枚举必须同时满足：4 条边同向凸（两两叉积会放过自交蝴蝶形——鞋带面积≈0 曾把正确的四角判成"框不住页面"）；**转向为正**（镜像的走法同样凸、同样满足"br 空心"，会把角色旋转 90°，所以镜像只能单独报 `mirrored-image` 提示"纸放反了"）；**空心判据进入枚举**而不是事后校验（矩形度对 4 种循环标注同分，事后校验会挑中一个实心在 br 的标注然后报 `hollow-corner-missing`）。
    - **底色取自矫正后画布静默区的亮部上四分位**（`quietZoneSubstrate`），绝不取照片边框：深色桌垫会让底色估成 (40,40,45)，于是纸被判成墨、整页反相，误读率 76%（≈三值字母整体平移一格的特征签名）。
    - 二值化带多阈值重试（Otsu ×1/×1.35/×1.7/×2.1）。干净图必须一次命中——`warp.test.mjs` 断言 `thresholdFactor===1`，把"依赖重试"变成可测的回归。
+10. **只有一条解码路**：`core/decode/page.js:decodePage` 是"图像→页数据"的唯一入口（角标检测→单应→回显带头→读格）。CLI 现在调它，M8 网页端必须调同一份，不允许出现"CLI 一套、浏览器一套"的两条读出路——那样门限测的已经不是交付的东西了。干净画布（尺寸+dpi 都对得上）才允许走快路省掉重采样，**且快路读不出来时必须退回几何路**：一张恰好同尺寸的扫描不是画布。
+11. **每个失败原因都必须有对用户的说法**：`core/decode/advice.js` 把 reason 映射到"物理成因 + 重拍指令"（G4 判据）。映射表会被遗忘，所以 `tests/unit/advice.test.mjs` 直接扫 `core/decode/*.js` 源码里的 `reason:` 字面量——新增一个没映射的原因就红（已用注入 `zz-not-mapped` 证实它真的会红）。没映射的原因仍要给出通用指令，并且**自称未映射**，不许借用别人的成因。
+12. **交叉校验的独立性靠"看不到"来保证**：`tests/conformance.json`（78 条向量，196 KB，发射器带 400 KB 预算闸）是答案卷；`ref/decode.py` 的编写纪律是**禁止阅读 `core/*.js`**，只准依据 JSON 里的 `meta`（GF(2⁸) 参数、CRC 参数、位序、交织规则、56 字节头表、KDF、容器格式）独立实现。规则写进 `meta` 而不是靠读码，是这套对拍有意义的前提；信息不足时必须报 `SPEC GAP` 而不是猜。同时 `tests/unit/conformance.test.mjs` 在 JS 侧**逐类复算**每条向量（含"重新发射必须逐字节相同"），所以这道对拍不会静默腐烂，也不依赖 Python 是否在跑。
 
 ## 容量实测表（`node cli/pskit.mjs status` 复算，勿手改）
 
@@ -85,14 +88,17 @@
 
 ## 已知风险 / 待办
 
-- **真实相机/扫描仪照片尚未验证**（M3 只到合成照片）。仿真里 1px 模糊就能桥接点阵 → 真实光学 MTF 更差，`PL-G` 之外的粗档可能不够。**下一步（M4）就是拿 Python+OpenCV 造信道**（高斯/离焦模糊、渐晕、镜面高光、JPEG 85、传感器噪声、摩尔纹），把 G2/G3/G4 打在真实退化上；若 `PL-G` 也撑不住，就再抬 EW 地板（数字会变，结论不变）。
-- `pskit receive` 只吃 PNG；TIFF 读回与 PDF 输出（`encodePDFPage` 已绿）都还没接进 CLI。
+- **真实相机/扫描仪照片尚未验证**（M3 只到合成照片）。仿真里 1px 模糊就能桥接点阵 → 真实光学 MTF 更差，`PL-G` 之外的粗档可能不够。M4 信道 `sim/channel.py`（子代理在写，含 scan300/scan600/phone40/phone-hard/plate-matte/plate-glossy/identity 预设）落地后立刻把 G2/G3/G4 打在真实退化上；若 `PL-G` 也撑不住，就再抬 EW 地板（数字会变，结论不变）。
+- **`--gate G4` 依赖照片路解码的吞吐**：单页矫正 ~360-460ms，500 seed × 7 档 = 数十分钟。要么并行，要么在门限里降采样（`warp.test.mjs` 那组 68s 同理）。
+- `pskit receive` 只吃 PNG；TIFF 读回会点名跳过（不静默丢文件）。PDF 输出已接（`--format pdf|all`，超出 380 MB 组装预算时明确拒绝并让用户改打 PNG）。
 - 合成照片里"字节穿越照片"那组测试要 68s（3 档 × 多页 × 全分辨率矫正）。M9 soak 前需要降采样或减少页数，否则门限跑不动。
 - `densityReport` 对单通道档的 `monoSafe` 标 `n/a`（语义正确但易被读成"没保护"）。
-- `pskit send` 目前把 `glyph` 几何写进 manifest 了吗？没写的话 M8 网页端要自己从 profile+nozzle 重算——更好是随页输出几何 JSON。M8 开工前先确认。
+- 交叉校验目前是**发射侧自证**：`tests/unit/conformance.test.mjs` 会逐条复算并保证重新发射逐字节相同，但 `ref/decode.py` 独立实现仍在写。它跑绿之前，G2/G4 的"另一个实现也同意"这一半还没闭合。
 
 ## 变更日志
 
 - M1：编码核心完成，105 单元全绿；修 RS 擦除定位子、BM 的 m 计数、deflate LZ77 重叠拷贝、native 档校验字节重复计入、填充字节混入摘要；新增 `monoSafe` 三档与分块塞满；`tools/fix-mojibake.mjs`。
 - **M2**：渲染层完成——`core/render/{units,glyphs,layout,raster}.js` + `core/palette.js` + `core/decode/{ideal,echo,png-read}.js` + `core/render/{png,tiff}.js`（pillow+node:zlib 双向验证）+ `cli/pskit.mjs`（send/receive/status/verify/roundtrip）。G1 图像层 269 万格 0 误读；G7 通过；磁盘文件→PNG→文件 sha256 相同。修：静区计入版面、ρ 阈值自标定、mono 搬道、色道存活判据反了、门限空跑护栏。测试 105→136。
 - **M3**：解码链路完成到"合成照片可往返"。新增 `core/decode/{transform,fiducial,warp}.js`（4 点 DLT 单应 + 残差自校验 + 双线性格心采样；连通域角标检测 + 页面定位 + 结构过滤；矫正到规范画布后直接复用 `readPageIdeal`/`readEcho`）、`core/render/pdf.js`（DeviceRGB + FlateDecode Predictor 15，字节确定性，`%%EOF` 结尾）、`tests/unit/{transform,warp}.test.mjs`。测试 136→156，全绿；门限 `all --seeds 3` 全通过。**本轮最大的东西不是代码而是决策 6**：形状字母按 EW 量化，板材容量掉 5×（1098→220 B/页），纸面不变；同时把检测器的四条硬规则钉死（决策 9），每条都对应一个已复现的假成功路径。
+- **M4（上半）**：解码收口成一条路 + 两个门限 + 交叉校验答案卷。新增 `core/decode/page.js`（`decodePage`：角标→单应→回显头→读格唯一入口；干净画布才走快路，快路读不出来必须退回几何路）、`core/decode/advice.js`（20 个 reason → 物理成因 + 重拍指令）、`tools/emit-conformance.mjs` + `tests/conformance.json`（78 向量/196 KB/400 KB 预算闸）+ `tests/unit/conformance.test.mjs`（11 例**活复算**：CRC/SHA/deflate/ChaCha20/PBKDF2/RS/交织/头/页解包/页解码/版面几何，外加"重新发射逐字节相同"）、`tests/unit/{advice,render-glyphs}.test.mjs`。CLI `receive` 现在能吃照片：逐图分类失败而不是第一张坏图就整体中止、统计重复页、**原子写**（`out.part`→rename；摘要不符删文件并 exit 1）。门限：`G3` 协议层（丢 0..parity 全复原、丢 parity+1 干净拒绝且不写文件、每页喂两次仅计重复、异会话页拒绝）、`G5` 正式 **10000 次篡改 0 误接受**（800 次由明文摘要拦下）+ 两项变异检验。`core/render/pdf.js` 支持 N 页 `pack.pdf`（单页输出保持逐字节不变），`send --format` 改列表并有拼写护栏。
+  本轮修掉三个"自己骗自己"：**①** G5 的摘要承重测试第一版是假通过——PL-M1@0.4 一页就装下全部数据，伪造页根本没参与判定；改成先短一页再塞伪造页后，`feed: accept` 但结果为空，摘要才被证明是最后一道闸。**②** 交织：`unpackLevels` 要的是**去交织后**的 levels，直接喂印刷顺序会得到"看着合法的垃圾页"，page-decode 三条向量因此全 fail。**③** `rsEncode(data,nsym)` 返回完整码字而非校验字节，我自己把 data 拼了两遍——`tools/inspect-conformance.mjs` 复算时才撞出来。另外 `neededCellEw` 原来是解析式估算（10 EW，实际 8 就够，会让人白印粗一档），改为复用渲染器同一条量化搜索、且搜索域用半 EW 步长（真实 cellEw 几乎都是分数：10.4 能排 4 级字母，10 和 11 都不能）；`cellEw` 对纸面从 `Infinity` 改成 `null`（`Infinity` 一进 JSON 就静默变 `null`，这就是它泄漏进答案卷的方式）。测试 156→179，全绿；`--gate all --seeds 3` 全通过，容量表数字未变。
