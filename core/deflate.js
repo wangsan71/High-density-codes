@@ -43,6 +43,19 @@
  * and distances. If the result is not below 98% of the input size (incompressible
  * data) we fall back to method 0x00 stored, so compress() never bloats by more
  * than the header.
+ *
+ * Exports
+ *   compress(bytes)          -> Uint8Array   PSZ1 container
+ *   decompress(bytes)        -> Uint8Array   original bytes, or throws
+ *   isCompressed(bytes)      -> boolean      PSZ1 magic present (routing hint)
+ *   deflateRaw(bytes)        -> Uint8Array   bare RFC 1951 stream (no container)
+ *   inflateRaw(bytes, [n])   -> Uint8Array   bare RFC 1951 decoder; n, when given,
+ *                                            caps the output at n bytes
+ *   decompressPayload        = inflateRaw (alias used by the CLI and the tests)
+ *   MAGIC, METHOD_STORED, METHOD_DEFLATE, HEADER_SIZE, MAX_ORIGINAL_LENGTH
+ *
+ * Every entry point accepts Uint8Array or ArrayBuffer (any TypedArray view too)
+ * and returns a freshly allocated Uint8Array that never aliases the input.
  */
 
 /* ------------------------------------------------------------------ */
@@ -210,6 +223,7 @@ class BitReader {
 
   /** decode one Huffman symbol (codes are written MSB-first into an LSB-first stream). */
   huffman(dec) {
+    if (dec.maxlen === 0) throw new Error('deflate.inflate: symbol without a Huffman code');
     if (this.bitcnt < 16) this.fill(15);
     const k = this.bitcnt < 16 ? this.bitcnt : 16;
     const lim = dec.maxlen < k ? dec.maxlen : k;
@@ -671,7 +685,11 @@ function inflatePayload(input, offset, declaredLen) {
   for (let p = br.bytePos(); p < data.length; p++) {
     if (data[p] !== 0) throw new Error('deflate.inflate: non-zero trailing bytes');
   }
-  return out.a.subarray(0, out.n);
+  // Hand back an exactly-sized buffer: the sink may have grown geometrically, and
+  // callers must not be able to touch the sibling bytes of a grown allocation.
+  const result = new Uint8Array(out.n);
+  result.set(out.a.subarray(0, out.n));
+  return result;
 }
 
 /**

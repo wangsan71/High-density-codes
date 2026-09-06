@@ -116,7 +116,7 @@ test('rs: known small vector (RS(7,3) style) decodes a single symbol error', () 
   assert.deepEqual(Array.from(res.cw), Array.from(cw));
 });
 
-test('rs: exhaustive stress â€?every (t,e) with 2t+e <= nsym recovers', () => {
+test('rs: exhaustive stress -?every (t,e) with 2t+e <= nsym recovers', () => {
   const cases = [
     [8, 0], [16, 0], [0, 16], [0, 32], [5, 10], [9, 6], [1, 30], [8, 1],
     [10, 10], [0, 31], [15, 2], [2, 28], [4, 24],
@@ -195,7 +195,7 @@ test('rs: beyond the limit is reported as failure, never silently accepted', () 
   assert.equal(rsDecode(Uint8Array.from(cw), nsym, [99999]).ok, false);
 });
 
-test('rs: 255 blocks â€?no codeword shorter than nsym+1 accepted silently', () => {
+test('rs: 255 blocks -?no codeword shorter than nsym+1 accepted silently', () => {
   const cw = rsEncode(new Uint8Array([5]), 8);
   assert.equal(cw.length, 9);
   assert.ok(rsDecode(Uint8Array.from(cw), 8).ok);

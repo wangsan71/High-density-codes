@@ -1,5 +1,5 @@
 /**
- * PSKT core — transfer builder and receiver assembler.
+ * PSKT core -?transfer builder and receiver assembler.
  *
  * Unified page model (docs/PROTOCOL.md):
  *   - a *page* carries `D` content bytes and `P` parity bytes (D/P come from the
@@ -16,7 +16,7 @@
  *
  * Why single-colour printing still works (gate G7): if the colour channel is
  * unreadable, every content byte is an *erasure at a known position*, and the
- * shape channel still carries P >= D parity bytes — RS recovers it exactly.
+ * shape channel still carries P >= D parity bytes -?RS recovers it exactly.
  */
 
 import { planPage } from './profiles.js';
@@ -61,10 +61,12 @@ export function packLevels({ content, parity, geom }) {
   const sb = ch.secondary ? ch.bits[ch.secondary] : 0;
   if (pb + sb !== geom.bitsPerCell) throw new Error('packLevels: channel bit mismatch');
 
-  // native profiles carry content || parity in the one and only channel
-  const primSource = geom.ecc.mode === 'unequal' ? content : concat(content, parity || new Uint8Array(0));
+  // native profiles carry content || parity in the one and only channel: the
+  // secondary bit budget does not exist there, so parity must not be counted twice.
+  const native = geom.ecc.mode !== 'unequal';
+  const primSource = native ? concat(content, parity || new Uint8Array(0)) : content;
   const primBits = bytesToBitArray(primSource);
-  const secBits = parity ? bytesToBitArray(parity) : new Uint8Array(0);
+  const secBits = native || !parity ? new Uint8Array(0) : bytesToBitArray(parity);
   const primCapacity = cells * pb;
   const secCapacity = cells * sb;
   if (primBits.length > primCapacity) throw new RangeError(`content too large for page: ${primBits.length}>${primCapacity} bits`);
@@ -243,6 +245,12 @@ export async function encodeTransfer(raw, opts = {}) {
   let flags = 0;
   let payload = raw.length ? Uint8Array.from(raw) : new Uint8Array(0);
 
+  // The frame digest always covers the *plaintext*: it is the thing the receiver
+  // must reproduce, so a wrong passphrase (or a corrupt deflate stream) is caught
+  // instead of silently yielding garbage.
+  const fullDigest = sha256(payload);
+  const sessionId = fullDigest.slice(0, 8);
+
   const zipped = compress(payload);
   if (zipped.length + 1 < payload.length) {
     payload = zipped;
@@ -259,18 +267,16 @@ export async function encodeTransfer(raw, opts = {}) {
     flags |= FLAGS.CIPHER;
   }
 
-  const fullDigest = sha256(payload);
-  const sessionId = fullDigest.slice(0, 8);
-
-  const dataPages = Math.max(1, Math.ceil(payload.length / D));
+  const dataPages = Math.ceil(payload.length / D) || 1;
   const padTo = dataPages * D;
-  if (padTo !== payload.length) {
+  const blockPad = padTo - payload.length;
+  if (blockPad) {
     const padded = new Uint8Array(padTo);
     padded.set(payload);
     payload = padded;
     flags |= FLAGS.PADDED;
   }
-  const blockPad = padTo - (raw.length && opts.cipher ? payload.length : payload.length); // informational
+  const payloadLen = payload.length;
 
   let parityPages = Math.max(2, Math.ceil((dataPages * (opts.parityPct ?? geom.ecc.inter.parityPct)) / 100));
   if (dataPages + parityPages > 255) parityPages = 255 - dataPages;
@@ -352,7 +358,7 @@ export async function encodeTransfer(raw, opts = {}) {
 /**
  * Incremental, order-agnostic receiver. Feed it decoded pages (in any order, with
  * duplicates); it assembles, applies inter-page erasure decoding, and only then
- * hands back bytes — and only if the digest matches.
+ * hands back bytes -?and only if the digest matches.
  */
 export class TransferAssembler {
   constructor(opts = {}) {
@@ -377,8 +383,9 @@ export class TransferAssembler {
    * @param {object} page {levels, header|headerBytes, cellMissing?, channelMissing?}
    * @returns {{ok:boolean, reason?:string, duplicate?:boolean, assembled?:boolean}}
    */
-  feed(page) {
-    const hdrRaw = page.headerBytes ? decodeHeader(page.headerBytes) : { ok: true, header: page.header };
+  async feed(page) {
+    const rawHeader = page.headerBytes || (page.header instanceof Uint8Array ? page.header : null);
+    const hdrRaw = rawHeader ? decodeHeader(rawHeader) : { ok: true, header: page.header };
     if (!hdrRaw.ok) {
       this.rejected.push({ reason: hdrRaw.reason });
       return { ok: false, reason: `header:${hdrRaw.reason}` };
@@ -407,6 +414,8 @@ export class TransferAssembler {
         dataPages: h.dataPages,
         totalPages: h.totalPages,
         payloadLen: h.payloadLen,
+        blockPad: h.blockPad,
+        monoSafe: geom.ecc.monoSafe,
         D: h.dataBytesPerPage,
         P: geom.ecc.parityBytes,
         profile: h.profile,
@@ -432,12 +441,12 @@ export class TransferAssembler {
     }
     this.pages.set(h.pageIndex, { content: dec.content, header: h, stats: dec });
 
-    const done = this.tryAssemble();
+    const done = await this.tryAssemble();
     return { ok: true, assembled: !!done, stats: dec };
   }
 
   /** @returns {Uint8Array|null} the recovered payload, or null while incomplete */
-  tryAssemble() {
+  async tryAssemble() {
     const s = this.session;
     if (!s) return null;
     const { dataPages, totalPages, D } = s;
@@ -500,29 +509,35 @@ async function finish(pageContents) {
   const s = this.session;
   const joined = new Uint8Array(pageContents.length * s.D);
   for (let q = 0; q < pageContents.length; q++) joined.set(pageContents[q], q * s.D);
-  let payload = joined.subarray(0, s.payloadLen);
+  // payloadLen counts the zero padding that filled out the last page; the wire
+  // bytes that matter stop at payloadLen - blockPad.
+  let payload = joined.subarray(0, s.payloadLen - s.blockPad);
 
+  try {
+    if (s.flags & FLAGS.CIPHER) {
+      const salt = payload.subarray(0, 16);
+      const nonce = payload.subarray(16, 16 + NONCE_LEN);
+      const body = payload.subarray(16 + NONCE_LEN);
+      if (!this.opts.passphrase && !this.opts.key) {
+        this.needPassphrase = true;
+        return null;
+      }
+      const key = this.opts.key || (await deriveKey(this.opts.passphrase, salt, this.opts.iterations || 150000));
+      payload = chacha20Xor(key, nonce, body, 1);
+    }
+    if (s.flags & FLAGS.COMPRESSED) payload = decompress(payload);
+  } catch (e) {
+    this.error = `transform-failed: ${e.message}`;
+    return null;
+  }
+
+  // final gate: the digest covers the plaintext, so nothing wrong ever escapes
   const digest = sha256(payload);
   for (let i = 0; i < DIGEST_LEN; i++) {
     if (digest[i] !== s.digest[i]) {
       this.error = 'digest-mismatch';
       return null;
     }
-  }
-
-  if (s.flags & FLAGS.CIPHER) {
-    const salt = payload.subarray(0, 16);
-    const nonce = payload.subarray(16, 16 + NONCE_LEN);
-    const body = payload.subarray(16 + NONCE_LEN);
-    if (!this.opts.passphrase && !this.opts.key) {
-      this.needPassphrase = true;
-      return null;
-    }
-    const key = this.opts.key || (await deriveKey(this.opts.passphrase, salt, this.opts.iterations || 150000));
-    payload = chacha20Xor(key, nonce, body, 1);
-  }
-  if (s.flags & FLAGS.COMPRESSED) {
-    payload = decompress(payload);
   }
   this.result = payload;
   return payload;
@@ -579,9 +594,9 @@ export async function roundtrip(bytes, opts = {}, degrade = null) {
     if (degrade) {
       const d = degrade(p, i);
       if (d === null) continue; // page dropped entirely
-      asm.feed({ levels: d.levels ?? p.levels, header: p.header, cellMissing: d.cellMissing });
+      await asm.feed({ levels: d.levels ?? p.levels, header: p.header, cellMissing: d.cellMissing, channelMissing: d.channelMissing });
     } else {
-      asm.feed({ levels: p.levels, header: p.header });
+      await asm.feed({ levels: p.levels, header: p.header });
     }
   }
   return { transfer: t, result: asm.result, assembler: asm };

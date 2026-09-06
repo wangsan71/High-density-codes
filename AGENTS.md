@@ -1,0 +1,34 @@
+# AGENTS.md · 本仓库作业约定（每轮先读）
+
+## 任务契约
+
+见 `docs/PLAN.md`（已批准的 v3）。台账与"下一步做什么"见 `docs/STATUS.md`。
+**每轮收尾必须**：跑门限 → 更新 `docs/STATUS.md` → `git commit` → `git tag -a M<n>`。
+
+## 硬性约束
+
+- **零运行时依赖**：`package.json` 的 `dependencies` 永远是 `{}`。要加依赖先问用户。
+- 核心代码必须是**纯 ESM JS，Node 与浏览器同一份**，不得用 `node:` 内建（`core/**` 里只允许 Node 侧的 CLI/IO 在 `cli/` 下）。
+- 不用 `crypto.subtle`（`file://` 不是安全上下文）、不用 `node:zlib`/`CompressionStream`（跨宿主不同步）。自研：`core/hash.js`、`core/chacha20.js`、`core/deflate.js`。
+- 正确性优先：**任何情况下不得输出"看起来成功但是错"的数据**（帧 CRC16 + 明文 SHA-256 摘要 + 原子写）。误接受是唯一不可原谅的失败。
+
+## 本机（Windows + DSH 沙箱）陷阱
+
+| 现象 | 原因 | 做法 |
+|---|---|---|
+| `spawn EPERM` | 沙箱禁止管道 stdio 的子进程 | 测试用 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`；门限一律**进程内**跑，不要 spawn 子进程 |
+| `ERR_UNSUPPORTED_DIR_IMPORT` | `--test` 不吃目录参数 | 必须给 glob 字符串 |
+| 源码注释变成 U+FFFD / C1 控制字符 | PowerShell `Get-Content`+`Set-Content` 走 CP1252 往返 | **改文件只用 edit/write 工具**；出事跑 `node tools/fix-mojibake.mjs --write` |
+| `git` 刷一屏 CRLF warning | 缺 `.gitattributes` | 已有 `* text=auto eol=lf`；不要加 `core.autocrlf=true` |
+| npm 装不了东西 | 缓存目录不可写 | 本来就不允许依赖；实在要试用 `--cache ./.npm-cache` 并先问用户 |
+| `&&` 报错 | 这是 PowerShell | 命令分隔用 `;`；路径用 `C:\...` 反斜杠形式 |
+
+## 环境事实（探测过，别再探）
+
+- Node v24.14.0；Python 3.10.9 + numpy 2.2.6 + opencv-python 4.13（**有 `cv2.aruco`，无 contrib**）+ pillow 11.1 + scipy 1.15.1；**没有** pytest/hypothesis/img2pdf/segno/pyzbar。
+- 20 核，D: 盘 2TB 空闲；本机无可枚举 WIA 扫描仪（只读沙箱里 COM 被拦）。
+- Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。
+
+## 门限（G0–G10）
+
+判据写在 `docs/PLAN.md`。STATUS 里的"门限状态"表记实测结果。G5（误接受）与 G6（soak）是长任务，跑之前先确认 `--gate` 参数。

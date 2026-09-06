@@ -62,8 +62,14 @@ export const PROFILES = {
   'PL-D3': {
     id: 'PL-D3', medium: MEDIUM.PLATE,
     channels: [{ name: 'colour', levels: 4 }, { name: 'shape', levels: 2 }],
-    intra: { k: 85, nsym: 170 }, parityPct: 20, monoRecoverable: true,
-    note: 'four-filament plate: 2 bits colour (data) + 1 bit shape (parity), rate 1/2',
+    intra: { k: 223, nsym: 32 }, parityPct: 20, monoSafe: 'off',
+    note: 'four-filament plate, 3 bits/cell, maximum density: needs all four colours present',
+  },
+  'PL-D3S': {
+    id: 'PL-D3S', medium: MEDIUM.PLATE,
+    channels: [{ name: 'colour', levels: 4 }, { name: 'shape', levels: 4 }],
+    intra: { k: 85, nsym: 85 }, parityPct: 20, monoSafe: 'partial',
+    note: 'four-filament with parity: 3 bits/cell, survives ~50% colour loss',
   },
   'PL-G': {
     id: 'PL-G', medium: MEDIUM.PLATE, pitchMm: UNIVERSAL_PITCH_MM,
@@ -134,7 +140,7 @@ export function planPage(profileId, opts = {}) {
   const bitsPerCell = channels.reduce((a, c) => a + c.bits, 0);
   const symbolBytes = Math.floor((totalCells * bitsPerCell) / 8);
 
-  const ecc = planEcc(p, channels, parityPct);
+  const ecc = planEcc(p, channels, parityPct, opts);
 
   return {
     profile: p.id,
@@ -160,57 +166,113 @@ export function planPage(profileId, opts = {}) {
 }
 
 /**
- * Budget the two Reed-Solomon layers for a profile.
- * Returns {mode, intra:{k,nsym,blocks,dataBytes,parityBytes}, inter:{...}, netBytesPerPage}
+ * Choose how many Reed-Solomon blocks to use so that almost every printed cell
+ * carries information, while keeping `k + nsym <= 255`.
+ * @returns {{k:number, nsym:number, blocks:number, dataBytes:number, parityBytes:number}}
  */
-export function planEcc(p, channels, parityPct) {
-  const byName = Object.fromEntries(channels.map((c) => [c.name, c]));
-  const hasColour = !!byName.colour;
-
-  if (p.monoRecoverable && hasColour) {
-    const dataBytes = byName.colour.byteCount;
-    const parityBytes = byName.shape.byteCount;
-    if (parityBytes < dataBytes) {
-      throw new RangeError(`profile ${p.id}: colour parity budget smaller than data (${parityBytes} < ${dataBytes})`);
-    }
-    let { k, nsym } = p.intra;
-    if (nsym < k) nsym = k; // rate 1/2 so that losing the whole colour channel is recoverable
-    if (k + nsym > 255) {
-      k = 127;
-      nsym = 127;
-    }
-    const blocks = Math.floor(Math.min(dataBytes / k, parityBytes / nsym));
-    const useData = blocks * k;
-    const useParity = blocks * nsym;
-    return {
-      mode: 'unequal',
-      monoRecoverable: true,
-      dataBytes: useData,
-      parityBytes: useParity,
-      wastedBytes: dataBytes + parityBytes - useData - useParity,
-      rate: useData / (useData + useParity),
-      intra: { k, nsym, blocks },
-      inter: planInter(useData, parityPct),
-      netBytesPerPage: useData,
-    };
+function chooseBlocks(dataWanted, parityWanted, perBlockMax = 255) {
+  let k = Math.min(dataWanted, perBlockMax - 2);
+  let nsym = Math.min(parityWanted, perBlockMax - k);
+  if (k < 1) return { k: 0, nsym: 0, blocks: 0, dataBytes: 0, parityBytes: 0 };
+  let blocks = 1;
+  if (dataWanted > k) {
+    blocks = Math.ceil(dataWanted / k);
+    k = Math.floor(dataWanted / blocks);
+    nsym = Math.max(1, Math.min(parityWanted, Math.floor(parityWanted / blocks), perBlockMax - k));
   }
+  if (k + nsym > perBlockMax) nsym = perBlockMax - k;
+  return { k, nsym, blocks, dataBytes: k * blocks, parityBytes: nsym * blocks };
+}
 
-  const only = channels.reduce((a, c) => ({ bytes: a.bytes + c.byteCount }), { bytes: 0 });
-  const totalBytes = only.bytes;
-  const { k, nsym } = p.intra;
-  const blocks = Math.floor(totalBytes / (k + nsym));
-  const useData = blocks * k;
-  const useParity = blocks * nsym;
+/**
+ * Budget the two Reed-Solomon layers for a profile.
+ *
+ * monoSafe (the capacity/robustness dial the user chooses):
+ *   'full'    parity bytes >= colour bytes  -> a *totally* unreadable colour
+ *             channel (single-colour print, empty spool, wrong filament) is still
+ *             recovered, because those bytes are erasures at known positions.
+ *   'partial' parity = half the colour bytes -> survives up to ~50% colour cell
+ *             loss (glare, a smeared island) but not a whole-channel loss.
+ *   'off'     data spans every channel with a standard light parity budget ->
+ *             maximum density, no colour-loss protection at all.
+ */
+export function planEcc(p, channels, parityPct, opts = {}) {
+  const byName = Object.fromEntries(channels.map((c) => [c.name, c]));
+  const monoSafe = opts.monoSafe || p.monoSafe || (p.monoRecoverable ? 'full' : 'off');
+  const colour = byName.colour;
+  const secondary = byName.shape || byName.height;
+
+  const nativeBudget = (total) => {
+    // Fill every cell: pick the number of blocks first, then the largest (k, nsym)
+    // that keeps the profile's parity ratio and the 255-symbol codeword limit.
+    const ratio = p.intra.nsym / p.intra.k;
+    const blocks = Math.max(1, Math.ceil(total / 255));
+    let k = Math.floor(total / blocks / (1 + ratio));
+    let nsym = Math.round(k * ratio);
+    if (k + nsym > 255) nsym = 255 - k;
+    if (blocks * (k + nsym) > total) {
+      // rounding pushed us past the budget: drop one block worth of symbols
+      k = Math.floor((total - (blocks - 1) * (k + nsym)) / (1 + ratio));
+      nsym = Math.round(k * ratio);
+    }
+    const dataBytes = blocks * k;
+    const parityBytes = blocks * nsym;
+    return {
+      mode: 'native',
+      monoSafe: 'n/a', // no colour channel exists, so there is nothing to lose
+      monoRecoverable: false,
+      parityRatio: round4(ratio),
+      dataBytes,
+      parityBytes,
+      wastedBytes: total - dataBytes - parityBytes,
+      rate: dataBytes / Math.max(1, dataBytes + parityBytes),
+      intra: { k, nsym, blocks },
+      inter: planInter(dataBytes, parityPct),
+      netBytesPerPage: dataBytes,
+    };
+  };
+
+  if (!colour || monoSafe === 'off') {
+    const total = channels.reduce((a, c) => a + c.byteCount, 0);
+    const r = nativeBudget(total);
+    if (monoSafe !== 'off') r.monoSafe = 'off';
+    return r;
+  }
+  if (!secondary) throw new RangeError(`profile ${p.id}: monoSafe=${monoSafe} needs a parity channel`);
+
+  const dataAvail = colour.byteCount;
+  const parityAvail = secondary.byteCount + (byName.height ? byName.height.byteCount : 0);
+  const ratio = monoSafe === 'full' ? 1 : monoSafe === 'partial' ? 0.5 : null;
+  if (ratio === null) throw new RangeError(`unknown monoSafe "${monoSafe}"`);
+
+  // data capped so that the parity budget can cover it at the requested ratio
+  const dataWanted = Math.min(dataAvail, Math.floor(parityAvail / ratio));
+  const want = { k: 0, nsym: 0, blocks: 0, dataBytes: 0, parityBytes: 0 };
+  if (dataWanted >= 1) {
+    const per = ratio === 1 ? 127 : 170; // k + nsym <= 255 with nsym = k or nsym = k/2
+    let k = Math.min(dataWanted, per);
+    let blocks = Math.max(1, Math.ceil(dataWanted / k));
+    k = Math.floor(dataWanted / blocks);
+    let nsym = Math.max(1, Math.min(Math.floor(parityAvail / blocks), Math.ceil(k * ratio), 255 - k));
+    while (blocks * nsym > parityAvail && blocks > 1) blocks--;
+    want.k = k;
+    want.nsym = nsym;
+    want.blocks = blocks;
+    want.dataBytes = k * blocks;
+    want.parityBytes = nsym * blocks;
+  }
+  if (want.dataBytes < 1) throw new RangeError(`profile ${p.id} (${p.note}): no usable capacity at this nozzle`);
   return {
-    mode: 'native',
-    monoRecoverable: false,
-    dataBytes: useData,
-    parityBytes: useParity,
-    wastedBytes: totalBytes - useData - useParity,
-    rate: useData / (useData + useParity),
-    intra: { k, nsym, blocks },
-    inter: planInter(useData, parityPct),
-    netBytesPerPage: useData,
+    mode: 'unequal',
+    monoSafe,
+    monoRecoverable: ratio === 1,
+    dataBytes: want.dataBytes,
+    parityBytes: want.parityBytes,
+    wastedBytes: dataAvail + parityAvail - want.dataBytes - want.parityBytes,
+    rate: want.dataBytes / (want.dataBytes + want.parityBytes),
+    intra: { k: want.k, nsym: want.nsym, blocks: want.blocks },
+    inter: planInter(want.dataBytes, parityPct),
+    netBytesPerPage: want.dataBytes,
   };
 }
 
@@ -250,6 +312,7 @@ export function densityReport(opts = {}) {
         rowsOut.push({
           profile: id,
           nozzle: nozzle || '-',
+          monoSafe: g.ecc.monoSafe,
           pitchMm: g.pitchMm,
           cols: g.cols,
           rows: g.rows,
