@@ -30,6 +30,9 @@
  * unless the produced byte count equals it, so a truncated or tampered payload
  * can never be silently accepted (PSKT invariant: fail rather than mis-decode).
  * For method = 0x00 the payload length must also equal originalLength exactly.
+ * A DEFLATE reader stops at the end of the final block and ignores whatever
+ * bytes follow (zlib / Python zlib.decompressobj() semantics): the stream is
+ * self-terminating, and the enclosing frame owns the exact payload boundary.
  * ===========================================================================
  *
  * Bit order (the classic DEFLATE trap): the *stream* is LSB-first -- every header
@@ -252,11 +255,6 @@ class BitReader {
     const r = this.bitcnt & 7;
     this.bitbuf = (this.bitbuf >>> r) >>> 0;
     this.bitcnt -= r;
-  }
-
-  /** index of the first byte no bit of which has been consumed. */
-  bytePos() {
-    return this.pos - (this.bitcnt >> 3);
   }
 
   /** raw (byte-aligned) copy of `len` bytes into out. */
@@ -679,14 +677,13 @@ function inflatePayload(input, offset, declaredLen) {
     if (final) break;
   }
 
-  // Past the last consumed byte only zero padding may remain (RFC 1951 sec. 3.1
-  // pads the final partial byte with zeroes and nothing else). Anything else
-  // means the payload was longer than the stream, i.e. corrupt.
-  for (let p = br.bytePos(); p < data.length; p++) {
-    if (data[p] !== 0) throw new Error('deflate.inflate: non-zero trailing bytes');
-  }
-  // Hand back an exactly-sized buffer: the sink may have grown geometrically, and
-  // callers must not be able to touch the sibling bytes of a grown allocation.
+  // Bytes past the end of the final block are ignored, exactly like zlib and
+  // Python's zlib.decompressobj(): a DEFLATE stream is self-terminating, so
+  // surplus bytes cannot change what we produced, and the caller's framing layer
+  // (which knows the true payload length) owns that boundary. Truncation, in
+  // contrast, always throws -- the bit stream runs dry mid-symbol -- and the
+  // byte count is re-checked against the container's originalLength by
+  // decompress(), so a short read can never pass as success either.
   const result = new Uint8Array(out.n);
   result.set(out.a.subarray(0, out.n));
   return result;

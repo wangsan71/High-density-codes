@@ -462,10 +462,21 @@ test('spec: junk and non-container input are rejected without throwing from isCo
   const badMethod = Uint8Array.from(c);
   badMethod[4] = 0x02;
   assert.throws(() => decompress(badMethod), /unsupported method/);
-  const withJunk = new Uint8Array(c.length + 1);
+  // Bytes past the end of the final block are ignored (zlib parity: the stream is
+  // self-terminating and the frame owns the boundary), so the decode must still be
+  // exactly right rather than merely "not an error".
+  const withJunk = new Uint8Array(c.length + 2);
   withJunk.set(c);
   withJunk[c.length] = 0x7f;
-  assert.throws(() => decompress(withJunk), /trailing|originalLength/, 'trailing junk must not be ignored');
+  withJunk[c.length + 1] = 0x11;
+  assert.equal(bytesEq(decompress(withJunk), SPEC_SHAPES.asciiRepeat(400)), true);
+  // ... and node:zlib agrees with that same leniency, so the Python reference
+  // decoder built on zlib.decompressobj() will behave identically.
+  assert.equal(
+    zlib.inflateRawSync(Buffer.from(withJunk.subarray(HEADER_SIZE))).length,
+    400,
+    'zlib must also ignore the trailing bytes',
+  );
 });
 
 test('spec: bit corruption is detected or changes the data -- never a silent no-op', () => {

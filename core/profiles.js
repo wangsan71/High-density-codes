@@ -16,6 +16,7 @@
  */
 
 import { getNozzle, pitchFor, quantizePitch, UNIVERSAL_PITCH_MM } from './nozzles.js';
+import { QUIET_CELLS } from './render/constants.js';
 
 export const MEDIUM = { PAPER: 'paper', PLATE: 'plate' };
 
@@ -125,8 +126,16 @@ export function planPage(profileId, opts = {}) {
   const region = { w: sheet.w - 2 * marginMm, h: sheet.h - 2 * marginMm };
   if (region.w <= 0 || region.h <= 0) throw new RangeError('margin leaves no printable region');
 
-  const cols = Math.floor(region.w / pitchMm);
-  const rows = Math.floor(region.h / pitchMm);
+  // The quiet zone and corner markers are printed *inside* the printable region, so
+  // they come out of the cell budget. Fitting the lattice alone (as an earlier
+  // revision did) produced pages that silently overflowed the plate.
+  const cols = Math.floor(region.w / pitchMm) - 2 * QUIET_CELLS;
+  const rows = Math.floor(region.h / pitchMm) - 2 * QUIET_CELLS;
+  if (cols < 4 || rows < 4) {
+    throw new RangeError(
+      `profile ${p.id}: only ${cols}x${rows} cells fit ${sheet.w}x${sheet.h}mm once the ${QUIET_CELLS}-cell quiet zone is paid for`,
+    );
+  }
   const totalCells = cols * rows;
 
   const channels = p.channels.map((c) => ({
@@ -163,25 +172,6 @@ export function planPage(profileId, opts = {}) {
     originMm: { x: marginMm + round4((region.w - cols * pitchMm) / 2), y: marginMm + round4((region.h - rows * pitchMm) / 2) },
     notes: p.note,
   };
-}
-
-/**
- * Choose how many Reed-Solomon blocks to use so that almost every printed cell
- * carries information, while keeping `k + nsym <= 255`.
- * @returns {{k:number, nsym:number, blocks:number, dataBytes:number, parityBytes:number}}
- */
-function chooseBlocks(dataWanted, parityWanted, perBlockMax = 255) {
-  let k = Math.min(dataWanted, perBlockMax - 2);
-  let nsym = Math.min(parityWanted, perBlockMax - k);
-  if (k < 1) return { k: 0, nsym: 0, blocks: 0, dataBytes: 0, parityBytes: 0 };
-  let blocks = 1;
-  if (dataWanted > k) {
-    blocks = Math.ceil(dataWanted / k);
-    k = Math.floor(dataWanted / blocks);
-    nsym = Math.max(1, Math.min(parityWanted, Math.floor(parityWanted / blocks), perBlockMax - k));
-  }
-  if (k + nsym > perBlockMax) nsym = perBlockMax - k;
-  return { k, nsym, blocks, dataBytes: k * blocks, parityBytes: nsym * blocks };
 }
 
 /**

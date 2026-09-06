@@ -42,6 +42,36 @@ export function channelNames(geom) {
   return { primary: only, secondary: null, bits: { [only]: geom.bitsPerCell } };
 }
 
+/**
+ * Split one cell's packed level value into per-channel values. The bit order is
+ * the same one packLevels writes: the first channel's bits are most significant.
+ * Works in both ECC modes because it follows the *physical* channel bit widths.
+ */
+export function splitCellLevel(value, geom) {
+  let v = value;
+  const out = {};
+  for (let i = geom.channels.length - 1; i >= 0; i--) {
+    const c = geom.channels[i];
+    out[c.name] = v & ((1 << c.bits) - 1);
+    v >>>= c.bits;
+  }
+  if (v !== 0) throw new RangeError(`splitCellLevel: ${value} overflows ${geom.bitsPerCell} bits`);
+  return out;
+}
+
+/** Inverse of splitCellLevel. */
+export function joinCellLevels(parts, geom) {
+  let v = 0;
+  for (const c of geom.channels) {
+    const value = parts[c.name] | 0;
+    if (value < 0 || value >= c.levels) {
+      throw new RangeError(`joinCellLevels: ${c.name} level ${value} out of range 0..${c.levels - 1}`);
+    }
+    v = (v << c.bits) | value;
+  }
+  return v;
+}
+
 export function interleaveStep(cellCount) {
   return defaultStep(cellCount);
 }
