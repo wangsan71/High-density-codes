@@ -20,7 +20,7 @@ import zlib from 'node:zlib';
 
 import { sha256 } from '../../core/hash.js';
 import { toHex } from '../../core/crc.js';
-import { encodePDFPage } from '../../core/render/pdf.js';
+import { encodePDFPage, encodePDFDocument } from '../../core/render/pdf.js';
 import { planPage } from '../../core/profiles.js';
 import { pageLayout } from '../../core/render/layout.js';
 import { renderPageBitmap } from '../../core/render/raster.js';
@@ -410,4 +410,95 @@ test('PDF: a real PL-M1 page at 300 dpi encodes and passes the xref reader', () 
   assert.ok(Math.abs(Number(mb[2]) - wantH) <= 0.01, `MediaBox height ${mb[2]} vs ${wantH.toFixed(2)}`);
   assert.equal(Number(/\/Columns\s+(\d+)/.exec(info.dicts.get(4).dict)[1]), bitmap.width * 3, 'predictor Columns');
   eqBytes(encodePDFPage(bitmap), file, 'a full page must be reproducible byte for byte');
+});
+
+/* ------------------------------------------------------------------ */
+/* multi-page documents -- what a real print pack becomes              */
+/* ------------------------------------------------------------------ */
+
+/** Locate every "N 0 obj" and confirm the xref table points exactly there. */
+function checkOffsets(file, label) {
+  const s = text(file);
+  const xrefAt = s.lastIndexOf('\nxref\n');
+  assert.ok(xrefAt > 0, `${label}: no xref table`);
+  const rows = [...s.slice(xrefAt).matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+  assert.ok(rows.length >= 6, `${label}: xref has ${rows.length} entries`);
+  const declared = new Map();
+  for (let n = 1; n <= rows.length; n++) declared.set(n, rows[n - 1]);
+  for (const m of s.matchAll(/^(\d+) 0 obj/gm)) {
+    const n = Number(m[1]);
+    assert.equal(declared.get(n), m.index, `${label}: object ${n} is not where its xref entry says`);
+    assert.ok(s.startsWith(`${n} 0 obj`, m.index), `${label}: object ${n} offset points at itself`);
+  }
+  return { rows, s };
+}
+
+test('PDF: single-page document via the list API is byte-identical to the shorthand', () => {
+  const img = synthBitmap();
+  const one = encodePDFPage(img);
+  const list = encodePDFDocument([img]);
+  eqBytes(one, list, 'encodePDFDocument([x]) must not change the historical one-page object layout');
+  assert.match(text(one), /\/Kids \[3 0 R\] \/Count 1/, 'object 2 must still be the only Pages node with kid 3');
+});
+
+test('PDF: a 3-page pack keeps page order, per-page MediaBox and valid xref', () => {
+  const a = synthBitmap({ width: 40, height: 23, dpi: 300 });
+  const b = synthBitmap({ width: 61, height: 17, dpi: 600 });
+  const c = synthBitmap({ width: 33, height: 44, dpi: 150 });
+  const file = encodePDFDocument([a, b, c]);
+  const s = text(file);
+  assert.match(s, /\/Kids \[3 0 R 6 0 R 9 0 R\] \/Count 3/, 'kids must be 3+3i in page order');
+  checkOffsets(file, '3-page');
+  // each page carries its own box, in order
+  const boxes = [...s.matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  assert.equal(boxes.length, 3, 'one MediaBox per page');
+  for (const [i, img] of [a, b, c].entries()) {
+    const want = [(img.width / img.dpi) * 72, (img.height / img.dpi) * 72];
+    assert.ok(Math.abs(boxes[i][0] - want[0]) <= 0.02 && Math.abs(boxes[i][1] - want[1]) <= 0.02, `page ${i} box ${boxes[i]} vs ${want}`);
+  }
+  // every image object must inflate back to its own pixels
+  for (const [i, img] of [a, b, c].entries()) {
+    const imageNo = 4 + i * 3;
+    const m = new RegExp(`${imageNo} 0 obj`).exec(s);
+    assert.ok(m, `object ${imageNo} missing`);
+    const start = s.indexOf('stream\n', m.index) + 'stream\n'.length;
+    const end = s.indexOf('\nendstream', start);
+    const dict = s.slice(m.index, start);
+    const declared = Number(/\/Length (\d+)/.exec(dict)[1]);
+    assert.equal(end - start, declared, `page ${i}: /Length must match the bytes between stream and endstream`);
+    const z = new Uint8Array(file.subarray(start, end));
+    const raw = new Uint8Array(zlib.inflateSync(Buffer.from(z)));
+    const stride = img.width * 3;
+    const want = expectedRGB(img);
+    assert.equal(raw.length, (stride + 1) * img.height, `page ${i}: filtered scanline length`);
+    for (let y = 0; y < img.height; y++) {
+      assert.equal(raw[y * (stride + 1)], 0, `page ${i} row ${y} filter byte`);
+      for (let x = 0; x < stride; x++) assert.equal(raw[y * (stride + 1) + 1 + x], want[y * stride + x], `page ${i} byte ${x}`);
+    }
+  }
+  assert.ok(s.trimEnd().endsWith('%%EOF'), 'must end at %%EOF');
+  eqBytes(encodePDFDocument([a, b, c]), file, 'a document must be reproducible byte for byte');
+});
+
+test('PDF: an empty document is refused rather than written as a broken file', () => {
+  assert.throws(() => encodePDFDocument([]), /no pages/);
+});
+
+test('PDF: a real 3-page PL-D2 pack fits one printable file', () => {
+  const geom = planPage('PL-D2', { nozzle: '0.4' });
+  const layout = pageLayout(geom, 300, { plateMm: 200 });
+  const pages = [];
+  for (let i = 0; i < 3; i++) {
+    const levels = new Uint16Array(geom.totalCells);
+    for (let j = 0; j < levels.length; j++) levels[j] = (i * 3 + j) % 4;
+    pages.push(renderPageBitmap({ geom, levels, layout, palette: 'INK2', echoBits: new Uint8Array(56 * 8) }));
+  }
+  const t0 = performance.now();
+  const file = encodePDFDocument(pages);
+  const ms = performance.now() - t0;
+  checkOffsets(file, 'PL-D2 pack');
+  const s = text(file);
+  assert.equal((s.match(/\/Type \/Page[^s]/g) || []).length, 3, 'three page objects');
+  assert.ok(file.length < pages.reduce((n, p) => n + p.pixels.length, 0), 'the pack must actually compress');
+  console.log(`  3-page PL-D2@0.4 pack: ${(file.length / 1024).toFixed(0)} KiB in ${ms.toFixed(0)}ms`);
 });

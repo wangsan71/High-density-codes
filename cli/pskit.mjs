@@ -10,7 +10,7 @@
  * processes with piped stdio (spawn EPERM), and a verification suite that cannot
  * run is worse than no suite at all.
  */
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, basename, extname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -29,15 +29,26 @@ const HELP = `pskit <command> [options]
     --sheet <A4|Letter>  paper profiles only
     --parity <pct>       inter-page parity percentage (default per profile)
     --passphrase <pw>    ChaCha20 encrypt the payload (PBKDF2-SHA256, 150k iters)
-    --format <png|tiff|both>   default png
+    --format <png|tiff|pdf|both|all>   default png
+                         pdf = one pack.pdf carrying every page at true physical
+                         size (what you actually send to a printer)
     --mono               render as a single-colour print (proves the G7 fallback)
     --palette <id>       INK2 INK4 PAPER1 (default chosen by profile)
     --out <dir>          output directory (default artifacts/<name>)
     --dry-run            plan and report only, write nothing
 
-  receive <dir>          decode pages back (ideal channel, no camera)
+  receive <dir|file>     decode page images back to the payload
+    --photo              force the camera path: detect markers, undo the
+                         perspective, then read (works on scans and prints)
+    --out <file>         where to write the recovered payload
+    --passphrase <pw>    decrypt a --passphrase transfer
+    --profile/--nozzle/--dpi/--palette/--plate
+                         required only when there is no manifest.json
+
   status                 profile / nozzle capacity table
-  verify --gate <G>      run an acceptance gate in-process (G0 G1 G3 G7 all)
+  verify --gate <G>      run an acceptance gate in-process (G0 G1 G3 G5 G7 all)
+    --seeds <n>          G1/G3/G7 repetitions (default per gate)
+    --trials <n>         G5 tamper count (default 10000)
   roundtrip --selftest   encode+decode a synthetic payload, print timings
 `;
 
@@ -143,6 +154,26 @@ async function cmdSend(args) {
     sheetMm: mod.profiles.PROFILES[profileId].medium === 'paper' ? t.geom.sheetMm : undefined,
   });
 
+  const fmts = new Set(String(args.format || 'png').split(/[,\s]+/).filter(Boolean));
+  if (fmts.has('both')) {
+    fmts.add('png');
+    fmts.add('tiff');
+  }
+  if (fmts.has('all')) {
+    fmts.add('png');
+    fmts.add('tiff');
+    fmts.add('pdf');
+  }
+  const unknown = [...fmts].filter((f) => !['png', 'tiff', 'pdf'].includes(f));
+  if (unknown.length) {
+    throw new Error(`send: unknown --format ${unknown.join(', ')} (choose from png, tiff, pdf, both, all)`);
+  }
+  const wantPng = fmts.has('png');
+  const wantTiff = fmts.has('tiff');
+  const wantPdf = fmts.has('pdf');
+  let pdfOk = wantPdf;
+  const pdfPages = [];
+  const pdfBudget = 380e6; // raw RGB bytes the in-memory PDF assembly will absorb
   const files = [];
   let inkSum = 0;
   for (let i = 0; i < t.pages.length; i++) {
@@ -159,16 +190,31 @@ async function cmdSend(args) {
       const cov = mod.raster.coverageStats({ geom: t.geom, levels: p.levels, layout, palette: paletteId, mono: !!args.mono });
       inkSum = cov.printedAreaFraction;
     }
-    if (args.format === 'tiff' || args.format === 'both') {
+    if (wantTiff) {
       const name = `page-${String(i).padStart(3, '0')}.tif`;
       writeFileSync(join(outDir, name), mod.tiff.encodeTIFF(bitmap));
       files.push(name);
     }
-    if (args.format !== 'tiff') {
+    if (wantPng) {
       const name = `page-${String(i).padStart(3, '0')}.png`;
       writeFileSync(join(outDir, name), mod.png.encodePNG(bitmap));
       files.push(name);
     }
+    if (pdfOk && (i + 1) * layout.width * layout.height * 3 > pdfBudget) {
+      // A PDF document is assembled in memory, so an A4 600 dpi pack of dozens of
+      // pages would need gigabytes. Refuse the PDF and keep the images rather
+      // than dying: the PNGs print just as well.
+      console.log(`  pdf        not written: ${t.pages.length} pages at ${layout.width}x${layout.height}px exceed the ${Math.round(pdfBudget / 1e6)} MB assembly budget -- print the PNG files`);
+      pdfOk = false;
+      pdfPages.length = 0;
+    } else if (pdfOk) {
+      pdfPages.push(bitmap);
+    }
+  }
+  if (pdfPages.length) {
+    const { encodePDFDocument } = await import('../core/render/pdf.js');
+    writeFileSync(join(outDir, 'pack.pdf'), encodePDFDocument(pdfPages));
+    files.push('pack.pdf');
   }
   const t2 = performance.now();
 
@@ -204,7 +250,9 @@ async function cmdSend(args) {
     note: 'Print at 100% scale (no "fit to page"). Verify the plate fits: ' + layout.physicalMm.wMm.toFixed(1) + 'x' + layout.physicalMm.hMm.toFixed(1) + 'mm',
   };
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  console.log(`  wrote      ${files.length} image(s) (${t.dataPages} data + ${t.parityPages} parity) + manifest.json in ${outDir}`);
+  console.log(
+    `  wrote      ${t.pages.length} page(s) (${t.dataPages} data + ${t.pages.length - t.dataPages} parity) as ${files.length} file(s) + manifest.json in ${outDir}`,
+  );
   console.log(`  render     ${(layout.width)}x${layout.height}px @ ${dpi}dpi, printed area ${(inkSum * 100).toFixed(1)}%`);
   console.log(`  timings    encode ${Math.round(t1 - t0)}ms  render+write ${Math.round(t2 - t1)}ms`);
   return { outDir, manifest, t, raw, layout, dpi, paletteId, args };
@@ -212,42 +260,105 @@ async function cmdSend(args) {
 
 async function cmdReceive(args) {
   const mod = await load();
-  const dir = resolve(args._[0] || '.');
-  const names = readdirSync(dir).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort();
-  if (!names.length) throw new Error(`receive: no pages found in ${dir}`);
-  const manifestPath = join(dir, 'manifest.json');
-  const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
   const { decodePNG } = await import('../core/decode/png-read.js');
+  const { decodePage } = await import('../core/decode/page.js');
+  const { advise } = await import('../core/decode/advice.js');
+  const dir = resolve(args._[0] || '.');
+  const stat = statSync(dir);
+  const names = stat.isDirectory()
+    ? readdirSync(dir).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort()
+    : [basename(dir)];
+  const base = stat.isDirectory() ? dir : dirname(dir);
+  if (!names.length) throw new Error(`receive: no pages found in ${dir}`);
+  const manifestPath = join(base, 'manifest.json');
+  const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
   const profileId = manifest?.profile || args.profile;
   const nozzle = manifest?.nozzle || args.nozzle;
   const dpi = args.dpi ? Number(args.dpi) : manifest?.dpi || 300;
   const paletteId = manifest?.palette || args.palette || 'INK2';
-  const geom = mod.profiles.planPage(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined, monoSafe: manifest?.monoSafe });
-  const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm: args.plate ? Number(args.plate) : undefined });
+  if (!profileId) throw new Error('receive: no manifest.json and no --profile, cannot know the page geometry');
+  const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
+  const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
+  const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });
   const asm = new mod.protocol.TransferAssembler({ passphrase: args.passphrase });
+
+  const opts = {
+    allowFastPath: !args.photo,
+    requireFastPath: false,
+    log: args.verbose ? (m) => console.log(`    ${m}`) : null,
+  };
+  const seen = new Map();
+  let skippedTiff = 0;
   for (const name of names) {
-    const bytes = new Uint8Array(readFileSync(join(dir, name)));
-    const bitmap = /png$/i.test(name) ? decodePNG(bytes) : (() => {
-      throw new Error('receive: TIFF input not wired yet, use PNG pages');
-    })();
+    if (/\.tiff?$/i.test(name)) {
+      skippedTiff++;
+      continue;
+    }
+    const bytes = new Uint8Array(readFileSync(join(base, name)));
+    let bitmap;
+    try {
+      bitmap = decodePNG(bytes);
+    } catch (e) {
+      console.log(`  ${name}: not a readable PNG (${e.message})`);
+      continue;
+    }
     bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
-    const read = (await import('../core/decode/ideal.js')).readPageIdeal(bitmap, layout, geom, paletteId);
-    const hdr = name.replace(/\.png$/i, '') ;
-    // the echo strip carries the header; re-read it from the rendered page
-    const echo = (await import('../core/decode/echo.js')).readEcho(bitmap, layout);
-    if (!echo.ok) throw new Error(`receive: ${name}: echo strip unreadable (${echo.reason})`);
-    void hdr;
-    await asm.feed({ levels: read.levels, header: echo.headerBytes, channelMissing: read.colourAlive ? [] : ['colour'] });
+    const t0 = performance.now();
+    const r = decodePage(bitmap, { geom, layout, paletteId }, opts);
+    const ms = Math.round(performance.now() - t0);
+    if (!r.ok) {
+      const a = advise(r);
+      console.log(`  ${name}: FAIL ${r.stage}/${r.reason} [${ms}ms]`);
+      console.log(`      cause: ${a.cause}`);
+      console.log(`      do:    ${a.do}`);
+      continue;
+    }
+    const fed = await asm.feed({
+      levels: r.levels,
+      header: r.headerBytes,
+      channelMissing: r.colourAlive ? [] : ['colour'],
+    });
+    const idx = r.header ? r.header.pageIndex : undefined;
+    if (!fed.ok && !fed.duplicate) {
+      const a = advise({ stage: 'assemble', reason: fed.reason });
+      console.log(`  ${name}: REJECTED page ${idx ?? '?'} (${fed.reason})`);
+      console.log(`      cause: ${a.cause}`);
+      continue;
+    }
+    seen.set(idx, (seen.get(idx) || 0) + 1);
+    console.log(
+      `  ${name}: page ${idx === undefined ? '?' : idx} ${r.path}${r.path === 'photo' ? ` marker ${r.markerPx?.toFixed(0)}px cover ${(r.coverage * 100).toFixed(0)}%` : ''}` +
+        `${r.colourAlive ? '' : ' [colour channel dead -> erasure]'} [${ms}ms]${fed.duplicate ? ' (duplicate)' : ''}`,
+    );
   }
-  if (!asm.result) throw new Error(`receive: incomplete (${asm.error || asm.progress.dataHave}/${asm.progress.dataNeed} data pages)`);
-  const out = args.out || join(dir, basename(names[0]) + '.out');
-  writeFileSync(out, Buffer.from(asm.result));
+  if (skippedTiff) console.log(`  note: ${skippedTiff} TIFF input(s) ignored -- TIFF read-back is not wired yet, convert to PNG for now`);
+  const dupes = [...seen.entries()].filter(([, n]) => n > 1).length;
+  if (dupes) console.log(`  ${dupes} page(s) were supplied more than once (deduplicated)`);
+
+  const out = args.out ? resolve(args.out) : join(base, 'pskt-received.out');
+  if (!asm.result) {
+    const { dataHave, dataNeed } = asm.progress;
+    console.log(`receive: INCOMPLETE (${dataHave}/${dataNeed} data pages) -- ${asm.error || 'still short'}`);
+    console.log('  nothing was written: a partial file is never produced');
+    process.exitCode = 2;
+    return;
+  }
+  // G3: the result lands on disk only as a complete, verified file. Write to a
+  // temporary name and rename, so a crash cannot leave a half-written payload
+  // that a later step might mistake for the deliverable.
+  const tmp = `${out}.part`;
+  writeFileSync(tmp, Buffer.from(asm.result));
+  renameSync(tmp, out);
   const want = manifest?.sourceSha256;
   const got = mod.hash.sha256Hex(asm.result);
   console.log(`received ${asm.result.length} bytes -> ${out}`);
   console.log(`  sha256 ${got}`);
   if (want) console.log(`  ${want === got ? 'MATCHES' : 'DOES NOT MATCH'} manifest (${want})`);
-  if (want && want !== got) process.exitCode = 1;
+  if (want && want !== got) {
+    rmSync(out, { force: true });
+    console.log('  refused: the digest does not match the manifest, output deleted');
+    process.exitCode = 1;
+  }
 }
 
 async function cmdStatus() {
@@ -385,6 +496,249 @@ async function gateG1(args) {
   return allOk;
 }
 
+async function gateG3(args) {
+  const mod = await load();
+  const { encodeTransfer, TransferAssembler } = mod.protocol;
+  let allOk = true;
+  const note = (ok, msg) => {
+    allOk &&= ok;
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} ${msg}`);
+  };
+  const payloadOf = (n, seed) => {
+    const p = new Uint8Array(n);
+    let x = seed >>> 0 || 1;
+    for (let i = 0; i < n; i++) {
+      x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+      p[i] = x & 255;
+    }
+    return p;
+  };
+
+  for (const [pid, opts] of [['PL-D2', { nozzle: '0.2' }], ['PL-G', { nozzle: '0.4' }], ['P-M1-300', {}]]) {
+    const geom = mod.profiles.planPage(pid, opts);
+    const payload = payloadOf(Math.max(1, geom.ecc.netBytesPerPage * 2), 4242);
+    const t = await encodeTransfer(payload, { profile: pid, ...opts });
+    const parity = t.pages.length - t.dataPages;
+    // exactly at the parity budget must recover
+    for (let e = 0; e <= parity; e++) {
+      const keep = t.pages.slice();
+      // drop a spread of pages, not just the tail: parity pages matter too
+      for (let d = 0; d < e; d++) keep.splice((d * 3 + 1) % keep.length, 1);
+      // and hand the rest over in a shuffled order
+      for (let i = keep.length - 1; i > 0; i--) {
+        const j = (i * 7 + e) % (i + 1);
+        [keep[i], keep[j]] = [keep[j], keep[i]];
+      }
+      const asm = new TransferAssembler();
+      for (const p of keep) await asm.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+      const ok = !!asm.result && asm.result.length === payload.length && asm.result.every((v, i) => v === payload[i]);
+      if (!ok) note(false, `${pid}: lost ${e}/${parity} parity pages did not recover`);
+      if (e === 0 || e === parity || e === 1) note(ok, `${pid}: ${e} page(s) lost of ${t.pages.length} (${parity} parity) -> recovered`);
+    }
+    // one beyond the budget must refuse, and refuse without producing bytes
+    const asm = new TransferAssembler();
+    const keep = t.pages.slice(0, t.pages.length - parity - 1);
+    for (const p of keep) await asm.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+    note(asm.result === null, `${pid}: losing ${parity + 1} pages refuses (result null, nothing written)`);
+    if (asm.result !== null) {
+      allOk = false;
+      console.log('      produced bytes from too few pages -- THIS IS A FALSE ACCEPT');
+    }
+    // duplicates must be counted and must not corrupt the assembly
+    const asm2 = new TransferAssembler();
+    for (const p of t.pages) {
+      await asm2.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+      await asm2.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+    }
+    note(
+      asm2.result && asm2.result.every((v, i) => v === payload[i]) && asm2.duplicates >= t.pages.length,
+      `${pid}: every page supplied twice -> ${asm2.duplicates} duplicates ignored, bytes identical`,
+    );
+    // a foreign session interleaved into the stream must not be blended in
+    const other = await encodeTransfer(payloadOf(payload.length, 9999), { profile: pid, ...opts });
+    const asm3 = new TransferAssembler();
+    for (const p of t.pages) await asm3.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+    const foreign = other.pages[0];
+    const res = await asm3.feed({ levels: foreign.levels, header: foreign.header, channelMissing: [] });
+    note(!res.ok || res.duplicate === true, `${pid}: a page from another session is rejected (${res.reason || 'ignored'})`);
+  }
+  console.log(`G3 page loss / order / duplicates: ${allOk ? 'PASS' : 'FAIL'}`);
+  return allOk;
+}
+
+/**
+ * G5 -- false acceptance must measure zero.
+ *
+ * Ten thousand randomised corruptions of a real transfer, each one required to
+ * end in either "the exact original bytes" or "a refusal". A single wrong-but-
+ * accepted result fails the gate, because a silent corruption is the only
+ * failure this system is not allowed to have.
+ *
+ * The second half is the mutation check: it proves the *last* guard is actually
+ * load-bearing. A page is taken from a different transfer, given the other
+ * session's id and a freshly correct CRC, so it is structurally perfect -- the
+ * only thing left between it and your disk is the SHA-256 digest of the whole
+ * payload. If deleting that check still produced bytes, the suite would be
+ * green while the system was wrong.
+ */
+async function gateG5(args) {
+  const mod = await load();
+  const { encodeTransfer, TransferAssembler } = mod.protocol;
+  const trials = Number(args.trials || 10000);
+  const pid = 'PL-M1';
+  const opts = { nozzle: '0.4' };
+  const geom = mod.profiles.planPage(pid, opts);
+  const payload = new Uint8Array(Math.max(16, geom.ecc.netBytesPerPage));
+  let x = 20250802 >>> 0;
+  const rnd = () => {
+    x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+  for (let i = 0; i < payload.length; i++) payload[i] = (rnd() * 256) | 0;
+  const base = await encodeTransfer(payload, { profile: pid, ...opts });
+  const clone = (p) => ({ levels: p.levels.slice(), header: p.header.slice() });
+
+  let falseAccept = 0;
+  let recovered = 0;
+  let refused = 0;
+  const guard = {};
+  const fire = (why) => {
+    guard[why] = (guard[why] || 0) + 1;
+  };
+
+  for (let k = 0; k < trials; k++) {
+    const pages = base.pages.map(clone);
+    const mode = k % 7;
+    const pick = (n) => (rnd() * n) | 0;
+    if (mode === 0) {
+      // flip bits in one page's readout levels (the optical channel's failure mode)
+      const p = pages[pick(pages.length)];
+      const flips = 1 + pick(24);
+      for (let i = 0; i < flips; i++) {
+        const idx = pick(p.levels.length);
+        p.levels[idx] ^= 1 << pick(geom.bitsPerCell);
+      }
+    } else if (mode === 6) {
+      // heavy damage: a smudge or a bridged print covering most of one page, far
+      // beyond what the intra-page code can fix -- this is where the last guards
+      // have to work, so it needs to be a real share of the mix
+      const p = pages[pick(pages.length)];
+      const n = Math.floor(p.levels.length * (0.2 + rnd() * 0.6));
+      for (let i = 0; i < n; i++) p.levels[pick(p.levels.length)] = pick(1 << geom.bitsPerCell);
+    } else if (mode === 1) {
+      // erase whole cells (a smudge, a dropped print block)
+      const p = pages[pick(pages.length)];
+      const n = 1 + pick(p.levels.length);
+      for (let i = 0; i < n; i++) p.levels[pick(p.levels.length)] = 0;
+    } else if (mode === 2) {
+      // lose a page outright
+      pages.splice(pick(pages.length), 1);
+    } else if (mode === 3) {
+      // scribble on the header without repairing the CRC
+      const p = pages[pick(pages.length)];
+      p.header[pick(p.header.length)] ^= 1 << pick(8);
+    } else if (mode === 4) {
+      // lie about a header field and repair the CRC: everything structural now
+      // checks out, so this only fails if the content behind it is verified too
+      const p = pages[pick(pages.length)];
+      const dec = mod.frame.decodeHeader(p.header);
+      if (dec.ok) {
+        dec.header.pageIndex = (dec.header.pageIndex + 1 + pick(3)) % Math.max(2, base.pages.length);
+        p.header = mod.frame.encodeHeader(dec.header);
+      }
+    } else {
+      // substitute a page from an unrelated transfer, same geometry
+      const other = await encodeTransfer(new Uint8Array([1 + (k & 255), 2, 3, 4, 5, 6, 7, 8]), { profile: pid, ...opts });
+      const src = other.pages[0];
+      const dst = pages[pick(pages.length)];
+      dst.levels.set(src.levels.subarray(0, Math.min(dst.levels.length, src.levels.length)));
+    }
+    const asm = new TransferAssembler();
+    let fed = 0;
+    for (const p of pages) {
+      const r = await asm.feed({ levels: p.levels, header: p.header, channelMissing: [] });
+      if (r.ok) fed++;
+      else fire(`feed:${r.reason || '?'}`);
+    }
+    if (asm.result) {
+      const same = asm.result.length === payload.length && asm.result.every((v, i) => v === payload[i]);
+      if (same) {
+        recovered++;
+        fire('accepted-original');
+      } else {
+        falseAccept++;
+        fire('FALSE-ACCEPT');
+      }
+    } else {
+      refused++;
+      fire(`refused:${asm.error ? asm.error.split(/[\s(]/)[0] : 'incomplete'}${fed ? '' : '-nofeed'}`);
+    }
+  }
+  let ok = falseAccept === 0;
+  console.log(`  ${ok ? 'PASS' : 'FAIL'} ${trials} tamper trials: ${recovered} recovered exactly, ${refused} refused, ${falseAccept} FALSE ACCEPTS`);
+  const top = Object.entries(guard).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  console.log(`      which guard fired: ${top.map(([k2, v]) => `${k2}=${v}`).join('  ')}`);
+  // the header-CRC guard must actually be exercised, or the trial mix is weak
+  const crcFired = Object.keys(guard).some((k2) => /header-crc|bad-magic/.test(k2));
+  ok &&= crcFired;
+  console.log(`  ${crcFired ? 'PASS' : 'FAIL'} trial mix exercises the frame CRC/magic guards (mutation check on the suite itself)`);
+
+  // ---- the digest is load-bearing: structurally perfect foreign page -------
+  // The transfer must be *short* one data page before the forgery arrives, or the
+  // assembly completes from the honest pages alone and the forged page never
+  // reaches the decision -- which is exactly how this case first passed for the
+  // wrong reason.
+  {
+    // Incompressible bytes, or DEFLATE shrinks the payload to a page or two and
+    // the transfer is no longer multi-page -- which silently defeats the whole
+    // point of this case (that is exactly what the first version of it did).
+    const rndBytes = (n, seed) => {
+      const a = new Uint8Array(n);
+      let y = seed >>> 0 || 7;
+      for (let i = 0; i < n; i++) {
+        y ^= y << 13; y >>>= 0; y ^= y >>> 17; y ^= y << 5; y >>>= 0;
+        a[i] = y & 255;
+      }
+      return a;
+    };
+    let tall = rndBytes(geom.ecc.netBytesPerPage * 3, 5150);
+    let b2 = await encodeTransfer(tall, { profile: pid, ...opts });
+    // netBytesPerPage is a deliberately conservative figure (it under-promises
+    // what a page really carries, so the printed page count never surprises
+    // upwards), which means the payload may have to be grown to get a real
+    // multi-page transfer.
+    for (let g = 4; b2.dataPages < 3 && g <= 40; g += 4) {
+      tall = rndBytes(geom.ecc.netBytesPerPage * g, 5150 + g);
+      b2 = await encodeTransfer(tall, { profile: pid, ...opts });
+    }
+    if (b2.dataPages < 3) {
+      ok = false;
+      console.log(`  FAIL digest case needs >= 3 data pages, got ${b2.dataPages}`);
+    } else {
+      const other = await encodeTransfer(rndBytes(tall.length, 9001), { profile: pid, ...opts });
+      const stolenHeader = mod.frame.decodeHeader(other.pages[b2.dataPages - 1].header);
+      const hostHeader = mod.frame.decodeHeader(b2.pages[0].header);
+      stolenHeader.header.sessionId = hostHeader.header.sessionId; // claim the live session
+      stolenHeader.header.pageIndex = b2.dataPages - 1; // the one page we are short of
+      const stolen = mod.frame.encodeHeader(stolenHeader.header); // and a fresh, valid CRC
+      const asm = new TransferAssembler();
+      for (let i = 0; i < b2.dataPages - 1; i++) {
+        await asm.feed({ levels: b2.pages[i].levels, header: b2.pages[i].header, channelMissing: [] });
+      }
+      const shortOf = asm.result === null;
+      const r = await asm.feed({ levels: other.pages[b2.dataPages - 1].levels, header: stolen, channelMissing: [] });
+      const rejected = asm.result === null;
+      ok &&= shortOf && rejected;
+      console.log(
+        `  ${shortOf && rejected ? 'PASS' : 'FAIL'} forgery only matters when short (${shortOf ? 'yes' : 'no'}), and a foreign page with the live session id + valid CRC is refused (${rejected ? 'yes' : 'NO -- BYTES WERE PRODUCED'}) [feed: ${r.ok ? 'accept' : r.reason}]`,
+      );
+      if (!rejected) falseAccept++;
+    }
+  }
+  console.log(`G5 false acceptance: ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
 async function gateG7(args) {
   const mod = await load();
   const ideal = await import('../core/decode/ideal.js');
@@ -421,8 +775,8 @@ async function gateG7(args) {
 
 async function cmdVerify(args) {
   const gate = String(args.gate || 'all');
-  const wanted = gate === 'all' ? ['G0', 'G1', 'G7'] : [gate.toUpperCase()];
-  const runners = { G0: gateG0, G1: gateG1, G7: gateG7 };
+  const wanted = gate === 'all' ? ['G0', 'G1', 'G3', 'G5', 'G7'] : [gate.toUpperCase()];
+  const runners = { G0: gateG0, G1: gateG1, G3: gateG3, G5: gateG5, G7: gateG7 };
   let allOk = true;
   for (const g of wanted) {
     const r = runners[g];

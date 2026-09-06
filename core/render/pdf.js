@@ -1,29 +1,35 @@
 /**
- * PSKT core -- single-page PDF 1.4 writer for a rendered page bitmap.
+ * PSKT core -- PDF 1.4 writer for one or more rendered page bitmaps.
  *
  * Pure function, synchronous, byte-deterministic, zero dependency, no `node:`
  * builtins: the exact same module runs in Node and in a browser under `file://`.
  * See docs/RENDER-CONTRACT.md for the pixel buffer the input follows.
  *
- *   encodePDFPage({ width, height, pixels, dpi, substrate?, pageMm? }) -> Uint8Array
+ *   encodePDFDocument([{width,height,pixels,dpi,substrate?,pageMm?}, ...]) -> Uint8Array
+ *   encodePDFPage(raster) -> Uint8Array            // one-page shorthand
  *
  * Why a PDF at all: the plate/paper geometry is fixed by the renderer, so the one
  * thing this file has to guarantee is that a print driver puts the bitmap on the
  * sheet at *true physical size* -- no "fit to page" surprises, no resampling
  * decision left to the viewer. Hence one XObject Image painted onto a MediaBox
- * whose size is derived from the pixel size and the dpi.
+ * whose size is derived from the pixel size and the dpi. And why *multiple*
+ * pages: a 41-page paper pack is only printable as one file, because a human
+ * cannot keep 41 separate documents in order.
  *
  * What it writes, in order:
  *
  *   1  Catalog          -> /Pages 2 0 R
- *   2  Pages            -> one kid
- *   3  Page             -> /MediaBox [0 0 w_pt h_pt], /Resources /XObject /Im0,
- *                          /Contents 5 0 R
- *   4  Image XObject    -> /DeviceRGB, /BitsPerComponent 8, /FlateDecode with
+ *   2  Pages            -> Kids [3 0 R, 6 0 R, ...], /Count N
+ *   per page i (0-based):
+ *     3+3i   Page       -> /MediaBox [0 0 w_pt h_pt], /Resources /XObject /Im0
+ *     4+3i   Image      -> /DeviceRGB, /BitsPerComponent 8, /FlateDecode with
  *                          /DecodeParms /Predictor 15 /Colors 3 /Columns width*3
- *   5  Content stream   -> substrate background fill + `cm` scaling /Im0 to the
+ *     5+3i   Contents   -> substrate background fill + `cm` scaling /Im0 onto the
  *                          whole MediaBox
  *   xref table (classic, one 20-byte entry per object) + trailer + startxref
+ *
+ * That numbering is not incidental: for N=1 it reproduces the object layout this
+ * module has always emitted, so single-page fixtures stay byte-identical.
  *
  * The image data is *exactly* the PNG scanline stream: one filter-type byte 0
  * (None) in front of each RGB row, then `78 01` + core/deflate.js deflateRaw +
@@ -208,72 +214,71 @@ function zlibWrap(filtered) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Encode an RGBA raster as a one-page PDF whose MediaBox is the page's true
- * physical size, carrying the image as a FlateDecode/Predictor-15 XObject.
- * @param {{width:number,height:number,pixels:Uint8Array,dpi:number,
- *          substrate?:number[]|Uint8Array,pageMm?:number[]}} img
+ * Encode one or more RGBA rasters as a PDF whose pages each carry their own
+ * MediaBox at true physical size. Object numbering is chosen so that a
+ * one-page document produces exactly the layout `encodePDFPage` has always
+ * produced (Catalog 1, Pages 2, then Page 3 / Image 4 / Contents 5), which keeps
+ * existing byte-for-byte fixtures valid while allowing a 41-page print pack to
+ * ship as a single file -- the thing that actually gets sent to a printer.
+ *
+ * @param {Array<object>|object} images one raster, or a list of them in page order
  * @returns {Uint8Array} the complete file, ending in `%%EOF`
  */
-export function encodePDFPage(img) {
-  const { width, height, pixels, dpi } = checkRaster(img, 'encodePDFPage');
-  const substrate = checkSubstrate(img.substrate);
-  const pageMm = checkPageMm(img.pageMm);
+export function encodePDFDocument(images) {
+  const list = Array.isArray(images) ? images : [images];
+  if (!list.length) throw new RangeError('encodePDFDocument: no pages to write');
+  const pages = list.map((img) => {
+    const { width, height, pixels, dpi } = checkRaster(img, 'encodePDFDocument');
+    return { width, height, pixels, dpi, substrate: checkSubstrate(img.substrate), pageMm: checkPageMm(img.pageMm) };
+  });
 
-  // MediaBox: the sheet the renderer asked for, in points. Default is the pixel
-  // grid at the stated dpi; an explicit pageMm is a deliberate override (a
-  // printer that must lay the same bitmap on a fixed plate size).
-  const wPt = pageMm ? numPt(pageMm.w * PT_PER_MM) : numPt((width / dpi) * 72);
-  const hPt = pageMm ? numPt(pageMm.h * PT_PER_MM) : numPt((height / dpi) * 72);
-
-  // ---- object 4: the image ----
-  const imageData = zlibWrap(filteredScanlines(width, height, pixels));
-  const imageObj = cat([
-    ascii(
-      `4 0 obj\n` +
-        `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height}\n` +
-        // Interpolate false: a viewer that resamples the bitmap blurs the ink
-        // edges, and edge position is exactly what the decoder measures.
-        `   /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false\n` +
-        `   /Filter /FlateDecode\n` +
-        `   /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${width * 3} >>\n` +
-        `   /Length ${imageData.length} >>\nstream\n`,
-    ),
-    imageData,
-    ascii(`\nendstream\nendobj\n`),
-  ]);
-
-  // ---- object 5: the content stream ----
-  // The image is mapped from the unit square onto the whole MediaBox. No Y flip:
-  // PDF already puts the first sample row at the *top* of the image cell, which
-  // matches the RGBA buffer's "first row is the top row" convention.
-  // The substrate fill under it is invisible while /Im0 covers the box; it is
-  // there so a viewer that clips the image still shows material colour, not white.
-  const content = ascii(
-    `q\n` +
-      (substrate ? `${numUnit(substrate[0])} ${numUnit(substrate[1])} ${numUnit(substrate[2])} rg\n0 0 ${wPt} ${hPt} re f\n` : '') +
-      `${wPt} 0 0 ${hPt} 0 0 cm\n/Im0 Do\nQ\n`,
-  );
-  const contentObj = cat([
-    ascii(`5 0 obj\n<< /Length ${content.length} >>\nstream\n`),
-    content,
-    ascii(`\nendstream\nendobj\n`),
-  ]);
-
-  // ---- objects 1..3: the tree above them ----
-  // Header + the binary-marker comment line: a '%' followed by four bytes > 127
-  // tells a transport "do not treat this as text", which plain ASCII would not.
   const header = cat([ascii(`%PDF-1.4\n`), new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a])]);
   const objects = [
     ascii(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`),
-    ascii(`2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n`),
-    ascii(
-      `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${wPt} ${hPt}]\n` +
-        `   /Resources << /XObject << /Im0 4 0 R >> /ProcSet [/PDF /ImageC] >>\n` +
-        `   /Contents 5 0 R >>\nendobj\n`,
-    ),
-    imageObj,
-    contentObj,
+    null, // /Pages, filled in once the kid numbers are known
   ];
+
+  pages.forEach((p, i) => {
+    const { width, height, pixels, dpi, substrate, pageMm } = p;
+    const pageNo = 3 + i * 3;
+    const imageNo = pageNo + 1;
+    const contentNo = pageNo + 2;
+    const wPt = pageMm ? numPt(pageMm.w * PT_PER_MM) : numPt((width / dpi) * 72);
+    const hPt = pageMm ? numPt(pageMm.h * PT_PER_MM) : numPt((height / dpi) * 72);
+
+    const imageData = zlibWrap(filteredScanlines(width, height, pixels));
+    const pageObj = ascii(
+      `${pageNo} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${wPt} ${hPt}]\n` +
+        `   /Resources << /XObject << /Im0 ${imageNo} 0 R >> /ProcSet [/PDF /ImageC] >>\n` +
+        `   /Contents ${contentNo} 0 R >>\nendobj\n`,
+    );
+    const imageObj = cat([
+      ascii(
+        `${imageNo} 0 obj\n` +
+          `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height}\n` +
+          // Interpolate false: a viewer that resamples the bitmap blurs the ink
+          // edges, and edge position is exactly what the decoder measures.
+          `   /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false\n` +
+          `   /Filter /FlateDecode\n` +
+          `   /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${width * 3} >>\n` +
+          `   /Length ${imageData.length} >>\nstream\n`,
+      ),
+      imageData,
+      ascii(`\nendstream\nendobj\n`),
+    ]);
+    // The substrate fill is invisible while /Im0 covers the box; it is there so a
+    // viewer that clips the image still shows material colour, not white.
+    const content = ascii(
+      `q\n` +
+        (substrate ? `${numUnit(substrate[0])} ${numUnit(substrate[1])} ${numUnit(substrate[2])} rg\n0 0 ${wPt} ${hPt} re f\n` : '') +
+        `${wPt} 0 0 ${hPt} 0 0 cm\n/Im0 Do\nQ\n`,
+    );
+    const contentObj = cat([ascii(`${contentNo} 0 obj\n<< /Length ${content.length} >>\nstream\n`), content, ascii(`\nendstream\nendobj\n`)]);
+    objects.push(pageObj, imageObj, contentObj);
+    pages[i].kids = pageNo;
+  });
+
+  objects[1] = ascii(`2 0 obj\n<< /Type /Pages /Kids [${pages.map((p) => `${p.kids} 0 R`).join(' ')}] /Count ${pages.length} >>\nendobj\n`);
 
   const offsets = [];
   let at = header.length;
@@ -292,7 +297,7 @@ export function encodePDFPage(img) {
     // short entry silently shifts every object after it -- refuse rather than
     // write a table that points anywhere but at its object.
     if (off > 9999999999) {
-      throw new RangeError(`encodePDFPage: offset ${off} does not fit the 10-digit xref field`);
+      throw new RangeError(`encodePDFDocument: offset ${off} does not fit the 10-digit xref field`);
     }
     xref += `${String(off).padStart(10, '0')} 00000 n \n`;
   }
@@ -305,4 +310,14 @@ export function encodePDFPage(img) {
   return cat([body, ascii(xref + trailer)]);
 }
 
-export default encodePDFPage;
+/**
+ * Single-page convenience wrapper: the object layout of the result is identical
+ * to what this module produced before multi-page support existed.
+ * @param {{width:number,height:number,pixels:Uint8Array,dpi:number,
+ *          substrate?:number[]|Uint8Array,pageMm?:number[]}} img
+ */
+export function encodePDFPage(img) {
+  return encodePDFDocument([img]);
+}
+
+export default encodePDFDocument;
