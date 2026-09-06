@@ -1,0 +1,19 @@
+{
+  "name": "pskit",
+  "version": "0.1.0",
+  "description": "PSKT - air-gapped file transfer over printed pages and 3D-printed plates (self-describing code, no network, no URLs)",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "pskit": "cli/pskit.mjs"
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none \"tests/unit/**/*.test.mjs\"",
+    "verify": "node cli/pskit.mjs verify --gate all",
+    "roundtrip": "node cli/pskit.mjs roundtrip --selftest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}

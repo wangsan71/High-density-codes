@@ -1,0 +1,10 @@
+# generated artifacts
+artifacts/
+out/
+*.tmp
+__pycache__/
+*.pyc
+.npm-cache/
+node_modules/
+# local soak scratch
+bench/.scratch/
