@@ -475,6 +475,33 @@ test('transfer: wrong passphrase is detected, never silently wrong output', asyn
   assert.equal(locked.needPassphrase, true, 'receiver must ask for the passphrase, not fail silently');
 });
 
+test('transfer: a passphrase alone requests encryption (the flag must say so)', async () => {
+  // Regression: `cipher: true` used to be required as well, and forgetting it
+  // produced a *plaintext* transfer whose header carried no CIPHER bit -- a
+  // caller that believed it had encrypted a file had printed the file in the
+  // clear. The conformance fixture hit this by asking an independent decoder to
+  // read the printed header; that decoder correctly reported nothing to decrypt.
+  const secret = new TextEncoder().encode('passphrase-only must still be cipher ' .repeat(30));
+  const t = await encodeTransfer(secret, {
+    profile: 'PL-G',
+    nozzle: '0.4',
+    passphrase: 'sole flag',
+    iterations: 2000,
+  });
+  assert.ok(t.flags & FLAGS.CIPHER, 'CIPHER flag missing: the payload was printed in plaintext');
+
+  // The printed cells must not contain the plaintext.
+  const printable = new TransferAssembler(); // no passphrase on purpose
+  await feedAll(printable, t.pages);
+  assert.equal(printable.result, null, 'a receiver without the key must not be handed the payload');
+  assert.equal(printable.needPassphrase, true);
+
+  const open = new TransferAssembler({ passphrase: 'sole flag', iterations: 2000 });
+  await feedAll(open, t.pages);
+  assert.ok(open.result, `decrypt failed: ${open.error}`);
+  assert.ok(eq(open.result, secret));
+});
+
 test('transfer: nothing is reported complete unless bytes match', async () => {
   // mini G5: mutate whole cells on every page; either RS fixes it, or we refuse.
   const payload = rndBytes(3000, 88);

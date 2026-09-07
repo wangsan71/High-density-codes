@@ -61,6 +61,8 @@
 11. **每个失败原因都必须有对用户的说法**：`core/decode/advice.js` 把 reason 映射到"物理成因 + 重拍指令"（G4 判据）。映射表会被遗忘，所以 `tests/unit/advice.test.mjs` 直接扫 `core/decode/*.js` 源码里的 `reason:` 字面量——新增一个没映射的原因就红（已用注入 `zz-not-mapped` 证实它真的会红）。没映射的原因仍要给出通用指令，并且**自称未映射**，不许借用别人的成因。
 12. **交叉校验的独立性靠"看不到"来保证**：`tests/conformance.json`（78 条向量，196 KB，发射器带 400 KB 预算闸）是答案卷；`ref/decode.py` 的编写纪律是**禁止阅读 `core/*.js`**，只准依据 JSON 里的 `meta`（GF(2⁸) 参数、CRC 参数、位序、交织规则、56 字节头表、KDF、容器格式）独立实现。规则写进 `meta` 而不是靠读码，是这套对拍有意义的前提；信息不足时必须报 `SPEC GAP` 而不是猜。同时 `tests/unit/conformance.test.mjs` 在 JS 侧**逐类复算**每条向量（含"重新发射必须逐字节相同"），所以这道对拍不会静默腐烂，也不依赖 Python 是否在跑。
 
+13. **给了口令就是要求加密**：`encodeTransfer(x, {passphrase})` 不必再补 `cipher:true`；`passphrase` 本身就是加密请求，页头必须置 `CIPHER`。旧语义要求两个旗标同时出现，漏一个就**静默印明文**——CLI 恰好两个都传所以躲过了，是我的 conformance 发射器（只传口令）踩中的，而独立解码器报"页上没有任何东西告诉我要解密"才把它照出来。反向纪律：接收方看到 `CIPHER` 却没拿到口令时，只能 `needPassphrase` 问用户，绝不吐字节。
+
 ## 容量实测表（`node cli/pskit.mjs status` 复算，勿手改）
 
 | 档 | 喷嘴 | 节距 mm | 网格 | 净字节/页 | 码率 |
@@ -93,7 +95,8 @@
 - `pskit receive` 只吃 PNG；TIFF 读回会点名跳过（不静默丢文件）。PDF 输出已接（`--format pdf|all`，超出 380 MB 组装预算时明确拒绝并让用户改打 PNG）。
 - 合成照片里"字节穿越照片"那组测试要 68s（3 档 × 多页 × 全分辨率矫正）。M9 soak 前需要降采样或减少页数，否则门限跑不动。
 - `densityReport` 对单通道档的 `monoSafe` 标 `n/a`（语义正确但易被读成"没保护"）。
-- 交叉校验目前是**发射侧自证**：`tests/unit/conformance.test.mjs` 会逐条复算并保证重新发射逐字节相同，但 `ref/decode.py` 独立实现仍在写。它跑绿之前，G2/G4 的"另一个实现也同意"这一半还没闭合。
+- 交叉校验**已经跑起来了，但现在是红的**：`python ref/decode.py` → `FAIL (58 mismatch(es))`。其中 4 个是它咬到我这边、本轮已修的真缺陷（见变更日志 M4 下半）；剩下的 54 个集中在 `ref/decode.py` 自己手搓的原语上——它自写的 SHA-256 连空串的摘要都不对、CRC-32 反射参数错、RS 纠错分支（Chien/Forney）在 `nsym=10` 修 2 错就失败、PBKDF2 多块输出（dkLen>32）不对。**这些必须在下一轮修掉**：修之前 G2/G4 的"另一个实现也同意"这一半没有闭合，不能拿它当门限证据。它同时也暴露了参考实现的分工问题——交给子代理写会中途爆上下文（M5 代理两次零产出），参考侧改为自己分段修。
+- M5（STL/3MF）**两次委托都失败**：子代理各烧完一个上下文窗口后 `core/mesh/` 里一个字节都没有。下一轮拆成"先写文件再解释"的小块自己做，或按单文件分别委托。
 
 ## 变更日志
 
@@ -102,3 +105,4 @@
 - **M3**：解码链路完成到"合成照片可往返"。新增 `core/decode/{transform,fiducial,warp}.js`（4 点 DLT 单应 + 残差自校验 + 双线性格心采样；连通域角标检测 + 页面定位 + 结构过滤；矫正到规范画布后直接复用 `readPageIdeal`/`readEcho`）、`core/render/pdf.js`（DeviceRGB + FlateDecode Predictor 15，字节确定性，`%%EOF` 结尾）、`tests/unit/{transform,warp}.test.mjs`。测试 136→156，全绿；门限 `all --seeds 3` 全通过。**本轮最大的东西不是代码而是决策 6**：形状字母按 EW 量化，板材容量掉 5×（1098→220 B/页），纸面不变；同时把检测器的四条硬规则钉死（决策 9），每条都对应一个已复现的假成功路径。
 - **M4（上半）**：解码收口成一条路 + 两个门限 + 交叉校验答案卷。新增 `core/decode/page.js`（`decodePage`：角标→单应→回显头→读格唯一入口；干净画布才走快路，快路读不出来必须退回几何路）、`core/decode/advice.js`（20 个 reason → 物理成因 + 重拍指令）、`tools/emit-conformance.mjs` + `tests/conformance.json`（78 向量/196 KB/400 KB 预算闸）+ `tests/unit/conformance.test.mjs`（11 例**活复算**：CRC/SHA/deflate/ChaCha20/PBKDF2/RS/交织/头/页解包/页解码/版面几何，外加"重新发射逐字节相同"）、`tests/unit/{advice,render-glyphs}.test.mjs`。CLI `receive` 现在能吃照片：逐图分类失败而不是第一张坏图就整体中止、统计重复页、**原子写**（`out.part`→rename；摘要不符删文件并 exit 1）。门限：`G3` 协议层（丢 0..parity 全复原、丢 parity+1 干净拒绝且不写文件、每页喂两次仅计重复、异会话页拒绝）、`G5` 正式 **10000 次篡改 0 误接受**（800 次由明文摘要拦下）+ 两项变异检验。`core/render/pdf.js` 支持 N 页 `pack.pdf`（单页输出保持逐字节不变），`send --format` 改列表并有拼写护栏。
   本轮修掉三个"自己骗自己"：**①** G5 的摘要承重测试第一版是假通过——PL-M1@0.4 一页就装下全部数据，伪造页根本没参与判定；改成先短一页再塞伪造页后，`feed: accept` 但结果为空，摘要才被证明是最后一道闸。**②** 交织：`unpackLevels` 要的是**去交织后**的 levels，直接喂印刷顺序会得到"看着合法的垃圾页"，page-decode 三条向量因此全 fail。**③** `rsEncode(data,nsym)` 返回完整码字而非校验字节，我自己把 data 拼了两遍——`tools/inspect-conformance.mjs` 复算时才撞出来。另外 `neededCellEw` 原来是解析式估算（10 EW，实际 8 就够，会让人白印粗一档），改为复用渲染器同一条量化搜索、且搜索域用半 EW 步长（真实 cellEw 几乎都是分数：10.4 能排 4 级字母，10 和 11 都不能）；`cellEw` 对纸面从 `Infinity` 改成 `null`（`Infinity` 一进 JSON 就静默变 `null`，这就是它泄漏进答案卷的方式）。测试 156→179，全绿；`--gate all --seeds 3` 全通过，容量表数字未变。
+- **M4（下半·交叉校验首跑）**：PLAN §9 的对拍真的接通了——`ref/decode.py`（1.5k 行，只依据答案卷 `meta` 独立实现，不读 `core/*.js`）现在跑完 78 条向量并打印 `301 checks / 58 FAIL / 7 SPEC GAP`。**它立刻咬出我这边四个真缺陷（均已修）**：**①** `encodeTransfer(x,{passphrase})` 少传 `cipher:true` 会**静默印明文**——答案卷里那条"加密"向量其实是明文，独立解码器的报法是"页面上没有任何东西告诉我要解密"（决策 13 + 回归测试；反向性质也钉住：看到 `CIPHER` 而无口令只能 `needPassphrase`，绝不吐字节）；**②** 我给 `meta.compression.container` 写的格式是**错的**（"u32be 原始长度"）——真实 `PSZ1` 是 10 字节头、offset 6 **小端** u32、offset 5 保留字节；我的 `core/deflate.js` 文档一直是对的，错的是答案卷，独立实现照答案卷读必然对不上；**③** 逐向量 `note` 让读者去 inflate 一个 method 0（stored）容器；**④** 我把 `headerCrc` 区间改成半开后，`decode.py` 仍按闭端切片 → 多哈希一字节且字段读错位（"改一端不改另一端"的区间约定是本轮我自己造的 bug）。`Report.check` 也顺手改成能识别"把真判据当 detail 传"的调用点（那种写法会永远记 pass）。答案卷重发射为 201 KB / 78 向量；测试 179→180。剩下 54 个 FAIL 是参考侧自己手搓原语的 bug，见"已知风险"。

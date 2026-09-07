@@ -78,9 +78,9 @@ const meta = {
   },
   hash: { sha256: 'FIPS 180-4; see also the vectors in tests/unit/hash.test.mjs' },
   compression: {
-    container: 'PSZ1: 4-byte magic, u8 method (0 stored, 1 deflate), u32be original length, then the payload',
-    rawDeflate: 'fixed Huffman, no preset dictionary, wrapped by the container; the stream field below is the container body only for method 1',
-    note: 'Python must INFLATE these streams with zlib(-15); it is not required to produce identical compressed bytes -- the compressor is one-way in this document.',
+    container: 'PSZ1 header is exactly 10 bytes (HEADER_SIZE): offset 0 magic 50 53 5a 31 ("PSZ1"), offset 4 u8 method (0 = stored, 1 = raw RFC 1951 DEFLATE), offset 5 u8 reserved written as 0 (readers must ignore it), offset 6 u32 LITTLE-endian originalLength (length of the UNCOMPRESSED bytes), offset 10 payload. Little-endian here; the page frame header is big-endian.',
+    rawDeflate: 'fixed Huffman (BTYPE=01, BFINAL=1), no preset dictionary, no zlib/gzip wrapper, no checksum inside the payload; bits are packed LSB-first per RFC 1951 sec 1.4 and the last byte is zero-padded to the boundary.',
+    note: 'method 0 stores the payload verbatim -- do NOT inflate it. method 1 is a raw DEFLATE stream: inflate with zlib(-15). Decompressing is one-way: a Python compressor is not required to produce byte-identical DEFLATE output, only to inflate the emitted stream back to `input`.',
   },
   encryption: {
     cipher: 'ChaCha20 (RFC 8439), 32-byte key, 12-byte nonce, initial counter 1',
@@ -110,8 +110,13 @@ const meta = {
     [28, 2, 'data pages (u16be)'],
     [30, 2, 'block pad (u16be)'],
     [32, 22, 'truncated SHA-256 of the recovered payload'],
-    [54, 2, 'CRC-16/CCITT-FALSE over bytes 0..53'],
+    [54, 2, 'CRC-16/CCITT-FALSE over the first 54 bytes'],
   ],
+  // Half-open ranges, stated as data rather than as prose. The prose above once
+  // said "over bytes 0..53", which the independent decoder read as a half-open
+  // span and required 0..54 -- both readings are defensible, so the sentence was
+  // the bug. Any consumer should read THIS field and not parse the description.
+  headerCrc: { field: [54, 56], covers: [0, 54], algo: 'crc16', ranges: 'half-open: [start, end)' },
   flags: frame.FLAGS,
   profileCodes: frame.PROFILE_CODES,
   howToVerify: 'ref/decode.py reads this file, re-implements the readout, and exits non-zero on the first mismatch.',
@@ -157,7 +162,9 @@ for (const { id, data, why } of DEFLATE_INPUTS) {
     container: hex(container),
     method: container[4],
     rawLength: data.length,
-    note: 'inflate the container body with zlib(-15) and compare against `input`',
+    note: container[4] === 1
+      ? 'method 1: inflate the container body (offset 10 onward) with zlib(-15) and compare against `input`'
+      : 'method 0 (stored): the container body IS `input`, byte for byte -- inflating it is an error, not a test',
   });
   if (data.length) {
     const raw = deflate.deflateRaw(data);

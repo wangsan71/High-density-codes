@@ -288,8 +288,15 @@ export async function encodeTransfer(raw, opts = {}) {
   }
 
   let key = null;
-  if (opts.cipher) {
-    if (!opts.passphrase) throw new Error('cipher requested without passphrase');
+  // A passphrase *is* the request to encrypt. Making callers pass a second
+  // `cipher: true` as well bought nothing and left a footgun: with only a
+  // passphrase, encodeTransfer silently produced a plaintext transfer whose
+  // header carried no CIPHER flag. The CLI happened to pass both, so the bug was
+  // caught by the conformance fixture, whose encrypted vector turned out to be
+  // unencrypted -- and by an independent decoder reading the printed header and
+  // observing that nothing on the page told it to decrypt.
+  if (opts.cipher || opts.passphrase) {
+    if (!opts.passphrase && !opts.key) throw new Error('cipher requested without passphrase');
     const salt = opts.salt || randomBytes(16);
     key = opts.key || (await deriveKey(opts.passphrase, salt, opts.iterations || 150000));
     const nonce = opts.nonce || randomBytes(NONCE_LEN);
