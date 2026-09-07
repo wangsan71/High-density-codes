@@ -70,16 +70,18 @@ function explain(f) {
   const cropped = { ...bin, mask: cropMask(bin, region) };
   const comps = keepCandidateSquares(components(cropped), region);
   const big = comps.slice().sort((a, b) => b.area - a.area).slice(0, 4);
-  const holeFraction = (c, r) => {
-    // Component field names are read tolerantly: this probe walks the exported steps and
-    // must not depend on a shape I have not verified (guessing them is the failure mode
-    // that has cost a round here more than once).
-    const x0 = c.x0 ?? c.x ?? 0;
-    const x1 = c.x1 ?? x0 + (c.w ?? 0) - 1;
-    const y0 = c.y0 ?? c.y ?? 0;
-    const y1 = c.y1 ?? y0 + (c.h ?? 0) - 1;
-    const cx = Math.floor((x0 + x1) / 2);
-    const cy = Math.floor((y0 + y1) / 2);
+  // Two centres, because hasHole (fiducial.js:160) samples at comp.cx/cy while the hole is
+  // concentric with the marker's bbox: an ink centroid is dragged toward wherever the ring
+  // survived binarisation best. If those two centres disagree by a probe radius, the hollow
+  // test is reading ring ink and reporting a solid marker -- which is what the ladder above
+  // suggested. Printed side by side so the diagnosis is a reading, not an inference.
+  const holeFraction = (c, r, mode) => {
+    const bx0 = c.x0 ?? c.x ?? 0;
+    const bx1 = c.x1 ?? bx0 + (c.w ?? 0) - 1;
+    const by0 = c.y0 ?? c.y ?? 0;
+    const by1 = c.y1 ?? by0 + (c.h ?? 0) - 1;
+    const cx = mode === 'centroid' ? Math.round(c.cx) : Math.floor((bx0 + bx1) / 2);
+    const cy = mode === 'centroid' ? Math.round(c.cy) : Math.floor((by0 + by1) / 2);
     let ink = 0;
     let tot = 0;
     for (let dy = -r; dy <= r; dy++) {
@@ -102,8 +104,10 @@ function explain(f) {
   for (const c of big) {
     const side = Math.min(c.w, c.h);
     const probeNow = Math.max(1, Math.round(side * 0.12));
+    const atCentroid = holeFraction(c, probeNow, 'centroid');
+    const atBBox = holeFraction(c, probeNow, 'bbox');
     console.log(
-      `   blob ${c.w}x${c.h} area=${c.area} [${Object.keys(c).slice(0, 6).join('|')}] 探针(现)=${probeNow} · 中心着墨率 r1=${holeFraction(c, 1).toFixed(2)} r2=${holeFraction(c, 2).toFixed(2)} r3=${holeFraction(c, 3).toFixed(2)} (空心判据 <0.35)`,
+      `   blob ${c.w}x${c.h} area=${c.area} fill=${c.fill?.toFixed?.(2) ?? '-'} 探针=${probeNow} · 现行约定(round(cx))着墨率=${atCentroid.toFixed(2)} (${atCentroid < 0.35 ? '空心' : '实心'}) · floor(bbox中心)=${atBBox.toFixed(2)} (${atBBox < 0.35 ? '空心' : '实心'})`,
     );
   }
 }

@@ -159,8 +159,20 @@ export function components(bin) {
 /** True when the centre of the bbox is background while the ring around it is ink. */
 function hasHole(comp, bin) {
   const { mask, width } = bin;
-  const cx = Math.round(comp.cx);
-  const cy = Math.round(comp.cy);
+  // Sample at floor((x0+x1)/2) rather than the comp.cx/cy that components() reports. Those
+  // are also bounding-box centres (cx = (x0+x1+1)/2, line ~150), but rounded up for odd
+  // widths -- so on a 15 px marker the two conventions differ by exactly one pixel. That
+  // single pixel decides this test: measured on a clean shrinking page
+  // (tools/probe-marker-scale.mjs --explain), at a 15 px marker with probe radius 2 the
+  // rounded convention reads 0.36 ink against a 0.35 cut-off -- "solid", no hollow corner,
+  // page refused -- while the floored centre reads 0.00 at that scale and at every other
+  // scale down to 75dpi-equivalent. The non-monotonicity of the old behaviour was this
+  // boundary flipping depending on marker parity, not resolution. (An earlier draft of this
+  // comment blamed centroid bias; comp.cx is not a centroid, so that story was wrong and is
+  // replaced by the two readings above.) Solid markers still read 1.00 here at every scale,
+  // so the criterion is not being loosened -- the sample point was simply off by one.
+  const cx = Math.floor((comp.x0 + comp.x1) / 2);
+  const cy = Math.floor((comp.y0 + comp.y1) / 2);
   // the hole is one data cell across, i.e. ~1/3 of the marker side, so the probe
   // must stay well inside that: 0.12 of the short edge, never the ring itself
   const probe = Math.max(1, Math.round(Math.min(comp.w, comp.h) * 0.12));
