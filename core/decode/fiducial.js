@@ -272,14 +272,57 @@ export function findMarkers(bitmap, opts = {}) {
   const base = binarize(bitmap, opts);
   if (base.inkCount < 32) return { ok: false, reason: 'blank-image', threshold: base.threshold };
   const factors = opts.thresholds || [1, 1.35, 1.7, 2.1];
+  const peak = base.inkness.max;
+  // A stricter cut-off is only worth trying while some pixel can survive it. On a
+  // real scan the inkness maximum is ~248 while Otsu sits near 140, so the factor
+  // 2.1 attempt asked for a threshold of 296: zero ink, `blank-image`, and because
+  // this loop used to return its LAST result, that starvation message overwrote
+  // whatever the useful attempts had found -- telling a user "nothing was printed"
+  // about a page that was merely hard to segment. Track the furthest attempt
+  // instead, and let starvation disqualify an attempt rather than report it.
+  const floor = Math.max(32, base.inkCount * 1e-4);
   let last = null;
+  let best = null;
+  let bestScore = -1;
+  let starved = 0;
   for (const f of factors) {
+    if (base.threshold * f >= peak) {
+      starved++;
+      continue;
+    }
     const bin = f === 1 ? base : rethreshold(base, f);
+    if (bin.inkCount < floor) {
+      starved++;
+      continue;
+    }
     const r = detectIn(bin, opts);
     if (r.ok) return { ...r, thresholdFactor: f };
     last = { ...r, thresholdFactor: f };
+    const score = progressScore(r);
+    if (score > bestScore) {
+      bestScore = score;
+      best = last;
+    }
   }
-  return last;
+  if (best) return best;
+  return last || { ok: false, reason: 'blank-image', threshold: base.threshold, note: `every threshold factor starved the page (peak ${peak.toFixed(1)}, otsu ${base.threshold.toFixed(1)}, ${starved} skipped)` };
+}
+
+/** How far an attempt got, so the report can name the most advanced failure. */
+function progressScore(r) {
+  const rank = {
+    'blank-image': 0,
+    'no-square-candidates': 1,
+    'no-marker-size-cluster': 2,
+    'too-few-candidates': 2,
+    'quad-too-small-for-page-region': 3,
+    'no-hollow-corner': 4,
+    'no-rectangular-quad': 5,
+    'mirrored-image': 6,
+    'homography-degenerate': 7,
+    'quad-covers-little-of-the-photo': 8,
+  };
+  return (rank[r.reason] ?? 0) * 1000 + (r.candidates ?? 0);
 }
 
 function rethreshold(base, factor) {
@@ -303,28 +346,52 @@ function detectIn(bin, opts) {
   if (squares.length < 4) {
     return { ok: false, reason: 'no-square-candidates', candidates: squares.length, threshold: bin.threshold };
   }
-  // the four markers share one physical size; among size clusters that have at
-  // least four members, the *largest* cluster wins -- the corner markers are by
-  // construction the biggest isolated squares on the page, whereas the echo
-  // strip produces many small ones and would otherwise outvote them
+  // The four markers share one physical size, so a size cluster with at least four
+  // members is a candidate for "the markers". It used to be enough to find the
+  // *largest* such cluster and stop there, on the reasoning that the corner markers
+  // are by construction the biggest isolated squares on the page. That premise is
+  // false exactly when it matters: at a permissive threshold the anti-alias tail
+  // bridges the data lattice into 300 px meshes (a pristine 300 dpi page binarises
+  // to 41% ink when its true coverage is ~25%), those meshes pass the page-scale
+  // filter, they sort ahead of the 30 px markers -- and the winner is a lattice
+  // cluster in which no corner is hollow, so every real page was rejected as
+  // `no-hollow-corner`. Try the clusters largest-first instead and let the
+  // three-solid-one-hollow pattern decide, which is the only claim that actually
+  // identifies the markers. Bounded because the search is per anchor.
   squares.sort((a, b) => b.w - a.w);
   const sizeTol = opts.sizeTol ?? 0.3;
-  let group = null;
-  for (let i = 0; i < squares.length && !group; i++) {
+  const maxClusters = opts.maxClusters ?? 16;
+  const clusters = [];
+  for (let i = 0; i < squares.length && clusters.length < maxClusters; i++) {
     const anchor = squares[i].w;
-    // skip duplicates of an anchor already tested (cheap: only the first of each cluster)
+    // only the first member of each cluster starts a new anchor
     if (i > 0 && Math.abs(anchor - squares[i - 1].w) <= squares[i - 1].w * sizeTol) continue;
     const members = squares.filter((c) => Math.abs(c.w - anchor) <= anchor * sizeTol);
-    if (members.length >= 4) group = members;
+    if (members.length >= 4) clusters.push({ anchor, members });
   }
-  if (!group) {
+  if (!clusters.length) {
     return { ok: false, reason: 'no-marker-size-cluster', candidates: squares.length, threshold: bin.threshold, sizes: squares.slice(0, 8).map((c) => c.w) };
   }
-  const quad = buildQuad(group, page, region);
-  if (!quad.ok) {
-    return { ...quad, candidates: squares.length, threshold: bin.threshold, sizes: group.map((c) => c.w).slice(0, 8) };
+  let bestQuad = null;
+  let bestScore = -1;
+  const tried = [];
+  for (const cl of clusters) {
+    const quad = buildQuad(cl.members, page, region);
+    if (quad.ok) return { ...quad, candidates: squares.length, threshold: bin.threshold, clusterPx: cl.anchor };
+    tried.push({ clusterPx: cl.anchor, reason: quad.reason, hollowCount: quad.hollowCount ?? null });
+    const score = progressScore(quad);
+    if (score > bestScore) {
+      bestScore = score;
+      bestQuad = quad;
+    }
   }
-  return { ...quad, candidates: squares.length, threshold: bin.threshold };
+  return {
+    ...bestQuad,
+    candidates: squares.length,
+    threshold: bin.threshold,
+    sizes: clusters.map((c) => c.anchor).slice(0, 8),
+    clustersTried: tried,
+  };
 }
 
 /**
