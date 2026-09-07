@@ -29,6 +29,12 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 40 轮新增（OPEN）
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| D42 | **我把"node 里不能 spawn 子进程"错误推广成"语料不能自己造"⇒ 数轮把 G2 按 32/200 记账，并把"200 seeds 需用户带外手跑"写进 `docs/STATUS.md` 与 `docs/ACCEPTANCE.md`** ✗ 实际：**pwsh 工具跑 python 一直是通的**（`AGENTS.md`"环境事实"里的 Python 3.10.9 / numpy / cv2 本来就是这么探测出来的 ✓）⇒ 被禁的只是 **node 进程内的管道 stdio**，不是宿主 shell ⇒ 一个作用域记错，让门限的样本量长期停在判据的 1/6，还让"下一步"里排着一件**根本不需要用户**的事 | 实测（第 40 轮）：`python sim/channel.py --in .tmp/g2src --out .tmp/nc-scan300-17 --seed 17 --preset scan300 --modifier nocrop` ⇒ **15 s / 26.5 MB / 3 页**，`verify --gate G2 --corpus .tmp/nc-scan300-17` ⇒ exit 0、`204800 bytes, digest verified` **字节相同** ✓ 批量 seeds 18–29 ⇒ **12 份 / 174 s** ✓ `nc-scan*` 由 32 → **45** ✓ 再判 `--root .tmp --match 'nc-scan300-*'` ⇒ **exit 0、29/29 byte-exact、134.6 s**（4.6 s/份）⇒ 200 seeds 的代价可算：scan300 侧 ≈ **50 min / 5.3 GB**，600 dpi 侧像素约 4× ⇒ 合计数小时 / ~25 GB（D 盘 2 TB ✓）· 另测得操作事实：判**全 45 份**超工具 **600 s** 上限被杀（`exit 1` = 终止 ✓ 600 dpi 那 16 份占大头）⇒ **按 dpi 分开判**，且 `timeoutMs` 传更大值**无效**（执行器封顶）✗ | **OPEN ✗** 剩余动作：① `docs/ACCEPTANCE.md` 的 G2 段仍写着"需带外手跑"⇒ 改成上面这条已验证命令（本轮上下文耗尽 ✗ 不硬凑）② 把 scan300 补到 **200 seeds**（分批、每批 ≤600 s）、scan600 侧从 `.tmp/sw-scan600-src` 同法补齐，并诊断已知的两类失败（`nc-scan600-3` short 0/1、`nc-scan600-10` no-page-header ⇒ ACCEPTANCE #4）③ 顺带清 D41 行里那句已被取代的旧口径 ④ 把"沙箱禁的是 node 的管道 stdio、不是宿主 shell"写进 `AGENTS.md` 陷阱表（现有那行只写了"门限进程内跑"，正是它被我读窄的 ✗） |
+
 ### 第 38 轮新增（D41 ⇒ **第 39 轮已闭** ✓）
 
 | # | 缺陷 | 复验 | 状态 |

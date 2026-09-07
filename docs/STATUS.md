@@ -119,6 +119,16 @@
 
 ## 已知风险 / 待办
 
+### 第 40 轮（**推翻我自己的一条"不可能"**：G2 的 200 seeds 一直可以在会话内跑 ✗ 记 D42）
+
+- **发现**：过去数轮把"node 里不能 spawn"推广成"语料只能带外由用户手跑"⇒ G2 长期按 **32/200** 记账 ✗ 实测 **pwsh 工具跑 python 一直是通的**（`AGENTS.md` 的"环境事实"里 Python/cv2 本来就是这么探出来的 ✓）⇒ `python sim/channel.py --in .tmp/g2src --out .tmp/nc-scan300-17 --seed 17 --preset scan300 --modifier nocrop` ⇒ **生成 15 s / 26.5 MB**、门限判 **4.5 s**、`204800 bytes, digest verified` **字节相同 PASS** ✓（第 33 份真证据）⇒ 随后批量造 seeds 18–29（**12 份 / 174 s**）⇒ `nc-scan*` 目录 **32 → 45** ✓
+- **代价由此可算（不再是估计）**：scan300 侧 200 seeds ≈ **50 min / 5.3 GB**；600 dpi 侧像素约 4× ⇒ 两侧合计**数小时 / ~25 GB**（D 盘 2 TB ✓）⇒ **G2 的样本量缺口是时间问题、不是能力问题** ✓
+- **新测得的操作事实**：判**全 45 份**会**超工具 600 s 上限被杀**（`exit 1` = 终止、不是失败 ✓）——600 dpi 那半占大头（16 份 × ~30 s）⇒ **按 dpi 分开判**：`--match 'nc-scan300-*'` ⇒ **29/29 byte-exact / 134.6 s**（4.6 s/份）✓ 且 `timeoutMs` 传 1740000 **无效，执行器封顶 600 s** ✗
+- **记 D42（OPEN）**：根因是把沙箱限制的作用域记错（禁的是 **node 的管道 stdio** ✓ 不是宿主 shell）⇒ D29 同族第 4 次（未核实的断言 ✗）；剩余动作写在 D42 行里（改 ACCEPTANCE 的 G2 段、两侧补到 200 seeds、清 D41 那句旧口径）
+- 证据：`verify --gate G2 --root .tmp --match 'nc-scan300-*'` ⇒ **exit 0、29/29**（判据是 100% ✓ PLAN 要 200 固定 seed、本次 29 ⇒ **仍如实标"未达样本量"，不改判据** ✓）· 600 dpi 那 16 份本轮**未判**（含已知 `nc-scan600-3` short、`nc-scan600-10` no-page-header 两类失败 ⇒ ACCEPTANCE #4 仍 OPEN ✗）· 本轮**无代码改动**（只多了 `.tmp` 语料与文档）⇒ 提交前照例跑一次单测 ✓
+- 下一轮（预算 39/40 ⇒ 若还有轮次）：scan300 补到 200 seeds（~50 min，**分批 ≤600 s/次**）→ scan600 从 `sw-scan600-src` 同法补齐并诊断那两类失败 → 改 ACCEPTANCE 的 G2 段 → 清 D41 旧口径 → G4 手机实机 500×8（**仍未跑过** ✗）
+
+
 ### 第 39 轮（D41 闭合 ✓ 闭合它的方式是**先把 D40 那个错原样重演一遍**）
 
 - **交付**：`tests/unit/threeMF-xsd-parity.test.mjs`（5 条）+ `tools/check-3mf.mjs` 导出 `XSD_TABLE`（一处导出、不动声明）⇒ **表 ⇄ 权威 XSD 自动对拍**：用校验器**自己的 `scanXml`** 读 `ref/3mf-core-1.4.0.xsd`，抽出 16 个全局元素名、每个 `CT_*` 的属性名集合与 `use="required"` 集合、`xs:element ref=` 的**文档序**（= schema 的 sequence/choice 顺序）、`ST_ObjectType`(5)/`ST_Unit`(6) 枚举，与 `ELEMENTS`/`REQUIRED`/`OBJECT_TYPE`/`UNIT_ENUM` **双向逐项比对**（元素表恰好相等 ✓ 属性集恰好相等 ✓ required 集相等 ✓ 子元素顺序相等、且"schema 没有子元素的，表里也不许声明" ✓ `xml:lang` 单独按 `xs:attribute ref=` 核对 ✓）
