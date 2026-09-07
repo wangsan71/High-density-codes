@@ -397,10 +397,39 @@ writeDist('capture.js', read('web/capture.js').replace(/(['"])\.\.\/core\//g, '$
   const it = await encodeTransfer(seed, { profile: 'P-M1-300' });
   const ilayout = pageLayout(it.geom, 300, { sheetMm: it.geom.sheetMm });
   const ibmp = renderPageBitmap({ geom: it.geom, levels: it.pages[0].levels, layout: ilayout, palette: 'PAPER1', echoBits: echoBitsOf(it.pages[0].header) });
-  const ipng = Buffer.from(encodePNG(ibmp));
+  // Icons must be square (docs/DEFECTS.md D13): the page is A4-shaped, so shipping the page
+  // bitmap directly gave a 2260x3290 icon and a phone launcher cropped it into a slice.
+  // Mounting it centred on a square canvas keeps every pixel of the real page -- cropping
+  // would have cut off the fiducials, and the reason the icon is drawn by this project's own
+  // renderer is that the build then cannot claim an image the encoder cannot produce. The
+  // margin is paper white, which is already what the page's own corners are.
+  const ch = (ibmp.pixels.length / (ibmp.width * ibmp.height)) | 0;
+  const iconSide = Math.max(ibmp.width, ibmp.height);
+  // encodePNG demands a Uint8Array ("pixels must be a Uint8Array (RGBA, 4 bytes per pixel)")
+  // and a dpi -- it writes a pHYs physical-size chunk -- so a hand-built bitmap needs both.
+  // A Uint8ClampedArray is rejected; these are the two shapes this repository only learned by
+  // being told at runtime.
+  const icon = { width: iconSide, height: iconSide, dpi: ibmp.dpi, pixels: new Uint8Array(iconSide * iconSide * ch) };
+  for (let i = 0; i < icon.pixels.length; i += ch) {
+    icon.pixels[i] = 255;
+    icon.pixels[i + 1] = 255;
+    icon.pixels[i + 2] = 255;
+    icon.pixels[i + 3] = 255;
+  }
+  const offX = Math.floor((iconSide - ibmp.width) / 2);
+  const offY = Math.floor((iconSide - ibmp.height) / 2);
+  for (let y = 0; y < ibmp.height; y++) {
+    const srcRow = y * ibmp.width * ch;
+    icon.pixels.set(ibmp.pixels.subarray(srcRow, srcRow + ibmp.width * ch), (y + offY) * iconSide * ch + offX * ch);
+  }
+  const ipng = Buffer.from(encodePNG(icon));
+  // Fail here rather than ship a manifest describing an image the file is not.
+  const pngW = ipng.readUInt32BE(16);
+  const pngH = ipng.readUInt32BE(20);
+  if (pngW !== pngH) throw new Error(`icon-page.png is not square: ${pngW}x${pngH}`);
   writeFileSync(join(OUT, 'icon-page.png'), ipng);
   distFiles.push({ url: './icon-page.png', bytes: ipng.length, sha256: sha256(ipng) });
-  const iconSizes = ibmp.width && ibmp.height ? `${ibmp.width}x${ibmp.height}` : 'any';
+  const iconSizes = `${pngW}x${pngH}`;
   const webmanifest = {
     name: 'PSKT 打印—扫描传输',
     short_name: 'PSKT',

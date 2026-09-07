@@ -188,6 +188,23 @@ check('every markup reference in a built page resolves to a built file', () => {
   return `${onDisk.size} built paths, all page references resolve`;
 });
 
+check('the PWA manifest declares a square icon', () => {
+  // Keep-side pairing for D13: build-web.mjs already refuses to write a non-square icon (it
+  // reads IHDR out of the bytes it just encoded and takes the declared size from that same
+  // reading, so the manifest cannot describe a different image than the file). This check
+  // covers the other direction -- that nobody later replaces the icon with an A4-shaped one
+  // and updates the manifest to match, which would both install crooked and stay green here.
+  const m = JSON.parse(text(join(DIST, 'manifest.webmanifest')));
+  const sizes = (m.icons || []).map((i) => String(i.sizes || ''));
+  if (!sizes.length) throw new Error('manifest declares no icons');
+  const bad = sizes.filter((s) => {
+    const mm = /^(\d+)x(\d+)$/.exec(s);
+    return !mm || mm[1] !== mm[2];
+  });
+  if (bad.length) throw new Error(`non-square icon sizes: ${bad.join(', ')}`);
+  return sizes.join(', ');
+});
+
 check('the served index.html keeps its link to the sender', () => {
   // Pairing for build-web's single-file strip rule, which deletes <p class="nav"> from the
   // inlined page. Without this, that same class-name regex could delete the link from the
