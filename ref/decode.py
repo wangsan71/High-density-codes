@@ -405,7 +405,16 @@ def rs_decode(gf: GF, cw: bytes, nsym: int, erasures=(), fcr: int = 0):
 
     le = [1]
     for j in epos:
-        le = polymul_asc(gf, le, [1, gf.exp[(n - 1 - j) % 255]])
+        # The erasure locator has to cancel the erased symbols inside the modified
+        # syndromes M_k = sum_i le_i * S_{k+i}.  With this file's syndrome convention
+        # (S_k = sum_m Y_m X_m^k, X_m = alpha^(n-1-m)), that cancellation only happens
+        # for le = prod(1 - X_j^-1 z), because then le(X_m) really is zero at an erased
+        # position m.  Using X_j instead leaves M non-zero -- verified directly: with
+        # 3 erasures and nsym=10 the X_j form gives M = [42 e7 0d 3b ...] while the
+        # X_j^-1 form gives all zeros.  A non-zero M then fails the nu=0 residual test,
+        # which is why every pure-erasure case reported "no codeword" and why dropping
+        # a page (an erasure, not an error) could not be repaired.
+        le = polymul_asc(gf, le, [1, gf.exp[(255 - ((n - 1 - j) % 255)) % 255]])
     mlen = nsym - E
     M = []
     for k in range(mlen):
@@ -565,6 +574,7 @@ def unpack_channels(cells, bits_per_cell: int, channels, stream_lens) -> bytes:
     bits_c most-significant-free positions of the cell, primary first) carries the
     c-th stream of `stream_lens` bytes, MSB-first.  Streams start at cell 0."""
     slices = []
+    consumed = 0
     for c, ln in zip(channels, stream_lens):
         b = c["bits"]
         want = ln * 8
@@ -575,7 +585,13 @@ def unpack_channels(cells, bits_per_cell: int, channels, stream_lens) -> bytes:
         nb = 0
         out = bytearray(ln)
         o = 0
-        shift = bits_per_cell - b
+        # Each channel sits below the ones already consumed: the primary occupies the
+        # most-significant b bits, the next channel the b bits below that, and so on.
+        # Computing `shift` as bits_per_cell - b for *every* channel makes the last
+        # one re-read the primary bits, which is how this decoder ended up with a
+        # correct content half and a wrong parity half.
+        shift = bits_per_cell - b - consumed
+        consumed += b
         for v in cells:
             acc = (acc << b) | ((v >> shift) & ((1 << b) - 1))
             nb += b
@@ -649,36 +665,38 @@ PSZ_MAGIC = b"PSZ1"
 def container_split(blob: bytes, report: "Report", vecid: str, expected_method=None, expected_rawlen=None):
     """Split a PSZ1 container into (method, rawLength, body).
 
-    meta.compression.container says: 4-byte magic, u8 method, u32be original length,
-    then the payload -- i.e. a 9-byte header.  The containers in the fixture have a
-    10-byte header: the u32 original length is little-endian at offset 6 and offset 5
-    is an undocumented 0x00.  That is a documented-vs-emitted contradiction, recorded
-    as a SPEC GAP; we read the layout that the emitted bytes actually use.
+    meta.compression.container states the layout outright: 10-byte header -- magic
+    "PSZ1", u8 method at 4, u8 reserved 0 at 5, **u32 little-endian** originalLength
+    at 6 -- then the body.  An earlier revision of that meta line said "u32be", and
+    this function carried a branch that guessed a 9-byte header whenever the
+    big-endian reading happened to match; with no expected length to match against
+    that condition was *always* true, so the body started one byte early and zlib
+    reported "invalid stored block lengths" on a stream that inflates fine.  There is
+    now one layout and one reading of it, and anything that disagrees is a refusal.
     """
+    HEADER = 10
     if blob[:4] != PSZ_MAGIC:
         raise Reject(f"bad container magic {blob[:4]!r}")
+    if len(blob) < HEADER:
+        raise Reject(f"container is {len(blob)} bytes, shorter than the {HEADER}-byte header")
     method = blob[4]
-    doc_len_be = int.from_bytes(blob[5:9], "big")
-    obs_len_le = int.from_bytes(blob[6:10], "little")
-    if doc_len_be == (expected_rawlen if expected_rawlen is not None else doc_len_be) and len(blob) >= 9:
-        header = 9
-        rawlen = doc_len_be
-    else:
-        report.gap(
-            vecid,
-            "meta.compression.container documents '4-byte magic, u8 method, u32be original length, then the "
-            "payload' (9-byte header), but every container in this fixture has a 10-byte header whose length "
-            "field is u32 **little**-endian at offset 6, with an undocumented always-zero byte at offset 5",
-        )
-        header = 10
-        rawlen = obs_len_le
+    if blob[5] != 0:
+        raise Reject(f"reserved byte at offset 5 is {blob[5]}, must be 0 (readers may not invent meanings for it)")
+    rawlen = int.from_bytes(blob[6:10], "little")
+    body = blob[HEADER:]
     if expected_rawlen is not None and rawlen != expected_rawlen:
         raise Reject(f"container length field says {rawlen}, vector says rawLength {expected_rawlen}")
     if expected_method is not None and method != expected_method:
         raise Reject(f"container method {method}, vector says {expected_method}")
-    if header + rawlen > len(blob) and method == 0 and rawlen != len(blob) - header:
-        raise Reject(f"container body shorter than its declared length")
-    return method, rawlen, blob[header:]
+    if method not in (0, 1):
+        raise Reject(f"container method {method} is neither stored (0) nor deflate (1)")
+    if method == 0 and len(body) != rawlen:
+        raise Reject(f"stored container declares {rawlen} raw bytes but carries {len(body)}")
+    # rawLength is the *uncompressed* length, so for method 1 a body shorter than it
+    # is the normal, desired case -- checking `len(body) < rawlen` generally rejects
+    # every real compression (it did: "body is 1673 bytes, shorter than its declared
+    # 4096"), and the inflate below is what actually proves the body is well formed.
+    return method, rawlen, body
 
 
 def container_decode(blob: bytes, report: "Report", vecid: str) -> bytes:

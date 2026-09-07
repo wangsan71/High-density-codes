@@ -92,6 +92,12 @@ const meta = {
     rule: 'a cell holds bitsPerCell bits: the primary channel occupies the most significant bits, the secondary channel the least. bits of a byte stream are taken most-significant-bit first, cell by cell, and cells that run past the end of the source are zero-padded.',
     interleave: 'after packing, cell i is moved to position (i*step) mod n; step = defaultStep(n) = the smallest prime >= n/2 that is coprime with n (falling back to the smallest coprime, then 1). The FLAGS.INTERLEAVED bit says whether a page was permuted.',
     erasure: 'a channel declared dead arrives as `missing`, and its cells are erased as whole bytes of the affected stream -- not per bit.',
+    // Written because an independent implementation read the prose above and got
+    // the *second* channel wrong (it re-read the primary bits), producing a page
+    // whose content half matched and parity half did not. Prose that a careful
+    // reader can misread is not a specification; the M8 browser receiver will be
+    // written from this same text, so it gets numbers too.
+    example: 'PL-D2 @ 0.4 mm: bitsPerCell=2, channels in order [colour(1 bit, top), shape(1 bit, bottom)], ECC mode unequal, D=P=220 bytes, 1764 cells. With content[0]=0xB4 (bits 1,0,1,1,0,1,0,0 MSB-first) and parity[0]=0x1D (bits 0,0,0,1,1,1,0,1), the first eight cell levels are 2,0,2,3,1,3,0,1 -- i.e. level = (contentBit << 1) | parityBit. Channel k therefore sits at shift = bitsPerCell - (sum of bits of channels 0..k) ... the primary takes the top bits and each following channel the bits immediately below, so the LAST channel of an unequal page has shift 0, not bitsPerCell - itsWidth.',
   },
   headerLayout: [
     [0, 4, 'magic "PSK1" (u32be 0x50534b31)'],
@@ -103,7 +109,7 @@ const meta = {
     [16, 2, 'page index (u16be)'],
     [18, 1, 'total pages (data + parity)'],
     [19, 1, 'kind: 0 data, 1 parity'],
-    [20, 4, 'payload length (u32be)'],
+    [20, 4, 'payload length (u32be) -- the post-transform payload (after compression and/or encryption) INCLUDING the intra-page block padding that filled out the last page: meaningful bytes = this minus blockPad, and the assembled wire region is dataPages*dataBytesPerPage. It is NOT the plaintext file size; the plaintext is identified only by the digest field.'],
     [24, 1, 'intra-page k'],
     [25, 1, 'intra-page nsym'],
     [26, 2, 'data bytes per page (u16be)'],
