@@ -29,6 +29,20 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 29 轮（D26 收窄到"角簇/尝试的选择环节" ✓ 并撤回我自己的第二个猜想）
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D27 | `tools/probe-marker-scale.mjs --explain` 需要读 `cropMask`/`components` 的真实形状才能写 ✓ 我第一次把 `cropMask` 的返回当 bin 传（它返回**裸 `Uint8Array`** ✓ 还副作用写 `region.cropInset` ✓）⇒ `TypeError: Cannot read properties of undefined (reading 'length')` ✓ **第 13 次"引用未证实的名字"** ✓ 由执行当场抓获 | `node tools/probe-marker-scale.mjs --explain --scales 0.5` | 探针侧 ✓ 未影响产物 ✓ 模式仍未断根（见 D23 ✓） |
+
+**D26 的诊断进展（不改行为 ✓）**：`findMarkers` 自带 `clustersTried`（`fiducial.js:390/406` ✓ 每个角簇假设一条记录 ✓）⇒ 150dpi 失败时它**只试了一个簇**：`cluster 15px -> no-hollow-corner hollow=0` ✓ 而在**同一尺度、同一份裁剪后掩模**上手工走它自己的判据：15×15 且 `area=200 < 225` 的那个 blob（即带孔的那个 ✓）**中心 5×5 窗口着墨率 = 0.00** ✓ 远低于空心判据 0.35 ✓ ⇒ **空心角标明明在候选集里** ✓ 结论：丢失发生在**角簇/尝试的选择环节**（`fiducial.js` L360–400 一带 ✓ 聚簇只产出一个假设、且它取自孔被填掉的那次阈值尝试）✓ **不是二值化本身 ✓ 也不是格点几何 ✓**
+
+**撤回我的第二个猜想** ✗ 本轮我先假设"探针半径 `round(min(w,h)*0.12)` 随尺寸跳档 ⇒ 5×5 把环墨也量进去 ⇒ 空心被判成实心" ✓ 上面那张 r1/r2/r3 表把它否证了：150dpi 处 `probe=2`（5×5 ✓）而 5×5 的着墨率是 **0.00** ✓ 孔完好 ✓ 该解释不成立 ✓ 记下来防止我以后又拿它当结论 ✓（同一轮里它还顺带否证了"角标像素预算地板"✓ 见 D24 更正 ✓）
+
+**修法暂不下注**：要动的是 `findMarkers` 的角簇枚举/阈值尝试取舍（L360–400 ✓）✓ 那是角标朝向判定的所在地 ⇒ **改完必须重跑 `tests/unit`（含"90 度旋转页仍能解出 ✓ 朝向来自空心角标"这条）+ 全套门限** ✓ 未做 ✓ 下一轮首位 ✓
+
+
+
 ### 第 28 轮（一次"测量否决了自己的修复" ✓ 并抓出更锋利的 D26）
 
 | # | 缺陷 | 复现 | 性质 |

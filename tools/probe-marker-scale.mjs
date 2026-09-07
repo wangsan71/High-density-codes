@@ -29,7 +29,7 @@ const scales = String(opt('--scales', '1,0.7,0.5,0.4,0.35,0.3,0.25')).split(',')
 const { encodeTransfer } = await imp('core/protocol.js');
 const { pageLayout } = await imp('core/render/layout.js');
 const { renderPageBitmap, echoBitsOf } = await imp('core/render/raster.js');
-const { findMarkers } = await imp('core/decode/fiducial.js');
+const { findMarkers, binarize, components, pageRegion, cropMask, keepCandidateSquares } = await imp('core/decode/fiducial.js');
 const { sampleBilinear } = await imp('core/decode/transform.js');
 
 const raw = new Uint8Array(512).map((_, i) => (i * 7 + 3) & 0xff);
@@ -50,6 +50,67 @@ function shrink(f) {
     }
   }
   return { width: w, height: h, dpi: Math.round(dpi * f), pixels: out };
+}
+
+// Where the detector's hollow test actually stands at each scale. The shipped test uses a
+// probe window whose radius is round(0.12 * side) -- an integer that jumps a level as the
+// marker shrinks -- so the hole can be sampled with a 5x5 window at one scale and a 3x3 at
+// the next, which is the candidate explanation for the non-monotonicity above. This prints
+// the ink fraction of the marker's centre region for every probe radius so the claim is a
+// reading, not an inference: a small window inside the hole, a window that also catches the
+// ring, and the threshold the shipped predicate compares against (0.35).
+let keysLogged = false;
+function explain(f) {
+  const bmp = f === 1 ? src : shrink(f);
+  const bin = binarize(bmp, {});
+  const region = pageRegion(bin);
+  // cropMask returns a bare Uint8Array (and sets region.cropInset as a side effect), while
+  // components wants the bin-shaped object -- the first draft passed the mask straight
+  // through and died reading .length on undefined, in the probe rather than in the client.
+  const cropped = { ...bin, mask: cropMask(bin, region) };
+  const comps = keepCandidateSquares(components(cropped), region);
+  const big = comps.slice().sort((a, b) => b.area - a.area).slice(0, 4);
+  const holeFraction = (c, r) => {
+    // Component field names are read tolerantly: this probe walks the exported steps and
+    // must not depend on a shape I have not verified (guessing them is the failure mode
+    // that has cost a round here more than once).
+    const x0 = c.x0 ?? c.x ?? 0;
+    const x1 = c.x1 ?? x0 + (c.w ?? 0) - 1;
+    const y0 = c.y0 ?? c.y ?? 0;
+    const y1 = c.y1 ?? y0 + (c.h ?? 0) - 1;
+    const cx = Math.floor((x0 + x1) / 2);
+    const cy = Math.floor((y0 + y1) / 2);
+    let ink = 0;
+    let tot = 0;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 0 || y < 0 || x >= cropped.width || y >= cropped.height) continue;
+        tot++;
+        if (cropped.mask[y * cropped.width + x]) ink++;
+      }
+    }
+    return tot ? ink / tot : 1;
+  };
+  const fm = findMarkers(bmp, {});
+  console.log(`\n scale ${f.toFixed(2)}: ${comps.length} 个方形候选 · findMarkers ${fm.ok ? 'FOUND' : 'FAIL ' + fm.reason}`);
+  // findMarkers already reports what it tried (fiducial.js clustersTried): one entry per
+  // corner-cluster hypothesis, with the reason each attempt gave. That is the difference
+  // between "the geometry is wrong" and "the detector never looked at the right set".
+  for (const tr of fm.clustersTried || []) console.log(`   cluster ${tr.clusterPx}px -> ${tr.reason} hollow=${tr.hollowCount}`);
+  for (const c of big) {
+    const side = Math.min(c.w, c.h);
+    const probeNow = Math.max(1, Math.round(side * 0.12));
+    console.log(
+      `   blob ${c.w}x${c.h} area=${c.area} [${Object.keys(c).slice(0, 6).join('|')}] 探针(现)=${probeNow} · 中心着墨率 r1=${holeFraction(c, 1).toFixed(2)} r2=${holeFraction(c, 2).toFixed(2)} r3=${holeFraction(c, 3).toFixed(2)} (空心判据 <0.35)`,
+    );
+  }
+}
+
+if (args.includes('--explain')) {
+  for (const f of scales) explain(f);
+  process.exit(0);
 }
 
 let prev = null;
