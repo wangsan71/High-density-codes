@@ -65,12 +65,19 @@ if (process.argv.includes('--markers')) {
         if (bin.mask[(cy + dy) * width + cx + dx]) inside++;
       }
     }
-    let bboxInk = 0;
-    for (let y = Math.max(0, c.y); y < Math.min(bin.height, c.y + c.h); y++) {
-      for (let x = Math.max(0, c.x); x < Math.min(width, c.x + c.w); x++) if (bin.mask[y * width + x]) bboxInk++;
-    }
-    console.log(`  w=${String(c.w).padStart(4)}x h=${String(c.h).padStart(4)} fill=${(bboxInk / (c.w * c.h)).toFixed(2)} centerProbe=${probe}px centerInk=${(inside / total).toFixed(3)} -> ${inside / total < 0.35 ? 'HOLLOW' : 'solid'}`);
+    // c.fill is the component's own area/bbox ratio, already computed by
+    // components(): a solid square is 1.00, a ring of one-cell wall is 8/9.
+    console.log(`  ${c.w}x${c.h} @${c.x0},${c.y0} fill=${c.fill.toFixed(2)} aspect=${c.aspect.toFixed(2)} probe=${probe}px centerInk=${(inside / total).toFixed(3)} -> ${inside / total < 0.35 ? 'HOLLOW' : 'solid'}`);
   }
+  const anchors = [];
+  const sorted = sq.slice().sort((a, b) => b.w - a.w);
+  for (let i = 0; i < sorted.length && anchors.length < 6; i++) {
+    const w = sorted[i].w;
+    if (i > 0 && Math.abs(w - sorted[i - 1].w) <= sorted[i - 1].w * 0.3) continue;
+    const m = sq.filter((c) => Math.abs(c.w - w) <= w * 0.3);
+    if (m.length >= 4) anchors.push(`${w}:${m.length}`);
+  }
+  console.log(`clusters   >=4 members, largest first: ${anchors.join(' ')}`);
   const fm = F.findMarkers(bmp);
   console.log(`findMarkers ${JSON.stringify({ ok: fm.ok, reason: fm.reason, candidates: fm.candidates, markerPx: fm.markerPx, thresholdFactor: fm.thresholdFactor })}`);
 }

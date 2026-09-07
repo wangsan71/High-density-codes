@@ -152,6 +152,10 @@ const ADVICE = {
     cause: 'correction produced a candidate codeword whose syndromes do not all vanish, so it was refused rather than accepted -- the receiver will not emit data it cannot prove',
     do: 'nothing to fix in the file: the refusal is correct. Supply the parity pages or re-photo the offending page',
   },
+  'no-candidate': {
+    cause: 'not one threshold across the header strip produced a header with the right magic and a valid CRC, so the strip is destroyed rather than merely mis-exposed (or the page is being read with the wrong geometry)',
+    do: 're-photo this page so the narrow strip above the lattice is fully inside the frame and in focus; if it persists, confirm the profile and nozzle the page was printed with',
+  },
 };
 
 /**
