@@ -134,6 +134,33 @@ check('SW precache manifest hashes match the artifacts on disk', () => {
   return `${man.entries.length} entries verified against bytes on disk, build ${man.buildId}`;
 });
 
+check('every inline script in a single-file page parses as JavaScript', () => {
+  // A single-file artifact lives or dies on one thing: the code inlined into it must still
+  // be valid JavaScript the browser can parse when the user double-clicks the file. Cutting
+  // the bundle in at build time, or a replacement that matched the wrong span, produces a
+  // page that looks complete on disk and never runs -- and nothing else here would notice,
+  // because the other assertions read markup, not the script body. Whether a browser also
+  // enforces this page's CSP under file:// cannot be checked here (docs/DEFECTS.md D18);
+  // that it parses can be, so it is verified rather than assumed.
+  const names = ['pskt-file.html', 'pskt-send-file.html'];
+  let blocks = 0;
+  for (const n of names) {
+    const s = text(join(DIST, n));
+    const inline = [...s.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
+    if (!inline.length) throw new Error(`${n}: no inline script found -- the bundle was not inlined`);
+    for (const body of inline) {
+      // new Function parses without executing: nothing here can reach the network or disk.
+      try {
+        new Function(body);
+      } catch (e) {
+        throw new Error(`${n}: inline script does not parse (${e.message})`);
+      }
+      blocks++;
+    }
+  }
+  return `${blocks} inline script blocks parsed`;
+});
+
 check('pskt-file.html references nothing but data:', () => {
   const s = text(join(DIST, 'pskt-file.html'));
   const refs = [...s.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]).filter((v) => !v.startsWith('data:'));

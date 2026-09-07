@@ -181,7 +181,7 @@ function closure(entry) {
   return order;
 }
 
-function bundle(entry) {
+function bundle(entry, autoRunGuardId) {
   const mods = closure(entry);
   const chunks = [];
   for (const { id, src } of mods) {
@@ -205,15 +205,19 @@ function bundle(entry) {
     '  var IDS = ' + JSON.stringify(ids) + ';',
     chunks.join('\n\n'),
     '  globalThis.__PSKT__ = { R: __R, modules: IDS };',
-    '  if (typeof document !== "undefined" && typeof document.getElementById === "function" && document.getElementById("files")) {',
-    '    __R("web/app.js");',
+    // The entry runs itself only when its own page is present. It used to be hardcoded to
+    // the receiver's id ("files"), which would have made a sender bundle boot the receiver
+    // -- or nothing -- depending on the page it landed in.
+    `  if (typeof document !== "undefined" && typeof document.getElementById === "function" && document.getElementById(${JSON.stringify(autoRunGuardId)})) {`,
+    `    __R(${JSON.stringify(entry)});`,
     '  }',
     '})();',
     '',
   ].join('\n');
 }
 
-const appBundle = bundle('web/app.js');
+const appBundle = bundle('web/app.js', 'files');
+const senderBundle = bundle('web/sender.js', 'sfile');
 // selftest.js is kept as a normal module for the Pages site (?selftest=1 imports it) and
 // is NOT bundled: it uses dynamic import() on purpose so a browser can load the
 // conformance asset lazily, and the bundler refuses those. That refusal is the point --
@@ -297,25 +301,65 @@ let single = html
   // file can carry, and opened from file:// it would point at a page the user did not get.
   // The link stays in the served index.html, where ./send.html really exists.
   .replace(/\s*<p class="nav">[\s\S]*?<\/p>/, '')
+  // A single file inlines its own <script>, so its CSP has to permit inline script --
+  // under `script-src 'self'` a browser refuses it. Whether a <meta> policy is enforced for
+  // file:// documents is exactly the kind of thing no browser exists here to check (D18),
+  // so rather than depend on that answer the page states a policy that works either way.
+  // A CSP hash was the tighter option and is rejected on purpose: it breaks silently the
+  // moment anything re-saves the file with different bytes, and a downloaded tool that
+  // refuses to boot is worse than one that allows its own inline code.
+  .replace("script-src 'self';", "script-src 'self' 'unsafe-inline';")
   .replace(/<meta name="description"[^>]*>/, '<meta name="description" content="Single-file PSKT receiver. Works from file:// with no network access.">');
 // What makes the single-file page "self-contained" is its MARKUP: no src=, no href=, no
 // url() pointing anywhere else. A check that scanned the whole text would trip over the
 // bundled JS (which legitimately contains strings like './hash.js' inside module bodies)
 // -- that is what happened first, and "fixing" it by deleting the strings would have been
 // the wrong kind of green.
-const externalRefs = [...single.matchAll(/(?:src|href)\s*=\s*(["'])\s*(?!#)([^"']+)\1/gi)]
-  .map((m) => m[2].trim())
-  .filter((v) => !v.startsWith('data:'));
-if (externalRefs.length) throw new Error(`single-file build is not self-contained: ${externalRefs.join(', ')}`);
-// Scope the CSS check to the style block. An unanchored `url(` test matched
-// `URL.createObjectURL(...)` in the inlined bundle -- the third time this round that one
-// of my guards fired on ordinary text because it was not anchored to where the thing it
-// forbids can actually appear.
-const styleBlocks = single.match(/<style>[\s\S]*?<\/style>/gi) || [];
-for (const s of styleBlocks) {
-  if (/@import|url\(\s*['"]?(?!data:)/i.test(s)) throw new Error('inline CSS references an external url/@import');
+// What makes a single-file page "self-contained" is its MARKUP: no src=, no href=, no
+// url() pointing anywhere else. A check that scanned the whole text would trip over the
+// bundled JS (which legitimately contains strings like './hash.js' inside module bodies)
+// -- that is what happened first, and "fixing" it by deleting the strings would have been
+// the wrong kind of green. It is a function now because there are two single-file pages,
+// and a second artifact must not get a weaker copy of the rule.
+function assertSingleFile(s, name) {
+  const refs = [...s.matchAll(/(?:src|href)\s*=\s*(["'])\s*(?!#)([^"']+)\1/gi)]
+    .map((m) => m[2].trim())
+    .filter((v) => !v.startsWith('data:'));
+  if (refs.length) throw new Error(`${name} is not self-contained: ${refs.join(', ')}`);
+  // Scope the CSS check to the style block. An unanchored `url(` test matched
+  // `URL.createObjectURL(...)` in the inlined bundle -- the third time this round that one
+  // of my guards fired on ordinary text because it was not anchored to where the thing it
+  // forbids can actually appear.
+  for (const block of s.match(/<style>[\s\S]*?<\/style>/gi) || []) {
+    if (/@import|url\(\s*['"]?(?!data:)/i.test(block)) throw new Error(`${name}: inline CSS references an external url/@import`);
+  }
+  if (!/globalThis\.__PSKT__/.test(s)) throw new Error(`${name}: the bundle was not inlined`);
+  // The page carries one inline <script>; if its own CSP does not allow inline script the
+  // artifact would be inert in a browser and every other assertion here would still pass.
+  if (!/script-src[^;]*'unsafe-inline'/.test(s)) throw new Error(`${name}: inline <script> is not permitted by its own CSP`);
+  return `${(Buffer.byteLength(s) / 1024).toFixed(1)} KiB`;
 }
+
 writeDist('pskt-file.html', single);
+console.log(`  single-file pskt-file.html ${assertSingleFile(single, 'pskt-file.html')}`);
+
+// The sender as a single file too (docs/DEFECTS.md D5): on a machine with no site and no
+// network, printing pages is the half that was missing -- the receiver alone cannot start a
+// transfer. Derived from web/send.html the same way, so there is one source for the markup.
+let singleSender = read('web/send.html')
+  .replace('<link rel="stylesheet" href="./app.css">', `<style>\n${css}\n</style>`)
+  .replace('<script type="module" src="./sender.js"></script>', `<script>\n${senderBundle}\n</script>`)
+  // Sibling navigation cannot live in one file: the tabs link points at index.html, which
+  // the user of a downloaded file does not have. (tools/check-dist.mjs asserts the reverse
+  // too -- that the SERVED send.html still has the link -- because a strip rule with no
+  // keep-side assertion can delete from both and stay green.)
+  .replace(/\s*<nav class="tabs">[\s\S]*?<\/nav>/, '')
+  .replace('<title>PSKT 发送端 · 把文件变成能打印的页</title>', '<title>PSKT 发送端（单文件版）</title>')
+  .replace("script-src 'self';", "script-src 'self' 'unsafe-inline';");
+const senderLink = /href="\.\/index\.html"/.test(singleSender) ? 'still links to index.html' : 'no sibling links';
+writeDist('pskt-send-file.html', singleSender);
+console.log(`  single-file pskt-send-file.html ${assertSingleFile(singleSender, 'pskt-send-file.html')} (${senderLink})`);
+if (senderLink !== 'no sibling links') throw new Error('pskt-send-file.html links to a page the user does not have');
 
 // Precache manifest for the service worker: computed from the bytes just written, so the
 // hashes cannot describe a different build than the one being served.

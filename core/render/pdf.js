@@ -320,4 +320,7 @@ export function encodePDFPage(img) {
   return encodePDFDocument([img]);
 }
 
-export default encodePDFDocument;
+// No default export: tools/build-web.mjs refuses default exports, so one here made this
+// module impossible to carry into the browser -- which is what blocked the single-file
+// sender (docs/DEFECTS.md D5) even though every caller already imports the name.
+// tests/unit/export-conventions.test.mjs now keeps it that way.

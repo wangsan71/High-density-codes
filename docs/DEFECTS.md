@@ -17,7 +17,7 @@
 | # | 缺陷 | 复现 | 性质 |
 |---|---|---|---|
 | ~~D4~~ | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
-| D5 | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
+| ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
 ### 第 24 轮新增
@@ -28,6 +28,21 @@
 | D18 | 连拍的**实机部分本机无法验证**：`getUserMedia` 授权、`facingMode/continuous` 对焦、`getImageData` 帧率、iOS Safari 的 canvas  tainted 行为 | 需真机 https 访问 | 与 D9 同类：浏览器内未验证，G9 维持 🟡 的核心理由 |
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
+
+### 第 32 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D5~~ | 发送端未进单文件变体 ⇒ `file://` 下只能"收"不能"发" ⇒ 气隙场景真正缺的那一半 | 新增产物 **`web/dist/pskt-send-file.html`（306.7 KiB ✓）** ✓ 与接收端单文件同一条流水线派生（内联 CSS ✓ 内联 bundle ✓ **剥掉 `<nav class="tabs">` 回链** ✓ 标题标注单文件版 ✓）✓ 复验：`node tools/build-web.mjs && node tools/check-dist.mjs --pages .tmp/g2src` ⇒ **11/11 PASS** ✓ 其中两条新判据直接压在这件事上（"内联脚本必须能解析 ✓ 2 blocks parsed" ✓ 与"单文件除 `data:` 外不引用任何东西" ✓）✓ 另注：**真正的拦路石不是页面而是三行死代码**（见 D35 ✓） | CLOSED |
+| ~~D35~~ | **三行 `export default` 死代码让 `core/render/pdf.js` 永远进不了浏览器 bundle** ⇒ 而发送端的 `pack.pdf` 是真功能（`send.html:12` ✓ 非可选）⇒ D5 一直被它挡住 ✗ 全仓库**没有任何一处** import 这三个 default（唯一的 default-import 是 tools/tests 里的 `node:` 内建 ✓ 逐一查过 ✓） | 删掉 `pdf.js/png.js/tiff.js` 三行 default ✓ 改为注释说明约定 ✓ **并加判据防复发**：新 `tests/unit/export-conventions.test.mjs`（3 条 ✓ 含"目录确实走到了"的防空跑守卫 ✓ 与"core/ 不得 import `node:` 内建"这条 AGENTS.md 早写着、此前**无判据** ✓ 的规则）✓ 负向证明：把 HEAD 版旧内容按真实编码读出来喂给同一正则 ⇒ **命中 true** ✓ 工作版 false ✓ 具名导出仍在 ✓ ⇒ 判据不是空跑 ✓ | CLOSED（两条"有约定无判据"的规则从此有判据 ✓） |
+
+### 第 32 轮新增（OPEN）
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D32 | **PowerShell 的 `>` 重定向把 `git show` 的输出写成 UTF-16LE**（首字节 255 = `0xFF` BOM ✓）⇒ 我用 UTF-8 读它 ⇒ `indexOf('export default')` 返回 -1 ⇒ **差点得出"我的判据是空跑的"这个错结论** ✗ 靠**阳性对照**（同一正则测已知含 default 的字符串 ⇒ true ✓）才分清"文件坏了"与"正则坏了" | `node -e "console.log(require('fs').readFileSync('.tmp/oldpdf.js')[0])"` ⇒ `255` | AGENTS.md 已记着同族坑（`Get-Content`+`Set-Content` 走 CP1252 ✓）✓ 这次是**重定向写 UTF-16LE** 的新变体 ⇒ 补进本机陷阱表：**跨工具取文本一律用 `node -e` 直读真文件 ✓ 不要用 `>` 落地后再读 ✓** |
+| D33 | 交付过一段时间的**单文件页带着 `script-src 'self'` 却内联了 `<script>`** ⇒ 按规范浏览器会拒绝执行自己页面的内联脚本（[GH issue](https://github.com/mshirel/song-history/issues/247) ✓ [SO](https://stackoverflow.com/questions/76347766/content-security-policy-csp-blocking-my-local-script) ✓）✓ 而 `file://` 下 `<meta>` CSP 是否强制执行**本机无浏览器无法验证**（D18 同族 ✓）⇒ 我不声称"它一直是坏的" ✗ 只说：**它把可用性押在一个我在这里验不了的问题上** | `Select-String web\dist\pskt-file.html -Pattern "Content-Security"`（第 31 轮产物：`script-src 'self';` ✓ 同文件里有内联 `<script>` ✓） | 已改为**不依赖那个答案**：两个单文件页的 CSP 都加 `'unsafe-inline'` ✓ 并加构建断言"内联脚本若不被本页 CSP 允许 ⇒ 拒绝出产物"✓ 未选 CSP hash：文件被任何一次重新保存（哪怕只改行尾）就会静默失效 ⇒ **一个下载后不启动的工具比允许自身代码的工具更糟** ✓ 真浏览器里仍需一次人工确认 ✓ 归 D18 |
+| D34 | `build-web.mjs` 的 `bundle(entry)` 把**自动运行守卫写死成接收端的 id `"files"`** ⇒ 我造第二个 bundle（发送端）时它会在错误的页面上启动错误的入口 ✓ 属于"一个产物能跑只是因为还没有第二个"的潜在缺陷 | `git show HEAD:tools/build-web.mjs` 里 `document.getElementById("files")` 与 `__R("web/app.js")` 均为字面量 | 已参数化 `bundle(entry, autoRunGuardId)` ✓ 接收端 `('web/app.js','files')` ✓ 发送端 `('web/sender.js','sfile')` ✓（`sfile` 这个 id 在 `send.html:16` ✓ 读过的 ✓ 不是猜的 ✓） |
 
 ### 第 31 轮闭掉的
 

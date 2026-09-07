@@ -22,6 +22,7 @@
 | `git` 刷一屏 CRLF warning | 缺 `.gitattributes` | 已有 `* text=auto eol=lf`；不要加 `core.autocrlf=true` |
 | npm 装不了东西 | 缓存目录不可写 | 本来就不允许依赖；实在要试用 `--cache ./.npm-cache` 并先问用户 |
 | `&&` 报错 | 这是 PowerShell | 命令分隔用 `;`；路径用 `C:\...` 反斜杠形式 |
+| `git show ... > f` 再读回，内容"查无此串" | PowerShell 重定向写的是 **UTF-16LE**（首字节 `255 254`）| **跨工具取文本一律 `node -e` 直读真文件**；要用 shell 落地就显式 `-Encoding utf8NoBOM` 并按同编码读回。判"某判据是不是空跑"之前**必做阳性对照**（拿已知命中的字符串测同一个正则）——第 32 轮就是这条差点让我把真判据误判成空跑 |
 
 ## 环境事实（探测过，别再探）
 

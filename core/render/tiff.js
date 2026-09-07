@@ -208,4 +208,5 @@ export function encodeTIFF(img) {
   return out;
 }
 
-export default encodeTIFF;
+// No default export: see core/render/pdf.js and tests/unit/export-conventions.test.mjs --
+// the web bundler refuses default exports and every caller imports the name.
