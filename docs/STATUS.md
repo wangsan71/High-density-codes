@@ -99,6 +99,13 @@
 
 ## 已知风险 / 待办
 
+- **第 17 轮（G8 的 schema 半边拿到权威文本 ✓ G2 的剩余病灶被分类器指到 `intra-fail`）**
+  - **拉取并 vendored 官方 3MF Core 1.4.0 XSD** ⇒ `ref/3mf-core-1.4.0.xsd`（10 196 B ✓ 带出处头 ✓）+ 新工具 `tools/fetch-3mf-schema.mjs`（可重取 ✓ 缺关键字则**拒绝写文件** ✓ 防止"存了个空 schema 当证据" ✓）。**三件事由文本裁决、不再靠记忆**：① `CT_Model` 属性只有 `unit/xml:lang/requiredextensions/recommendedextensions` ⇒ **`zUp` 不存在 ⇒ 我契约写错、子代理写对** ✓ ② `unit="millimeter"` 合法 ✓ 我契约里的 `<unit millimeter="millimeter">` 是胡写 ✓ ③ `CT_Resources` 要求 **`basematerials` 全部排在 `object` 之前**、`CT_Model` 要求 `metadata→resources→build`、`CT_Vertices ≥ 3 vertex`、`CT_Triangles ≥ 1 triangle`、`elementFormDefault=unqualified` ⇒ **元素顺序是规范判据不是风格** ✓ 已把 §5 两处错误按权威改写（**判据未降 ✓ 改的是我写错的格式细节 ✓ 并记明"逐 object 水密判据优先于'一个 object'那句措辞"** ✓）
+  - **G2 分类器落地并证实第 16 轮的诊断**：`tools/g2-corpus.mjs` 现从**像素自身**数"四个角里真有几个角标"（不信信道报告 ✓）+ 打印四边着墨率 ⇒ 32 份语料重跑（360.8 s ✓ 仍 `30/32 = 93.8%` ✓ **判决未上调 ✓**）：两个失败语料的角标页分别测得 **顶边 6% / 底边 47%、左边 13%** ⇒ **出画确证 ✓** 分类为 `fiducial-out-of-frame` ✓ 且 `no-marker-size-cluster`/`no-hollow-corner`/`quad-too-small` 三种 reason 都归到同一物理原因 ✓（这就是把它拆开记账的价值 ✓）
+  - **我自己新代码里的少报 bug**：`pageClasses` 只在"整份语料失败"那条 return 里返回 ⇒ **成功语料里的坏页全被丢掉**（几十页只统计到 4 条 ✗）⇒ 三个 return 都带上 `pageClasses` ✓ 教训：**注解也会撒谎，且比判决更难发现**（判决错了会红 ✓ 注解错了只是少报 ✓）⇒ 加注解时也要给它一条"不该为零"的下限断言 ✓
+  - **真正的剩余病灶浮出来了**：`assemble/intra-fail` 在 600 dpi 语料里出现 **≈9 次 / 8 个不同 seed**（`nc-scan600-2/3/5/7/9/11/14/15` ✓ 而**同页在 300 dpi 未见此病** ✓）⇒ 页内 RS 在 600 dpi 下被超预算 ⇒ **既非出画、也非回显条带** ✓ 这才是 G2 需要修的那一个 ✓ 下一步专查它（先看符号错在页内的**空间分布**：成片 ⇒ 光照/焦外；散点 ⇒ 采样/moire ✓）
+  - 工具链小账：本轮我又两次踩内联引号（PowerShell 撕碎 `[a-z]`/`m[1]` ✓ 一次 `replace_all` 顺手把**捕获组 `m[1]` 也改成了 `m[0]`** ⇒ 立刻回滚 ✓ 说明 `replace_all` 用短模式是危险动作 ✓）⇒ 一律改成写工具文件再跑 ✓
+
 - **第 16 轮：600 dpi 那两例失败不是缺陷 ✓ 是"判据前提错配"（本轮连翻两次案 ✓ 每次都是我自己错）**
   1. 我第 15 轮说的"几何筛选问题"被 ASCII 密度图否证 ⇒ 失败页 **顶边着墨 4.7% / 左 89.5% / 右 80.8% / 底 100%**，健康页四边均 100% ⇒ **上边缘出画** ✓ 那几个贴 `y=0` 的 `5×4` 碎块就是被切断的顶边框 ✓
   2. 我据此说"`--modifier nocrop` 在说谎" ⇒ **也错了** ✓ `sim/channel.py` L341 确实把 `crop_frac` 归零 ✓ 而打印出的 `crop=0.00281` 是 L1362 的 `1.0 - visible_frac`（**实际出画面积** ✓ 来自姿态/透视/`fill=0.95..1.0` ✓ 与裁切旋钮无关 ✓）

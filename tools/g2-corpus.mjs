@@ -21,7 +21,102 @@ import { performance } from 'node:perf_hooks';
 import { decodePage } from '../core/decode/page.js';
 import { decodePNG } from '../core/decode/png-read.js';
 import { advise } from '../core/decode/advice.js';
+import { binarize, components } from '../core/decode/fiducial.js';
 import { glyphSignature, glyphSignatureDiff } from '../core/render/glyphs.js';
+
+/**
+ * Failure classification, by looking at the image -- not at the channel's report.
+ *
+ * Two rounds of mis-attribution ended when it was noticed that a "decoder failure" page
+ * had 4.7 % ink coverage along its top edge against 100 % on a healthy page: the sheet
+ * was outside the capture, so its top-left fiducial does not exist in the image. With
+ * three fiducials there are six equations for an eight-degree-of-freedom homography, so
+ * the receiver refuses because it cannot solve. That is the channel precondition failing,
+ * not the decoder.
+ *
+ * This function therefore answers the physical question directly from pixels: how many
+ * of the four corners actually contain a marker-sized square. It is used ONLY to label
+ * the failure. It never turns a failure into a pass, and the pass/fail arithmetic above
+ * is untouched -- removing these pages from the denominator would be redefining G2.
+ */
+const CORNERS = ['tl', 'tr', 'bl', 'br'];
+
+function fiducialCensus(bitmap) {
+  const W = bitmap.width;
+  const H = bitmap.height;
+  const bin = binarize(bitmap);
+  const comps = components(bin);
+  const squares = comps.filter((c) => {
+    if (!(c.w > 8 && c.h > 8)) return false;
+    const aspect = Math.abs(c.w - c.h) / Math.max(c.w, c.h);
+    const fill = c.area / Math.max(1, c.w * c.h);
+    return aspect < 0.15 && fill > 0.75;
+  });
+  if (!squares.length) {
+    return { markers: 0, present: [], missing: CORNERS, sizeClass: null, edge: edgeCoverage(bin, W, H) };
+  }
+  // Dominant size class: fiducials are identical on the page, so the modal square side
+  // is the marker. Anything else is border stubs or a glyph block.
+  const bySide = new Map();
+  for (const c of squares) {
+    const k = Math.round(c.w / 3) * 3;
+    if (!bySide.has(k)) bySide.set(k, []);
+    bySide.get(k).push(c);
+  }
+  const cls = [...bySide.values()].sort((a, b) => b.length - a.length)[0];
+  const seen = new Set();
+  for (const c of cls) {
+    const cx = c.x0 + c.w / 2;
+    const cy = c.y0 + c.h / 2;
+    seen.add(`${cy < H / 2 ? 't' : 'b'}${cx < W / 2 ? 'l' : 'r'}`);
+  }
+  return {
+    markers: cls.length,
+    sizeClass: cls[0].w,
+    present: [...seen],
+    missing: CORNERS.filter((k) => !seen.has(k)),
+    edge: edgeCoverage(bin, W, H),
+  };
+}
+
+/** Ink share in the outermost `band` px of each side: a cut border shows up here. */
+function edgeCoverage(bin, W, H) {
+  const band = Math.max(10, Math.round(Math.min(W, H) * 0.006));
+  const acc = { top: [0, 0], bottom: [0, 0], left: [0, 0], right: [0, 0] };
+  for (let y = 0; y < H; y += 3) {
+    for (let x = 0; x < W; x += 3) {
+      const on = !!bin.mask[y * W + x];
+      if (y < band) acc.top[on ? 0 : 1]++;
+      if (y >= H - band) acc.bottom[on ? 0 : 1]++;
+      if (x < band) acc.left[on ? 0 : 1]++;
+      if (x >= W - band) acc.right[on ? 0 : 1]++;
+    }
+  }
+  const pct = ([a, b]) => (a + b ? Math.round((100 * a) / (a + b)) : 0);
+  return { top: pct(acc.top), bottom: pct(acc.bottom), left: pct(acc.left), right: pct(acc.right) };
+}
+
+/** A marker-stage refusal plus a corner missing from the image is a channel precondition failure. */
+const MARKER_STAGES = new Set(['markers', 'fiducial', 'quad']);
+
+function classifyFailure(bitmap, stage, reason) {
+  const markerish = MARKER_STAGES.has(stage) || /square|corner|quad|marker/i.test(String(reason));
+  if (!markerish) return null;
+  let census;
+  try {
+    census = fiducialCensus(bitmap);
+  } catch {
+    return null;
+  }
+  if (!census.missing.length) return null;
+  return {
+    kind: 'fiducial-out-of-frame',
+    detail: `${census.missing.length} of 4 corners carry no marker in the image (missing ${census.missing.join('+')}, ` +
+      `size class ${census.sizeClass}px, ${census.markers} candidates, edges T${census.edge.top}/B${census.edge.bottom}/L${census.edge.left}/R${census.edge.right}% ink) ` +
+      `-- 3 corners give 6 equations for an 8-DOF homography, so refusing is correct`,
+  };
+}
+
 
 function parse(argv) {
   const out = { dirs: [], root: null, match: '*', photo: true, json: false };
@@ -98,6 +193,7 @@ async function runCorpus(dir, mod) {
   const asm = new mod.protocol.TransferAssembler({ passphrase: manifest.passphraseHint || undefined });
   const opts = { allowFastPath: !mod.photo, requireFastPath: false, log: null };
   const failures = [];
+  const pageClasses = [];
   for (const name of names) {
     let bitmap;
     try {
@@ -109,11 +205,23 @@ async function runCorpus(dir, mod) {
     bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
     const r = decodePage(bitmap, { geom, layout, paletteId }, opts);
     if (!r.ok) {
-      failures.push(`${name}: ${r.stage}/${r.reason}`);
+      // Same failure, but labelled with what the pixels say about it. Annotation only:
+      // this cannot and does not make the page pass.
+      const cls = classifyFailure(bitmap, r.stage, r.reason);
+      failures.push(`${name}: ${r.stage}/${r.reason}${cls ? `  [${cls.kind}] ${cls.detail}` : ''}`);
+      if (cls) (r.classes ||= []).push(cls.kind);
+      (pageClasses ||= []).push(cls ? cls.kind : `decoder/${r.reason}`);
       continue;
     }
     const fed = await asm.feed({ levels: r.levels, header: r.headerBytes, channelMissing: r.colourAlive ? [] : ['colour'] });
-    if (!fed.ok && !fed.duplicate) failures.push(`${name}: assemble/${fed.reason}`);
+    if (!fed.ok && !fed.duplicate) {
+      failures.push(`${name}: assemble/${fed.reason}`);
+      // The assemble stage fails for its own reasons (intra/inter RS budget exceeded),
+      // and those pages were silently missing from the census until this line existed.
+      pageClasses.push(`assemble/${fed.reason}`);
+    } else if (fed.duplicate) {
+      pageClasses.push('assemble/duplicate-ok');
+    }
   }
   if (!asm.result) {
     const p = asm.progress;
@@ -122,17 +230,18 @@ async function runCorpus(dir, mod) {
       ok: false,
       reason: p.noSession ? 'no-page-header' : `short ${p.dataHave ?? '?'}/${p.dataNeed ?? '?'}`,
       failures,
+      pageClasses,
     };
   }
   const got = mod.hash.sha256Hex(asm.result);
   const want = manifest.sourceSha256;
   const bytes = asm.result.length;
-  if (!want) return { dir: basename(dir), ok: false, bytes, reason: 'manifest has no sourceSha256 to verify against', failures };
+  if (!want) return { dir: basename(dir), ok: false, bytes, reason: 'manifest has no sourceSha256 to verify against', failures, pageClasses };
   if (want !== got) {
     // The one outcome that must never be reported as anything but a hard failure.
-    return { dir: basename(dir), ok: false, bytes, reason: `DIGEST MISMATCH got ${got.slice(0, 16)} want ${want.slice(0, 16)}`, failures };
+    return { dir: basename(dir), ok: false, bytes, reason: `DIGEST MISMATCH got ${got.slice(0, 16)} want ${want.slice(0, 16)}`, failures, pageClasses };
   }
-  return { dir: basename(dir), ok: true, bytes, sha: got, failures };
+  return { dir: basename(dir), ok: true, bytes, sha: got, failures, pageClasses };
 }
 
 const opts = parse(process.argv.slice(2));
@@ -174,5 +283,21 @@ if (passed !== results.length) {
   const reasons = {};
   for (const r of results) if (!r.ok) reasons[r.reason.replace(/got \S+ want \S+/, 'digest differs')] = (reasons[r.reason.replace(/got \S+ want \S+/, 'digest differs')] || 0) + 1;
   console.log(`  failure classes: ${Object.entries(reasons).map(([k, v]) => `${k} x${v}`).join(', ')}`);
+  // Page-level classification from the pixels. Reported so the number can be read
+  // honestly; it does not enter the arithmetic above.
+  const byPage = {};
+  for (const r of results) for (const c of r.pageClasses || []) byPage[c] = (byPage[c] || 0) + 1;
+  const entries = Object.entries(byPage);
+  if (entries.length) {
+    console.log(`  page failure kinds (annotation only, still counted as failures):`);
+    for (const [k, v] of entries.sort((a, b) => b[1] - a[1])) console.log(`       ${String(v).padStart(3)} x ${k}`);
+    const outOfFrame = byPage['fiducial-out-of-frame'] || 0;
+    if (outOfFrame) {
+      console.log(`     -> ${outOfFrame} page(s) had a fiducial outside the capture: unrecoverable by`);
+      console.log(`        construction (a homography needs 4 point pairs), and a real flatbed can`);
+        console.log(`        produce it when the sheet is nearly as wide as the platen and rotated.`);
+      console.log(`        G2's stated criterion does not yet name that precondition -- see ACCEPTANCE G2.`);
+    }
+  }
   process.exit(1);
 }

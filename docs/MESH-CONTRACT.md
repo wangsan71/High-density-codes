@@ -61,7 +61,10 @@
 
 ### 3MF（`core/mesh/threeMF.js`）
 手写 OPC 包（零依赖，不引 zip 库）：`[Content_Types].xml`、`_rels/.rels`、`3D/3dmodel.model`。
-- `<unit millimeter="millimeter">` 明确单位；`<object type="model">` 一个，含 `<mesh>` 顶点/三角形。
+- `<model unit="millimeter">` 明确单位。**实现注记（第 17 轮·按官方文本更正本契约的笔误 ✓ 判据未变 ✓）**：
+  原文写的 `<unit millimeter="millimeter">` 与 `zUp` **都不是合法 3MF**——官方 Core 1.4.0 的 `CT_Model` 只允许 `unit` / `xml:lang` / `requiredextensions` / `recommendedextensions`（外加其他命名空间的任意属性 ✓）**没有 `zUp`** ✓ 且 `ST_Unit` 枚举为 `micron|millimeter|centimeter|inch|foot|meter` ✓ 本仓库的 +Z 向上是**我们自己的 §3.1 约定**、不是格式属性 ✓ 权威文本已 vendor 成 `ref/3mf-core-1.4.0.xsd`（`node tools/fetch-3mf-schema.mjs` 可重取 ✓ 不许手改 ✓）。
+- 原文写"`<object type="model">` 一个"**在本判据下做不到** ✓ 若底板与每格浮雕合成单个 `<object>`，各壳之间必然产生共面重叠面 ⇒ 违背"每条无向边恰被两个三角形共用"的水密判据 ✓ 故实现发**多个 `<object>`**（`plate-base` + `relief-ink{k}` ✓ 名称合法：`CT_Object` 允许 `id/type/thumbnail/partnumber/name/pid/pindex` ✓ `id` 必填 ✓），Python 侧**逐 object** 判水密 ✓ **本节的水密判据优先于"一个 object"这句措辞** ✓
+- **元素顺序是规范要求的、不是风格**：`CT_Model` 要求 `metadata* → resources → build` ✓ `CT_Resources` 要求 `basematerials`（及任意扩展元素）**全部排在 `object` 之前** ✓ `CT_Vertices` ≥ 3 个 `vertex` ✓ `CT_Triangles` ≥ 1 个 `triangle` ✓ `elementFormDefault="unqualified"` ⇒ 子元素不带前缀、默认命名空间指向 core ✓
 - **顶点索引表与 `weldTriangles` 一致**，且 `<mesh>` 的三角形数与 STL 一致（同一次布局的两种产物
   必须给出同一个格子集合，用于对拍）。
 - 每个 `<triangle>` 的顶点索引必须指向**已焊接**顶点，从而在 3MF 侧可判定水密：
