@@ -29,9 +29,13 @@ const HELP = `pskit <command> [options]
     --sheet <A4|Letter>  paper profiles only
     --parity <pct>       inter-page parity percentage (default per profile)
     --passphrase <pw>    ChaCha20 encrypt the payload (PBKDF2-SHA256, 150k iters)
-    --format <png|tiff|pdf|both|all>   default png
+    --format <png|tiff|pdf|both|all|stl|3mf>   default png; may be combined (png,3mf)
                          pdf = one pack.pdf carrying every page at true physical
                          size (what you actually send to a printer)
+                         stl/3mf = the plate relief model (docs/MESH-CONTRACT.md);
+                         plate profiles only -- paper profiles are refused, and
+                         every page also writes page-NNN.model-facts.json for
+                         ref/verify_model.py to check from the other side
     --mono               render as a single-colour print (proves the G7 fallback)
     --palette <id>       INK2 INK4 PAPER1 (default chosen by profile)
     --out <dir>          output directory (default artifacts/<name>)
@@ -164,13 +168,30 @@ async function cmdSend(args) {
     fmts.add('tiff');
     fmts.add('pdf');
   }
-  const unknown = [...fmts].filter((f) => !['png', 'tiff', 'pdf'].includes(f));
+  const unknown = [...fmts].filter((f) => !['png', 'tiff', 'pdf', 'stl', '3mf'].includes(f));
   if (unknown.length) {
-    throw new Error(`send: unknown --format ${unknown.join(', ')} (choose from png, tiff, pdf, both, all)`);
+    throw new Error(`send: unknown --format ${unknown.join(', ')} (choose from png, tiff, pdf, both, all, stl, 3mf)`);
   }
   const wantPng = fmts.has('png');
   const wantTiff = fmts.has('tiff');
   const wantPdf = fmts.has('pdf');
+  const wantStl = fmts.has('stl');
+  const want3mf = fmts.has('3mf');
+  const wantModel = wantStl || want3mf;
+  if (wantModel && mod.profiles.PROFILES[profileId].medium !== 'plate') {
+    // MESH-CONTRACT.md §3：纸面档的 cellEw 是 null，没有挤出宽度可以量化半径。
+    // 按 0.4 mm 猜一个就能出文件，但那是一份"看起来对"的浮雕，所以这里明确拒绝。
+    throw new Error(`send: --format stl|3mf needs a plate profile; ${profileId} is a paper medium (no extrusion width to quantise radii with) -- see docs/MESH-CONTRACT.md §3`);
+  }
+  const mesh = wantModel
+    ? {
+        plate: await import('../core/mesh/plate.js'),
+        stl: await import('../core/mesh/stl.js'),
+        three: await import('../core/mesh/threeMF.js'),
+        glyphs: await import('../core/render/glyphs.js'),
+      }
+    : null;
+  const modelReports = [];
   let pdfOk = wantPdf;
   const pdfPages = [];
   const pdfBudget = 380e6; // raw RGB bytes the in-memory PDF assembly will absorb
@@ -199,6 +220,89 @@ async function cmdSend(args) {
       const name = `page-${String(i).padStart(3, '0')}.png`;
       writeFileSync(join(outDir, name), mod.png.encodePNG(bitmap));
       files.push(name);
+    }
+    if (wantModel) {
+      // ── 板材浮雕（docs/MESH-CONTRACT.md）───────────────────────────────────
+      // 先装配、再逐格把顶面投影回格子网格和"渲染这一页得到的掩码"对拍（G8 §6.3），
+      // 对不上就拒绝写文件：宁可不出图，也不出一张"看起来对"的浮雕。
+      const tag = `page-${String(i).padStart(3, '0')}`;
+      const model = mesh.plate.buildPlateModel({ geom: t.geom, levels: p.levels, layout, mono: !!args.mono, palette: paletteId });
+      const proj = mesh.plate.projectionReport(model);
+      if (!proj.ok) {
+        throw new Error(
+          `send: ${tag} relief does not reproduce the raster mask —— ` +
+            `${proj.cellsOverTolerance}/${proj.cells} cells off by >= ${proj.tolerancePct}% (max ${proj.maxPct.toFixed(2)}%), ` +
+            `straddling ${proj.straddlingTriangles} triangles, ink mismatch ${proj.inkedMismatch}; refusing to write the model`,
+        );
+      }
+      const stlCheck = mesh.stl.stlSelfCheck(model.triangles);
+      if (!stlCheck.ok) throw new Error(`send: ${tag} stlSelfCheck refused: ${stlCheck.issues.join('; ')}`);
+      if (wantStl) {
+        const name = `${tag}.stl`;
+        const bytes = mesh.stl.encodeSTLSolid(model.triangles, { name: `PSKT-${profileId}-p${i}` });
+        writeFileSync(join(outDir, name), bytes);
+        files.push(name);
+        modelReports.push({ tag, kind: 'stl', file: name, bytes: bytes.length, sha256: mod.hash.sha256Hex(bytes).slice(0, 12), triangles: stlCheck.tris, bboxMm: stlCheck.bbox.size.map((v) => +v.toFixed(4)) });
+      }
+      if (want3mf) {
+        const name = `${tag}.3mf`;
+        const bytes = mesh.three.encode3MF({
+          objects: model.objects,
+          metadata: {
+            'pskt:profile': profileId,
+            'pskt:page': i,
+            'pskt:dpi': String(dpi),
+            'pskt:cellPx': String(layout.cellPx),
+            'pskt:glyph': JSON.stringify(mesh.glyphs.glyphSignature(layout.glyph)),
+            'pskt:sourceSha256': mod.hash.sha256Hex(raw),
+          },
+        });
+        const chk = mesh.three.selfCheck3MF(bytes, { expectTriangles: model.facts.trianglesTotal });
+        if (!chk.ok) throw new Error(`send: ${tag} selfCheck3MF refused: ${chk.issues.join('; ')}`);
+        writeFileSync(join(outDir, name), bytes);
+        files.push(name);
+        modelReports.push({
+          tag,
+          kind: '3mf',
+          file: name,
+          bytes: bytes.length,
+          sha256: chk.sha256,
+          triangles: chk.trianglesTotal,
+          objects: chk.objects.map((o) => `${o.name}:${o.triangles}t/${o.vertices}v/${o.manifold.components}shells/${'χ=' + o.manifold.euler}`),
+          watertightEachObject: chk.watertight,
+          bboxMm: model.facts.bbox.size.map((v) => +v.toFixed(4)),
+        });
+      }
+      const factsName = `${tag}.model-facts.json`;
+      writeFileSync(
+        join(outDir, factsName),
+        JSON.stringify(
+          {
+            tool: 'pskit',
+            version: 1,
+            tag,
+            sourceSha256: mod.hash.sha256Hex(raw),
+            glyphSignature: mesh.glyphs.glyphSignature(layout.glyph),
+            monoRender: !!args.mono,
+            ...model.facts,
+            bbox: { min: Array.from(model.facts.bbox.min), max: Array.from(model.facts.bbox.max), size: Array.from(model.facts.bbox.size) },
+            cells: model.cells.map((c) => [c.col, c.row, c.shapeLevel, c.colourLevel, +c.topMm.toFixed(6)]),
+            projection: {
+              cells: proj.cells,
+              tolerancePct: proj.tolerancePct,
+              maxPct: +proj.maxPct.toFixed(4),
+              meanPct: +proj.meanPct.toFixed(4),
+              cellsOverTolerance: proj.cellsOverTolerance,
+              straddlingTriangles: proj.straddlingTriangles,
+              inkedMismatch: proj.inkedMismatch,
+              ok: proj.ok,
+            },
+          },
+          null,
+          1,
+        ) + '\n',
+      );
+      files.push(factsName);
     }
     if (pdfOk && (i + 1) * layout.width * layout.height * 3 > pdfBudget) {
       // A PDF document is assembled in memory, so an A4 600 dpi pack of dozens of
@@ -250,6 +354,7 @@ async function cmdSend(args) {
     parityPages: t.parityPages,
     printedAreaFraction: Math.round(inkSum * 1000) / 1000,
     files,
+    ...(modelReports.length ? { model: modelReports } : {}),
     timingsMs: { encode: Math.round(t1 - t0), render: Math.round(t2 - t1) },
     note: 'Print at 100% scale (no "fit to page"). Verify the plate fits: ' + layout.physicalMm.wMm.toFixed(1) + 'x' + layout.physicalMm.hMm.toFixed(1) + 'mm',
   };
@@ -258,6 +363,17 @@ async function cmdSend(args) {
     `  wrote      ${t.pages.length} page(s) (${t.dataPages} data + ${t.pages.length - t.dataPages} parity) as ${files.length} file(s) + manifest.json in ${outDir}`,
   );
   console.log(`  render     ${(layout.width)}x${layout.height}px @ ${dpi}dpi, printed area ${(inkSum * 100).toFixed(1)}%`);
+  for (const r of modelReports) {
+    const bbox = r.bboxMm.map((v) => v.toFixed(3)).join(' x ');
+    console.log(`  ${r.kind.padEnd(9)} ${r.file}: ${r.triangles} tris, bbox ${bbox} mm, ${r.bytes} B, sha256 ${r.sha256}`);
+    if (r.watertightEachObject !== undefined) {
+      console.log(`            ${r.objects.join(' + ')}; each object watertight (every undirected edge used exactly twice): ${r.watertightEachObject}`);
+    }
+  }
+  if (modelReports.length) {
+    const p = JSON.parse(readFileSync(join(outDir, `${modelReports[0].tag}.model-facts.json`), 'utf8')).projection;
+    console.log(`  projection   G8 §6.3: max ${p.maxPct.toFixed(2)}% mean ${p.meanPct.toFixed(2)}% off the raster mask, ${p.cellsOverTolerance}/${p.cells} cells >= ${p.tolerancePct}% -> ${p.ok ? 'PASS' : 'FAIL'}`);
+  }
   console.log(`  timings    encode ${Math.round(t1 - t0)}ms  render+write ${Math.round(t2 - t1)}ms`);
   return { outDir, manifest, t, raw, layout, dpi, paletteId, args };
 }

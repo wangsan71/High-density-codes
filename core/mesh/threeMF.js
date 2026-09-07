@@ -573,7 +573,11 @@ export function modelXml({ objects, metadata = {}, decimals = COORD_DECIMALS }) 
   for (const k of metaNames) {
     const v = metadata[k];
     if (v === null || v === undefined) continue;
-    lines.push(`<metadata name="${xmlEscape(k)}">${xmlEscape(typeof v === 'number' ? String(v) : v)}</metadata>`);
+    // 只收字符串与有限数：对象在这里会变成 "[object Object]" 写进模型，那是"看起来
+    // 成功但是错"的那一类失败，宁可拒写。结构化的值请调用方自己 JSON.stringify。
+    if (typeof v === 'object') throw new Error(`modelXml: metadata "${k}" is an object; pass JSON.stringify(...) if you mean to embed it`);
+    if (typeof v === 'number' && !Number.isFinite(v)) throw new Error(`modelXml: metadata "${k}" is not finite`);
+    lines.push(`<metadata name="${xmlEscape(k)}">${xmlEscape(typeof v === 'number' ? String(v) : String(v))}</metadata>`);
   }
   lines.push('<resources>');
   // 先定义后引用（§3.4）⇒ basematerials 必须在 object 之前
@@ -641,7 +645,7 @@ export function parseModelXml(text) {
   const metadata = {};
   const mRe = /<metadata name="([^"]*)">([\s\S]*?)<\/metadata>/g;
   let mm;
-  while ((mm = mRe.exec(text))) metadata[mm[1]] = mm[2];
+  while ((mm = mRe.exec(text))) metadata[mm[1]] = xmlUnescape(mm[2]);
   const materials = [];
   const bRe = /<base name="([^"]*)" displaycolor="([^"]*)"\/>/g;
   let bb;

@@ -204,9 +204,19 @@ export function triangleCount(u8) {
 /**
  * 自校验：三角形数、有限性、退化计数、法向与顶点顺序是否一致、包围盒。
  *
- * watertightHint 恒为 false —— STL 不携带共享顶点拓扑，谎报水密是本仓库
- * 唯一不可原谅的失败。真正的水密/覆盖声明由 3MF 路径 + prismFromMask 的
- * rectsCoverMaskExact 逐像素不变式给出。
+ * watertightHint 恒为 false —— 但这句话说的是**容器**，不是几何。STL 不携带共享顶点
+ * 拓扑，所以它无从声明；把它"改进"成水密声明是本仓库唯一不可原谅的失败。
+ *
+ * 实测事实（M5，PL-G 页，14x14 格，装了底板之后重量，别把保守当真相）：把这 45,132 个
+ * 三角形按 1e-6 mm 焊接再数无向边，67,698 条边里 **100.00% 恰被两个三角形反向共用**，
+ * 符号体积 +68,180.17 mm^3 为正（`ref/verify_model.py` 的 stl/edge-census 与
+ * stl/signed-volume-positive 两条独立量出同样的数）。也就是说这批网格**确实**闭合成壳，
+ * 只是 STL 这个格式没法把这件事交给下游。几何层面的声明在 3MF 路径：
+ * `threeMF.encode3MF()` 逐 `<object>` 跑 `manifoldReportIndexed()`，不过就拒写。
+ *
+ * 早期这里写的是 "prismFromMask 的矩形共墙 ⇒ 边被用 4 次，不水密"：那句话对
+ * `prismFromMask` 这条路仍然成立（`ringTriangles`/`discTriangles` 每格各自成壳，
+ * 彼此由几何间隙分开，所以根本不共边），但它是**那条路**的性质，不是本网格的事实。
  *
  * @returns {{ok:boolean, tris:number, watertightHint:false, watertightNote:string,
  *            bbox:object|null, issues:string[], degenerate:number}}

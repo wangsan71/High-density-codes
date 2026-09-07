@@ -61,8 +61,10 @@
 - **STL ✅**：`python ref/verify_stl.py --selftest .tmp/plate-page0.stl` → 真实 13.1 MB / 262 080 三角形板上 **13/13 PASS**（`84+50n` 逐字节 ✓ 头部自报数与二进制数一致 ✓ units=mm ✓ 零退化 ✓ 每条法向与顶点右手序 cos>0.99 ✓ 包围盒有限且 mm 量级 ✓ **有向体积 +373 mm³** ⇒ 壳体序一致 ✓）+ `--selftest` 造坏副本**必须失败** ⇒ 检查是承重的 ✓
   附带一条反向收获：**无向边 393 120 条中 100% 恰被两个三角形共用 ⇒ 网格其实是水密的**，而 `core/mesh/stl.js` 一路保守报 `watertightHint:false` ⇒ 独立侧测得比自报更好 ✓ "保守误报"不等于真相 ✓
 - **3MF 🟡**：`core/mesh/threeMF.js` 已写出（`encode3MF`/`buildZip`/`readZip`/`parseModelXml`/`manifoldReport`/固定 DOS 时间戳 ✓）但**尚未被第三方解析验证过**，且它是在提交 `3502db8` 之后仍在改的中途状态 ⇒ 不判决 ✓
-- ❌ **G8 判据第 3 条（投影对拍）我的第一版是空转的**：`projectTopToCells` 拿 `splitCellLevel(...).shape>0` 当期望掩码、`buildPlateMesh` 又拿同一条 `shape>0` 决定画不画 ⇒ 同源 ⇒ `mismatch=0/1764` 毫无证据力 ✓ **判据必须来自被验证对象之外**（= 光栅侧真实页掩码）✓ 另：面积误差我拿 1.0 当分母（字形本就只填格 ~25%）⇒ `areaErr 70–80%` 是度量写错，不是几何错 ⇒ **这一条不宣布通过** ✓
-- ⬜ CLI 的 `--format stl|3mf` 从未接线 ⇒ 用户走不到这条产物路径 ✓
+- ✅ **G8 判据第 3 条（投影对拍）第 14 轮真过了**（我亲自重跑，不接受转述 ✓）：`send --format stl,3mf` 打印 `projection G8 §6.3: max 0.76% mean 0.69% off the raster mask, 0/1764 cells >= 8%` ✓ Python 侧从**文件里的**朝上三角形独立重量 ⇒ `PASS g8-3/projection-area-error max 1.208% mean 1.189% over 196 cells` ✓ 第三个不依赖光栅的纯解析式参考也给 `max 1.138%` ✓✓ **关键是两条算路互相独立**：期望掩码来自光栅侧（`buildCoverageTiles` + `layout.originPx` + 像素量化格宽 ✓ `shape=0` 仍算外环 ✓），不再是"拿网格跟自己比" ⇒ 我上一版那个 `mismatch=0/1764` 的空转已修 ✓ 且有 3 条承重反例（单格半径 ×1.3 → 红并命中该格 ✓ 删一格 → 被"每格都得有料"抓住 ✓ Python 侧改 facts 档 → 红 ✓）
+- ✅ **确定性实测**：同一输入连跑两次 ⇒ **STL 5 个文件 + 3MF 5 个文件逐字节相同** ✓（DOS 时间戳钉在 1980-01-01 ✓ 部件顺序固定 ✓）
+- ✅ **纸面档正确拒绝**（我实跑）：`--profile P-M1-300 --format stl` → exit 1 ✓ 消息引用 `MESH-CONTRACT §3` ✓ **输出目录 0 个文件** ✓
+- ⬜ **仍未做**：没有按 3MF Core 1.4 的 **XSD** 正式校验（本机无 XSD、无网络）⇒ 目前"schema 正确"的实际含义是"**被第三方 stdlib 解析器读通且结构自洽**" ✓ 不等于过 schema ✓ 另：`docs/MESH-CONTRACT.md` §5 与实现有两处文本冲突待我修订（"单个 `<object>`"在"每条无向边恰两次"下做不到 ⇒ 实现发多 object ✓；契约里写的 `<unit millimeter=…>`/`zUp` 不是合法 3MF Core 1.4 属性 ⇒ 实现写 `unit="millimeter"` ✓ **是实现比我的契约更对** ✓）；也没有进程内 `gateG8`（独立那一半天生需要 Python ✓ 沙箱禁 spawn ⇒ 与 G2 同一模式：门限跑 JS 侧 + 打印必须手跑的 python 命令 ✓）
 
 ### ⬜ G9 · Web 扫描端（GitHub Pages）
 `web/` 未开始 ✓ 零外部 origin / 离线 / `?selftest=1` 三项均无证据 ✓

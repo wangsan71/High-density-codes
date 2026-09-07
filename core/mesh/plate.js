@@ -363,6 +363,9 @@ export function buildPlateModel({ geom, levels, layout, mono = false, palette = 
     })),
     trianglesTotal: triangles.length / 9,
     bbox: boundingBox(triangles),
+    // 光栅侧的参考面积（每 shape 档一格内真正印出的 mm²）：与网格无关的独立量，
+    // 对拍要用它，`ref/verify_model.py` 也拿它当传入参考（自己再算一份理想圆面积交叉核对）。
+    reference: renderReferenceAreas({ layout, shapeLevels: shapeCh.levels, pitchMm }),
     // 跨部件接触面的真相（实测，不是推测）：把全部部件合成**一张** mesh 再数边，
     // "每条无向边恰用两次"照样成立 —— 因为各浮雕脚底的短边落在底板顶面那两个大
     // 三角形的**内部**，两边根本不共边。也就是说这条计数在合并 mesh 上什么也没证明：
