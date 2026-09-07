@@ -353,8 +353,13 @@ async function cmdReceive(args) {
 
   const out = args.out ? resolve(args.out) : join(base, 'pskt-received.out');
   if (!asm.result) {
-    const { dataHave, dataNeed } = asm.progress;
-    console.log(`receive: INCOMPLETE (${dataHave}/${dataNeed} data pages) -- ${asm.error || 'still short'}`);
+    const { dataHave, dataNeed, noSession } = asm.progress;
+    if (noSession) {
+      console.log(`receive: INCOMPLETE -- not one page header could be read, so the receiver never learned the page geometry (${seen.size} distinct page(s) read out of ${names.length - skippedTiff} image(s) offered)`);
+      console.log('  this is a whole-batch failure, not a missing page: parity cannot help when no page decoded');
+    } else {
+      console.log(`receive: INCOMPLETE (${dataHave}/${dataNeed} data pages) -- ${asm.error || 'still short'}`);
+    }
     console.log('  nothing was written: a partial file is never produced');
     process.exitCode = 2;
     return;

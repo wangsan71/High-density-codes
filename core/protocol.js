@@ -408,7 +408,14 @@ export class TransferAssembler {
   }
 
   get progress() {
-    if (!this.session) return { have: 0, need: 0, missing: [], complete: false };
+    if (!this.session) {
+      // Not one page header was readable, so there is no session to report against.
+      // Returning the same key names as the formed-session branch matters: the CLI
+      // used to print "(undefined/undefined data pages)" here, which hid the single
+      // most diagnostic fact about a failure -- that the receiver never even learned
+      // what it was looking at.
+      return { have: 0, need: 0, dataHave: 0, dataNeed: 0, missing: [], complete: false, noSession: true };
+    }
     const need = this.session.dataPages;
     const have = [...this.pages.keys()].filter((i) => i < need).length;
     const missing = [];
