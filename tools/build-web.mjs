@@ -243,6 +243,7 @@ mkdirSync(OUT, { recursive: true });
 // job (refusing unsupported import forms) is a correctness check, not a size optimisation.
 const needIds = new Set(JSON.parse(appBundle.match(/var IDS = (\[[^\]]*\])/)[1]));
 for (const m of closure('web/selftest.js')) needIds.add(m.id);
+for (const m of closure('web/sender.js')) needIds.add(m.id);
 const allCore = [];
 (function walkCore(d) {
   for (const f of readdirSync(d)) {

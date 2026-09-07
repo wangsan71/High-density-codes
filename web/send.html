@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; form-action 'none'; base-uri 'none'">
+<title>PSKT 发送端 · 把文件变成能打印的页</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<h1>PSKT 发送端</h1>
+<p class="lede">选文件 → 出可打印页 / <code>pack.pdf</code> / <code>.3mf</code>·<code>.stl</code> 实体码牌。<b>全程在本机浏览器内完成，不上传、不出网、不含任何第三方资源</b>：这里没有 URL，只有你打印出来的那张纸。</p>
+<nav class="tabs"><a href="./index.html">→ 接收端（扫描/解码）</a></nav>
+
+<form id="opts" onsubmit="return false">
+  <label>文件 <input id="sfile" type="file"></label>
+  <label>剖面
+    <select id="sprofile"></select>
+  </label>
+  <label>dpi <input id="sdpi" type="number" inputmode="numeric" placeholder="剖面默认"></label>
+  <label id="s3d">喷嘴
+    <select id="snozzle"><option value="">0.4</option><option>0.2</option><option>0.6</option><option>0.8</option></select>
+  </label>
+  <label>色板
+    <select id="spalette"><option>INK2</option><option>INK4</option><option>PAPER1</option></select>
+  </label>
+  <label id="sheetbox">纸张
+    <select id="ssheet"><option>A4</option><option>Letter</option></select>
+  </label>
+  <label>打印幅面 mm <input id="splate" type="number" inputmode="numeric" placeholder="剖面默认"></label>
+  <label>校验页 % <input id="sparity" type="number" inputmode="numeric" step="1" placeholder="剖面默认"></label>
+  <label>口令（可选，加密载荷） <input id="spw" type="text" autocomplete="off" spellcheck="false">
+  </label>
+  <label>单色可还原
+    <select id="smonosafe"><option value="">按剖面</option><option>full</option><option>partial</option><option>off</option></select>
+  </label>
+  <label class="chk"><input id="smono" type="checkbox"> 直接以单色出图（验证 G7 兜底）</label>
+  <div class="btns">
+    <button id="doencode" type="button" class="primary">编码</button>
+    <button id="doprint" type="button" disabled>打印</button>
+    <button id="dlpng" type="button" disabled>PNG</button>
+    <button id="dlpdf" type="button" disabled>pack.pdf</button>
+    <button id="dl3mf" type="button" disabled>3MF</button>
+    <button id="dlstl" type="button" disabled>STL</button>
+  </div>
+</form>
+
+<div class="notice">打印请优先用 <code>pack.pdf</code>：它把每页按<b>真实物理尺寸</b>摆好。浏览器的"打印"依赖你在缩放里选"实际大小/100%"，缩放一错，整盘页的几何就与扫描端的期望不符（帧头会拒收，不会静默出错）。</div>
+
+<section id="out">
+  <h2>页面</h2>
+  <div id="pages" class="pages"></div>
+  <h2>日志</h2>
+  <pre id="slog" class="log" aria-live="polite"></pre>
+</section>
+
+<script type="module" src="./sender.js"></script>
+</body>
+</html>
