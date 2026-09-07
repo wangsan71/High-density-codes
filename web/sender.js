@@ -33,6 +33,10 @@ import { encodeSTLSolid, stlSelfCheck } from '../core/mesh/stl.js';
 import { encode3MF, selfCheck3MF } from '../core/mesh/threeMF.js';
 import { sha256Hex } from '../core/hash.js';
 import { getPalette } from '../core/palette.js';
+// header.kind is a u8 (0 = data page, 1 = parity page), so the constant has to come from the
+// frame module rather than be remembered here -- this file used to compare it against a
+// string and silently counted zero parity pages forever (docs/DEFECTS.md D15).
+import { PAGE_KIND } from '../core/frame.js';
 
 export const isPlate = (id) => !!PROFILES[id] && PROFILES[id].medium === 'plate';
 
@@ -166,7 +170,7 @@ export async function buildArtifacts(bytes, opts = {}) {
     sourceSha256: sha256Hex(bytes),
     ms: Date.now() - t0,
     bytesIn: bytes.length,
-    parityPages: pages.filter((p) => p.header && p.header.kind === 'parity').length,
+    parityPages: pages.filter((p) => p.header && p.header.kind === PAGE_KIND.PARITY).length,
   };
 }
 
