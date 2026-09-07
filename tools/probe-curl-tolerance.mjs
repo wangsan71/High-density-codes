@@ -55,9 +55,9 @@ const cosR = Math.cos(rot);
 const sinR = Math.sin(rot);
 
 /** page px -> photo px: downscale, bend the sheet, rotate about the centre. */
-function forward(x, y, bend) {
-  const bx = x + bend * Math.sin((Math.PI * x) / src.width) * (y / src.height);
-  const by = y + bend * Math.sin((Math.PI * x) / src.width);
+function forward(x, y, bend, source) {
+  const bx = x + bend * Math.sin((Math.PI * x) / source.width) * (y / source.height);
+  const by = y + bend * Math.sin((Math.PI * x) / source.width);
   const cx = W / 2;
   const cy = H / 2;
   const px = (bx / down - cx) * cosR - (by / down - cy) * sinR + cx;
@@ -65,7 +65,7 @@ function forward(x, y, bend) {
   return [px, py];
 }
 
-function shoot(bend) {
+function shoot(bend, source = src) {
   const out = new Uint8Array(W * H * ch);
   let oor = 0; // pixels whose inverse map fell outside the page (clamped by the sampler)
   // White outside the sheet: a real photo has a background, and a detector that keys on the
@@ -78,20 +78,25 @@ function shoot(bend) {
       let x = px * down;
       let y = py * down;
       for (let it = 0; it < 3; it++) {
-        const [qx, qy] = forward(x, y, bend);
+        const [qx, qy] = forward(x, y, bend, source);
         x += (px - qx) * down;
         y += (py - qy) * down;
       }
       // sampleBilinear returns {values:[...], inside:boolean}: the first draft read v[c]
       // from that object, got undefined, wrote 0 -- and produced an all-black "photo" whose
       // refusal the decoder was right to give. `inside` doubles as the clipping meter.
-      const smp = sampleBilinear(src.pixels, src.width, src.height, ch, x, y);
+      const smp = sampleBilinear(source.pixels, source.width, source.height, ch, x, y);
       if (!smp.inside) oor++;
       const o = (py * W + px) * ch;
       for (let c = 0; c < ch; c++) out[o + c] = smp.values[c];
     }
   }
   return { width: W, height: H, dpi: Math.round(dpi / down), pixels: out, _oor: oor };
+}
+
+/** The rendered canvas of page i, same geometry and palette as page 0. */
+function renderPageFor(i) {
+  return renderPageBitmap({ geom: t.geom, levels: t.pages[i].levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(t.pages[i].header) });
 }
 
 console.log(`page ${pageIndex} of ${t.pages.length}: ${src.width}x${src.height} @${dpi}dpi -> shot ${W}x${H} @${dpi / down}等效dpi (down ${down}), 旋转 ${(rot * 180) / Math.PI}°`);
@@ -130,6 +135,55 @@ const controlIsCopy = down === 1 && rot === 0;
   }
   console.log('');
 }
+/* ---- transfer level: the question D21 actually hinges on ----
+ * Page-level ok:true with wrong cells is not a false accept by itself: acceptance belongs
+ * to TransferAssembler, which corrects with inter/intra-page RS and then demands the
+ * terminal SHA-256 match before `result` becomes non-null -- the same class the CLI and the
+ * browser client use, so this measures the shipped chain rather than a paraphrase of it.
+ * What was missing is the curl dimension on top of that chain: tools/smoke-capture.mjs
+ * already drives the real assembler through the burst collector (its stub feeds are only in
+ * the gate sub-cases), so what this mode adds is a warped sheet, not a wiring diagram.
+ */
+if (args.includes('--transfer')) {
+  const { TransferAssembler } = await imp('core/protocol.js');
+  const verdicts = [];
+  for (const bend of bends) {
+    const asm = new TransferAssembler({});
+    const tally = new Map();
+    const bump = (k) => tally.set(k, (tally.get(k) || 0) + 1);
+    const t0 = Date.now();
+    for (let i = 0; i < t.pages.length; i++) {
+      const boot = await bootstrapDecode(shoot(bend, renderPageFor(i)), { maxAttempts: 24 });
+      if (!boot.ok) { bump(`decode-refused/${boot.reason}`); continue; }
+      const fed = await asm.feed({
+        levels: boot.page.levels,
+        header: boot.page.headerBytes,
+        channelMissing: boot.page.colourAlive ? [] : ['colour'],
+      });
+      bump(fed.ok ? 'fed' : fed.duplicate ? 'duplicate' : `assemble-rejected/${fed.reason}`);
+    }
+    const res = asm.result;
+    const identical = !!res && res.length === raw.length && res.every((v, i) => v === raw[i]);
+    const verdict = identical ? 'ACCEPTED-CORRECT' : res ? 'ACCEPTED-WRONG' : 'REFUSED';
+    const p = asm.progress || {};
+    verdicts.push({ bend, verdict, ms: Date.now() - t0 });
+    console.log(
+      `  bend ${String(bend).padStart(3)}px  ${verdict === 'ACCEPTED-WRONG' ? '*** ACCEPTED-WRONG ***' : verdict}  ${verdict === 'REFUSED' ? `have ${p.dataHave ?? '?'}/${p.dataNeed ?? '?'}` : `${res ? res.length : 0} B vs ${raw.length} B`}  · ${[...tally].map(([k, n]) => `${k}×${n}`).join(' ')} · ${Date.now() - t0} ms`,
+    );
+  }
+  const ctrl = verdicts.find((v) => v.bend === 0);
+  console.log('');
+  if (!ctrl || ctrl.verdict !== 'ACCEPTED-CORRECT') {
+    console.log(`CONTROL FAILED: 平整的页没能被整链正确收回（${ctrl ? ctrl.verdict : '无 bend=0 档'}）⇒ 本表无结论 ✓`);
+    process.exitCode = 2;
+  } else {
+    const wrong = verdicts.filter((v) => v.verdict === 'ACCEPTED-WRONG').map((v) => v.bend);
+    console.log(wrong.length ? `传输级误接受出现在 bend=${wrong.join(',')}px ⇒ **属误接受家族，D21 立刻升为最高优先，且必须回 G5 重验** ✗✗` : '传输级：本探针内卷曲只造成拒绝，不造成误接受 ⇒ D21 的对齐梳属鲁棒性收益，不足以成为改动采样路径（G3/G5/G7 全压其上）的理由 ✓');
+    console.log('注意：这是单页卷曲的同一种形变同时作用于全部页的合成信道，不替代 G4 的真实照片档。');
+  }
+  process.exit(process.exitCode || 0);
+}
+
 const rows = [];
 for (const bend of bends) {
   const t0 = Date.now();
