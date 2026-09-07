@@ -29,6 +29,16 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 33 轮新增（OPEN）
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D36 | `no-hollow-corner` 的**语义过载仍未拆开**（ACCEPTANCE 开放缺陷 #3 ✓ 它曾连续误导两次根因分析 ✓）✓ 本轮做了一个**看起来显然、实则不成立**的拆法并把它否证掉：拿同尺寸的三个方块拼出页尺度直角 L ⇒ 用 L 推出第四角应有位置 ⇒ 看那儿有没有东西 ✗ **159 个方形候选里最大的那些是合并的数据格点** ✓ 而 `buildQuad` 的枚举池是**按面积取前 14** ⇒ 真角标挤不进去 ✓ 于是假 L 推出的 `q` 落在别处 ✓ 一个"角标在、只是孔不可读"的页被报成"没拍全" ✗ 换成全集候选则反向失衡（任意点附近更容易有东西 ⇒ 遮角情形被吞进"糊住"分支 ✓）**两个夹具互相拉扯 ⇒ 不是参数没调好 ✓ 是路子不对 ✓** | `node --test --test-isolation=none "tests/unit/fiducial-corner-damage.test.mjs"` ⇒ 打印 `D36 现状 · 第四角被遮=no-hollow-corner(hollow=0,cand=158) · 角标在而孔不可读=no-hollow-corner(hollow=0,cand=159)` ✓ **两种含义相反的失败 ✓ 同一个字符串 ✓** 且两者都被拒收（**无误接受 ✓**） | 新文件 `tests/unit/fiducial-corner-damage.test.mjs` 把这件事变成**可复现的一行输出**（此前只有散文描述 ✓）✓ **不交付会说谎的 reason** ⇒ 已撤回 ✓ 真正的拆法必须把"第四角该在哪"锚在**剖面自己的几何**上（用 layout 声明的页尺寸预测角位 ✓ 而不是靠任意三元组 ✓）⇒ 需要失败路径能拿到角标簇而不是 top-N ✓ 归 G4 待办 ✓
+
+
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
 ### 第 32 轮闭掉的
 
 | # | 缺陷 | 复验 | 状态 |
@@ -40,9 +50,9 @@
 
 | # | 缺陷 | 复现 | 性质 |
 |---|---|---|---|
-| D32 | **PowerShell 的 `>` 重定向把 `git show` 的输出写成 UTF-16LE**（首字节 255 = `0xFF` BOM ✓）⇒ 我用 UTF-8 读它 ⇒ `indexOf('export default')` 返回 -1 ⇒ **差点得出"我的判据是空跑的"这个错结论** ✗ 靠**阳性对照**（同一正则测已知含 default 的字符串 ⇒ true ✓）才分清"文件坏了"与"正则坏了" | `node -e "console.log(require('fs').readFileSync('.tmp/oldpdf.js')[0])"` ⇒ `255` | AGENTS.md 已记着同族坑（`Get-Content`+`Set-Content` 走 CP1252 ✓）✓ 这次是**重定向写 UTF-16LE** 的新变体 ⇒ 补进本机陷阱表：**跨工具取文本一律用 `node -e` 直读真文件 ✓ 不要用 `>` 落地后再读 ✓** |
-| D33 | 交付过一段时间的**单文件页带着 `script-src 'self'` 却内联了 `<script>`** ⇒ 按规范浏览器会拒绝执行自己页面的内联脚本（[GH issue](https://github.com/mshirel/song-history/issues/247) ✓ [SO](https://stackoverflow.com/questions/76347766/content-security-policy-csp-blocking-my-local-script) ✓）✓ 而 `file://` 下 `<meta>` CSP 是否强制执行**本机无浏览器无法验证**（D18 同族 ✓）⇒ 我不声称"它一直是坏的" ✗ 只说：**它把可用性押在一个我在这里验不了的问题上** | `Select-String web\dist\pskt-file.html -Pattern "Content-Security"`（第 31 轮产物：`script-src 'self';` ✓ 同文件里有内联 `<script>` ✓） | 已改为**不依赖那个答案**：两个单文件页的 CSP 都加 `'unsafe-inline'` ✓ 并加构建断言"内联脚本若不被本页 CSP 允许 ⇒ 拒绝出产物"✓ 未选 CSP hash：文件被任何一次重新保存（哪怕只改行尾）就会静默失效 ⇒ **一个下载后不启动的工具比允许自身代码的工具更糟** ✓ 真浏览器里仍需一次人工确认 ✓ 归 D18 |
-| D34 | `build-web.mjs` 的 `bundle(entry)` 把**自动运行守卫写死成接收端的 id `"files"`** ⇒ 我造第二个 bundle（发送端）时它会在错误的页面上启动错误的入口 ✓ 属于"一个产物能跑只是因为还没有第二个"的潜在缺陷 | `git show HEAD:tools/build-web.mjs` 里 `document.getElementById("files")` 与 `__R("web/app.js")` 均为字面量 | 已参数化 `bundle(entry, autoRunGuardId)` ✓ 接收端 `('web/app.js','files')` ✓ 发送端 `('web/sender.js','sfile')` ✓（`sfile` 这个 id 在 `send.html:16` ✓ 读过的 ✓ 不是猜的 ✓） |
+| ~~D32~~ | **PowerShell 的 `>` 重定向把 `git show` 的输出写成 UTF-16LE**（首字节 255 = `0xFF` BOM ✓）⇒ 我用 UTF-8 读它 ⇒ `indexOf('export default')` 返回 -1 ⇒ **差点得出"我的判据是空跑的"这个错结论** ✗ 靠**阳性对照**（同一正则测已知含 default 的字符串 ⇒ true ✓）才分清"文件坏了"与"正则坏了" | `node -e "console.log(require('fs').readFileSync('.tmp/oldpdf.js')[0])"` ⇒ `255` | AGENTS.md 已记着同族坑（`Get-Content`+`Set-Content` 走 CP1252 ✓）✓ 这次是**重定向写 UTF-16LE** 的新变体 ⇒ 补进本机陷阱表：**跨工具取文本一律用 `node -e` 直读真文件 ✓ 不要用 `>` 落地后再读 ✓** |
+| ~~D33~~ | 交付过一段时间的**单文件页带着 `script-src 'self'` 却内联了 `<script>`** ⇒ 按规范浏览器会拒绝执行自己页面的内联脚本（[GH issue](https://github.com/mshirel/song-history/issues/247) ✓ [SO](https://stackoverflow.com/questions/76347766/content-security-policy-csp-blocking-my-local-script) ✓）✓ 而 `file://` 下 `<meta>` CSP 是否强制执行**本机无浏览器无法验证**（D18 同族 ✓）⇒ 我不声称"它一直是坏的" ✗ 只说：**它把可用性押在一个我在这里验不了的问题上** | `Select-String web\dist\pskt-file.html -Pattern "Content-Security"`（第 31 轮产物：`script-src 'self';` ✓ 同文件里有内联 `<script>` ✓） | 已改为**不依赖那个答案**：两个单文件页的 CSP 都加 `'unsafe-inline'` ✓ 并加构建断言"内联脚本若不被本页 CSP 允许 ⇒ 拒绝出产物"✓ 未选 CSP hash：文件被任何一次重新保存（哪怕只改行尾）就会静默失效 ⇒ **一个下载后不启动的工具比允许自身代码的工具更糟** ✓ 真浏览器里仍需一次人工确认 ✓ 归 D18 |
+| ~~D34~~ | `build-web.mjs` 的 `bundle(entry)` 把**自动运行守卫写死成接收端的 id `"files"`** ⇒ 我造第二个 bundle（发送端）时它会在错误的页面上启动错误的入口 ✓ 属于"一个产物能跑只是因为还没有第二个"的潜在缺陷 | `git show HEAD:tools/build-web.mjs` 里 `document.getElementById("files")` 与 `__R("web/app.js")` 均为字面量 | 已参数化 `bundle(entry, autoRunGuardId)` ✓ 接收端 `('web/app.js','files')` ✓ 发送端 `('web/sender.js','sfile')` ✓（`sfile` 这个 id 在 `send.html:16` ✓ 读过的 ✓ 不是猜的 ✓） |
 
 ### 第 31 轮闭掉的
 
@@ -56,7 +66,7 @@
 
 | # | 缺陷 | 复现 | 性质 |
 |---|---|---|---|
-| D30 | 我给 `send.html` 加"回链到接收端"时**没有先看那页已有没有** ⇒ 那里本来就有 `<nav class="tabs"><a href="./index.html">→ 接收端（扫描/解码）</a></nav>` ✓ 我加出了**第二条重复回链** ✗ 由 `check-dist` 的引用计数目视复核抓获（不是我推理出来的 ✓ 是打印产物内容看到的 ✓）⇒ 撤掉我加的那条 ✓ 复验：站点 `send.html` 里 `href="./index.html"` 恰好 **1 条** | `Select-String web\dist\send.html -Pattern "href=.\./index\.html" \| Measure-Object` | 教训与 D4/D5 同源：**改 UI 前先读那页现有的东西** ✓ 本轮 index.html 也犯过一次同类（我把 `<p class="sub">` 那句"不联网、不上传、不需要 URL"**整段替换成了导航链接** ✓ 差点删掉项目最重要的那句承诺 ✗ 立刻补回 ✓）⇒ 两处都属"用 edit 时 old_string 圈大了" ✓ 圈定应只圈要改的那个元素 ✓ |
+| ~~D30~~ | 我给 `send.html` 加"回链到接收端"时**没有先看那页已有没有** ⇒ 那里本来就有 `<nav class="tabs"><a href="./index.html">→ 接收端（扫描/解码）</a></nav>` ✓ 我加出了**第二条重复回链** ✗ 由 `check-dist` 的引用计数目视复核抓获（不是我推理出来的 ✓ 是打印产物内容看到的 ✓）⇒ 撤掉我加的那条 ✓ 复验：站点 `send.html` 里 `href="./index.html"` 恰好 **1 条** | `Select-String web\dist\send.html -Pattern "href=.\./index\.html" \| Measure-Object` | 教训与 D4/D5 同源：**改 UI 前先读那页现有的东西** ✓ 本轮 index.html 也犯过一次同类（我把 `<p class="sub">` 那句"不联网、不上传、不需要 URL"**整段替换成了导航链接** ✓ 差点删掉项目最重要的那句承诺 ✗ 立刻补回 ✓）⇒ 两处都属"用 edit 时 old_string 圈大了" ✓ 圈定应只圈要改的那个元素 ✓ |
 | ~~D31~~ | 我在 `tools/build-web.mjs` 加的单文件剥离规则是 `/\s*<p class="nav">[\s\S]*?<\/p>/` ✓ 它**按 class 名**匹配 ⇒ 若将来别处也出现 `p.nav`、或站点版那条链接被误删 ✓ 现有判据**全都不会报**（它们只验"剩下的引用都能落到产物上"✓ 从不验"该在的引用还在"）✗ | 补了配对断言后：`node tools/check-dist.mjs` ⇒ 新增一条 `the served index.html keeps its link to the sender` ✓ 它同时断言**站点版必须有、单文件版必须没有** ✓ 去掉任一侧都会红 | CLOSED（同轮补断言 ✓ 没推到下轮：**"一行的事留给下轮"是这个台账里最常见的自欺 ✓**） |
 
 ### 第 30 轮闭掉的

@@ -471,16 +471,38 @@ export function buildQuad(list, bin, region) {
       return { ok: false, reason: 'mirrored-image', score: bestMirror };
     }
     // Readings for whoever debugs a refusal, deliberately named so it cannot be mistaken
-    // for a marker size. Measured on a shrinking synthetic page (see docs/DEFECTS.md D24):
-    // the failure is NOT monotonic in scale -- 105dpi and 120dpi recover the quad while
-    // 150dpi does not -- and this number read 15 in a failing case and 9 in another failing
-    // case, i.e. it tracks the largest blob, which can be a merged data cluster rather than
-    // a corner marker. So it is a diagnostic of what the binariser produced, nothing more,
-    // and no pixel floor may be derived from it.
+    // for a marker size. Historical measurement (docs/DEFECTS.md D24/D26, both closed): on a
+    // shrinking synthetic page this tracked the largest blob, which can be a merged data
+    // cluster rather than a corner marker -- it read 15 in one failing case and 9 in another.
+    // So it is a diagnostic of what the binariser produced, nothing more, and no pixel floor
+    // may be derived from it. The non-monotonicity it was recorded against turned out to be a
+    // one-pixel sampling-point bug in hasHole (closed in round 30), not resolution.
     const maxBlobArea = ranked.reduce((m, c) => (c.area > m ? c.area : m), 0);
     const maxBlobSide = Math.round(Math.sqrt(maxBlobArea) * 10) / 10;
-    // distinguish "no rectangle at all" from "no corner is hollow" so the caller
-    // learns whether to fix exposure or to move the phone
+    // "No hollow corner" carries two operationally opposite cases: the sheet's fourth corner
+    // is outside the photo (a framing problem -- move back), or the marker is present and its
+    // hole cannot be read (a scuff, a reflection, a print defect). They need different advice
+    // and one string cannot hold both (docs/ACCEPTANCE.md open defect #3). It still holds both
+    // today, because the obvious separation was tried and refuted below; until a sound version
+    // exists the advice entry for this reason speaks only to the second case, which is the one
+    // it can honestly address.
+    // Attempted and refuted by measurement, recorded here so nobody re-tries it blind
+    // (docs/DEFECTS.md D36): the two operationally opposite cases behind `hollow.size === 0`
+    // -- the fourth corner outside the photo, versus the marker present but its hole
+    // unreadable -- cannot be separated by "find three same-size squares that form a
+    // page-scale right angle, then look whether anything sits at the implied fourth corner".
+    // On a real 300 dpi page with a 256-byte payload there are 159 square candidates, of
+    // which the largest are merged data-cell blobs; the enumeration pool here is the top 14
+    // by AREA, so genuine 30 px markers lose their slots to lattice clusters and a bogus
+    // right angle gets built out of print noise -- its implied corner then sits nowhere near
+    // the missing marker, and a page whose corner marker was present and solid was reported
+    // as "out of frame". Switching the occupancy pool to all candidates pulls the other way
+    // (more blobs near any given point, so the scuff case swallows the framing case), which
+    // is what proves the approach rather than a parameter is wrong. A sound version has to
+    // anchor the expected fourth position on the profile's own geometry (a predicted corner
+    // from the three markers, checked against the layout the page declares), not on
+    // arbitrary triples -- and it would need the failure path to carry the marker cluster
+    // rather than a top-N area slice. Left as one reason until that exists.
     return {
       ok: false,
       reason: hollow.size === 0 ? 'no-hollow-corner' : 'no-rectangular-quad',
