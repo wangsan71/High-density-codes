@@ -35,7 +35,7 @@
 | G5 误接受 0 | ✅ | — | `verify --gate G5 --trials 10000`（9200 纠正 / 800 拒 / **0 误接受** ✓ 变异两项 ✓） |
 | G6 性能 + soak | 🟡 | 性能有实测数 ✓ **30–60 min soak 未跑** ✓ | 见 `ACCEPTANCE` G6 行 |
 | G7 单色兜底 100% | ✅ | — | `verify --gate G7`（`colourAlive=false` → 整道擦除复原 ✓） |
-| G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF 未过官方 XSD**：`ref/3mf-core-1.4.0.xsd` 已 vendored 但**校验器根本没写**（`verify_model.py` 无 `--xsd` 开关 ⇒ "过 schema"目前无任何证据 ✓ 现含义仅"被第三方 stdlib 读通且结构自洽" ✓）· 无进程内 `gateG8` | `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
+| G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF XSD 子集校验器：第 38 轮已写、进程内可跑、对我们所有产物 PASS ✅**（`tools/check-3mf.mjs` + `verify --gate G8` ✓ 规则逐条抄自 vendored `ref/3mf-core-1.4.0.xsd` 并注行号 ✓ 25 条测试 = 21 篡改 + 4 正例含"D40 回归守卫"✓ **绿了 ⇒ 已并入 `--gate all`** ✓）· 仍**不等于过 schema**（本机无 XSD 引擎 ✗ Python 侧 `verify_model.py` 无 `--xsd` 开关 ✗）· **D41 OPEN**：表与权威 XSD 之间**还没有自动对拍** ✗（本轮就是靠抄错权威翻了车 ✓） | `node cli/pskit.mjs verify --gate G8`（或 `--file a.3mf,b.3mf`）· `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
 | G9 Web 扫描端（Pages） | 🟡（产物级全绿 ✓ 浏览器内未验证） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **8/8 全绿**：零第三方加载点、两页 CSP `default-src 'self'`、SW 78 条清单哈希逐字节对上磁盘、页面每个引用都有对应产物、`pskt-file.html` 只含 data: ✓ **`web/dist/selftest.js` 在产物内跑出 13 pass / 0 fail** ✓ **bundle 无人告知几何解磁盘页 → 摘要等于 `manifest.sourceSha256`** ✓ 差多少：**本机无浏览器** ⇒ "`?selftest=1` 在页面里绿"与"`file://` 双击→选照片→解出文件"这两条只被 Node 侧等价物证明 ✓ 摄像头授权、SW 注册、iOS 主屏图标全属推定；要人在这台机器之外点一次才算闭合 | 第 22–23 轮 ✓ |
 | G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝 ✓）⇒ 完整矩阵未跑 ✓ 未标定 MTF 前不判决 ✓ | `pskit send --profile … --nozzle …` 逐档 |
 
@@ -118,6 +118,18 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 38 轮（3MF 的 XSD 子集校验器 + `--gate G8` ✓ 而本轮最大的产出是**我自己撤回的一条假发现**）
+
+- **交付**：`tools/check-3mf.mjs`（3MF Core 1.4 **XSD 子集**校验器：包部件与内容类型覆盖、部件名合法性、关系与唯一起始部件、**自解析命名空间**、元素序列与 `mesh|components` choice、属性值域、文档级 id 唯一、`pid` 悬空、三角形索引范围与退化、`ST_ResourceID/Index` 的 2³¹ 上界、`CT_Vertices` ≥3 / `CT_Triangles` ≥1、DTD 与实体声明）+ `verify --gate G8`（进程内造 `PL-D2@0.4` 板材 3MF，或 `--file a.3mf,b.3mf` 查历史产物）+ `tests/unit/threeMF-subset.test.mjs` **25 条**
+- **为什么必须独立于 `parseModelXml`**：它自己写着"只认自己写出来的那种形状：属性顺序固定"⇒ 建在它之上的校验器**继承同一份盲目**（属性换序/多一个属性/命名空间用前缀 ⇒ 它只是匹配不到）⇒ 本校验器自己扫 XML、解析 `xmlns` 绑定 ⇒ 正例"前缀绑定必须通过"就是为这条而写 ✓ 两条算路互不覆盖：`selfCheck3MF` 问"写出的是不是我想写的"、本校验器问"合规读取器会不会收下"✓
+- **本轮最该记住的错（D41 OPEN · D40 撤回）**：我先按记忆写属性表、再拿**网上取来的 schema 变体**当"核实"⇒ 它没有 `object/@name` ⇒ 校验器判我们**每一份** 3MF 违规、`--gate G8` FAIL ⇒ **若我信了，下一轮就会去"修"一个不存在的缺陷**：删发射器的 `name`、改 `parseModelXml` 的 object 正则（它把 `name` 当必需且在固定位置 ⇒ 删了一个对象都读不出）、动 mesh 测试、并因 `core/` 改动重建 `web/dist` ⇒ 一次纯粹的自我破坏 ✗ 而**权威 `ref/3mf-core-1.4.0.xsd` 一直在盘上、本页 L38 还点名过它** ⇒ 根因是**没先查工作区**（D29 同族第 3 次 ✓）⇒ 按权威改表后**全绿**；D40 行保留为历史并加撤回标记 ✓（照 D36 的先例 ✓）
+- **从权威 XSD 抄实的事实（都进了表与测试）**：`CT_Object` L84-101 = `id/type/thumbnail/partnumber/name/pid/pindex` + `xs:anyAttribute namespace="##other"` ⇒ **带前缀的扩展属性合法、无限定的未知属性仍违规** ✓ `ST_ObjectType` L211-217 有 **5** 个枚举（变体只有 2 个）✓ `ST_ResourceID/Index` L201-208 = positive/nonNegativeInteger 且 `maxExclusive 2^31` ✓ `CT_Vertices` minOccurs=3、`CT_Triangles` minOccurs=1 ✓ **core 元素只有 16 个**（`colorgroup`/`color`/`texture2d` 属**扩展** schema ⇒ 我凭记忆多加的两个已删 ✗）✓ 另**故意放宽一处并写明**：`metadata/@name` 是 `xs:QName`，但严格校验要求前缀已声明，而 3MF 惯例（`pskt:`、`slic3r:`、`Application`）都不声明 ⇒ 只查词法形状，否则会把所有真实文件判违规 ✓
+- **G8 已并入 `--gate all`**（绿了才进例行 ✓ 红的那几分钟里有意不并入，理由是并入会让例行基线永远红、掩盖其余门限回归）✓ `cmdVerify` 每次打印"本次未评估哪些门限"⇒ `ALL GATES PASS` 的覆盖面不可再被夸大 ✓
+- **我另外三个实现错，全由"跑一遍"暴露**（新检查第一次跑不可信 ✓ 又一次）：① 校验器首跑 **SyntaxError**（嵌套模板字符串 + 一个多余引号）② close 节点漏写 `local` ⇒ 每个 object 都像没闭合 ⇒ 统计全 `0 objects`（**假绿的一种：数字为零却报 OK**）③ `replace_all` 把 `resourceId` 的**定义体**一起吃掉 ⇒ TDZ ✗ 另踩一个 PowerShell 陷阱：双引号 `node -e "..."` 里的 `$1m:` 被 PS 当变量插值 ⇒ 已写进 `AGENTS.md` 陷阱表 ✓
+- 证据：单测 **272/272** ✓ `verify --gate all --seeds 2` ⇒ **exit 0**、`G0 unit suite: 272 passed, 0 failed`、`ALL GATES PASS -- 6/7 evaluated, 1 skipped`（G2 无语料 ⇒ 点名跳过 ✓）、`PASS G8 subset`（3 objects / 377964 triangles / 189802 vertices ✓）· `--gate G8 --file .tmp/m5det1/page-000.3mf,.tmp/m5verify/page-000.3mf` ⇒ 历史产物同样 OK ✓ `core/` **未动** ⇒ 不需要重建 `web/dist` ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**D41 的修法**——加一条"表 ⇄ `ref/3mf-core-1.4.0.xsd` 对拍"的测试（用本校验器自己的 `scanXml` 读 XSD、抽出 `CT_*` 属性集与 16 个元素名逐项比对 ⇒ 表再抄错就红 ✓）→ 200 seeds 的 G2 语料（需手跑 python）→ G4 手机实机压力 500×8（**从未跑过** ✗）→ G6 soak → G10 喷嘴矩阵 → `.github/workflows/pages.yml`
+
 
 ### 第 37 轮（G2 从"手工命令"变成**门限** ✓ 而它交出的第一个数字是 FAIL）
 

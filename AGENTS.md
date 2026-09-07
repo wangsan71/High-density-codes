@@ -23,12 +23,13 @@
 | npm 装不了东西 | 缓存目录不可写 | 本来就不允许依赖；实在要试用 `--cache ./.npm-cache` 并先问用户 |
 | `&&` 报错 | 这是 PowerShell | 命令分隔用 `;`；路径用 `C:\...` 反斜杠形式 |
 | `git show ... > f` 再读回，内容"查无此串" | PowerShell 重定向写的是 **UTF-16LE**（首字节 `255 254`）| **跨工具取文本一律 `node -e` 直读真文件**；要用 shell 落地就显式 `-Encoding utf8NoBOM` 并按同编码读回。判"某判据是不是空跑"之前**必做阳性对照**（拿已知命中的字符串测同一个正则）——第 32 轮就是这条差点让我把真判据误判成空跑 |
+| `node -e "...$1m:..."` 报 `Variable reference is not valid` | **PowerShell 双引号字符串先插值** ⇒ 内联 JS 里的正则替换 `$1`/`$2` 被当成 PS 变量 | 含 `$` 的内联脚本**落地成 `.mjs` 文件再跑**（本轮就这么绕过的）；另 `2>&1 \| ForEach-Object { $_.TrimEnd() }` 会在 ErrorRecord 上报 `MethodNotFound` ⇒ 改用 `{ [string]$_ }` |
 
 ## 环境事实（探测过，别再探）
 
 - Node v24.14.0；Python 3.10.9 + numpy 2.2.6 + opencv-python 4.13（**有 `cv2.aruco`，无 contrib**）+ pillow 11.1 + scipy 1.15.1；**没有** pytest/hypothesis/img2pdf/segno/pyzbar。
 - 20 核，D: 盘 2TB 空闲；本机无可枚举 WIA 扫描仪（只读沙箱里 COM 被拦）。
-- Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。
+- Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。**但先查工作区再上网**：`ref/` 里已 vendored 权威规范文件（如 `ref/3mf-core-1.4.0.xsd`）⇒ 第 38 轮我按记忆写表、又拿网上取来的 schema **变体**当权威，判自己发射器"违规"（D40 已撤回 / D41 OPEN ✗）。
 
 ## 门限（G0–G10）
 

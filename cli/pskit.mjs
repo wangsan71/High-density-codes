@@ -50,11 +50,14 @@ const HELP = `pskit <command> [options]
                          required only when there is no manifest.json
 
   status                 profile / nozzle capacity table
-  verify --gate <G>      run an acceptance gate in-process (G0 G1 G2 G3 G5 G7 all)
+  verify --gate <G>      run an acceptance gate in-process (G0 G1 G2 G3 G5 G7 G8 all)
     --seeds <n>          G1/G3/G7 repetitions (default per gate)
     --trials <n>         G5 tamper count (default 10000)
     --corpus <dir>       G2: a corpus dir made by sim/channel.py (or --root DIR --match GLOB)
     --fast               G2: skip the photo-path decode (same as g2-corpus.mjs --fast)
+    --file <a,b.3mf>     G8: check these files instead of building one in process
+                         'all' covers G0 G1 G2 G3 G5 G7 G8; G4/G9 need a phone and a browser,
+                         G6 is the long soak, G10 needs a printer -- name them to run them
   roundtrip --selftest   encode+decode a synthetic payload, print timings
 `;
 
@@ -977,10 +980,63 @@ async function gateG2(args) {
   return ok;
 }
 
+/**
+ * G8 -- the half of the 3D-artifact gate that can run in process.
+ *
+ * It builds a plate .3mf with our own encoder and hands the bytes to tools/check-3mf.mjs, which
+ * checks the Core 1.4 subset from the file alone and deliberately without the writer's parser:
+ * `parseModelXml` only recognises the exact shape our emitter produces, so a checker built on it
+ * could not notice that the shape itself is not what the schema allows. The rules are read against
+ * the schema vendored in this repository, `ref/3mf-core-1.4.0.xsd`; the first version of them was
+ * taken from a schema fetched off the web and produced a false finding against our own emitter,
+ * recorded and withdrawn as D40 (docs/DEFECTS.md).
+ *
+ * G8's other half (projecting the solid back onto the cell grid and comparing with the raster
+ * mask) needs Python + OpenCV, so it stays a documented command in docs/ACCEPTANCE.md rather than
+ * a printed guess here: the same split G2 uses, because spawning is denied in this sandbox and a
+ * gate only I could run would not be a gate the user can reproduce.
+ */
+async function gateG8(args) {
+  const check = await import('../tools/check-3mf.mjs');
+  const targets = [];
+  if (args.file) {
+    const { readFileSync } = await import('node:fs');
+    for (const f of String(args.file).split(',')) targets.push({ label: f, bytes: new Uint8Array(readFileSync(f)) });
+  } else {
+    const protocol = await import('../core/protocol.js');
+    const layoutMod = await import('../core/render/layout.js');
+    const plate = await import('../core/mesh/plate.js');
+    const three = await import('../core/mesh/threeMF.js');
+    const profileId = String(args.profile || 'PL-D2');
+    const nozzle = String(args.nozzle || '0.4');
+    const t = await protocol.encodeTransfer(new Uint8Array(64).fill(0x5a), { profile: profileId, nozzle });
+    // A plate profile carries no dpi of its own (PL-D2's is undefined, geom.dpi is null), so this
+    // is the canonical plate call used by `pskit send` and by the mesh tests: 300 dpi, 200 mm.
+    const layout = layoutMod.pageLayout(t.geom, 300, { plateMm: 200 });
+    const model = plate.buildPlateModel({ geom: t.geom, levels: t.pages[0].levels, layout });
+    const bytes = three.encode3MF({ objects: model.objects, metadata: { 'pskt:profile': profileId, 'pskt:page': 0 } });
+    const self = three.selfCheck3MF(bytes, { expectTriangles: model.facts.trianglesTotal });
+    console.log(`       built in process: ${profileId}@${nozzle} -> ${model.objects.length} objects, ${model.facts.trianglesTotal} triangles, ${bytes.length} bytes; selfCheck3MF ${self.ok ? 'ok' : `REFUSED: ${self.issues.join('; ')}`}`);
+    targets.push({ label: `${profileId}@${nozzle} (in process)`, bytes });
+  }
+  let ok = true;
+  for (const target of targets) {
+    const r = check.validate3MF(target.bytes);
+    const s = r.stats;
+    const shape = s && s.model ? `${s.parts} parts, ${s.model.objects} objects / ${s.model.triangles} triangles / ${s.model.vertices} vertices, unit ${s.model.unit}` : s ? `${s.parts} parts` : '';
+    console.log(`       ${r.ok ? 'OK  ' : 'FAIL'} ${target.label}  ${shape}`);
+    for (const i of r.issues.slice(0, 12)) console.log(`         - ${i}`);
+    if (r.issues.length > 12) console.log(`         ... and ${r.issues.length - 12} more`);
+    if (!r.ok) ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'} G8 subset: ${targets.length} file(s) checked against 3MF Core 1.4 (package parts, content types, relationships, model part), rules taken from the vendored ref/3mf-core-1.4.0.xsd. Not schema conformance -- there is no XSD engine here: docs/ACCEPTANCE.md G8.`);
+  return ok;
+}
+
 async function cmdVerify(args) {
   const gate = String(args.gate || 'all');
-  const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5', 'G7'] : [gate.toUpperCase()];
-  const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G7: gateG7 };
+  const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5', 'G7', 'G8'] : [gate.toUpperCase()];
+  const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G7: gateG7, G8: gateG8 };
   let allOk = true;
   const skipped = [];
   for (const g of wanted) {
@@ -1009,6 +1065,14 @@ async function cmdVerify(args) {
       ? `\nALL GATES PASS${skipped.length ? ` -- ${evaluated}/${wanted.length} evaluated, ${skipped.length} skipped\n  ${skipped.join('\n  ')}` : ''}`
       : '\nGATE FAILURE',
   );
+  // Name what this run did not cover, so a quoted "ALL GATES PASS" cannot be read as more than it
+  // is. G8 joined 'all' in the round it went green; it had been held out while it was red, because
+  // folding a known-red gate in would make every run red and hide regressions in the green ones.
+  const notHere = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10'].filter((g) => !wanted.includes(g));
+  if (notHere.length) {
+    console.log(`  not evaluated by this run: ${notHere.join(' ')}`);
+    console.log('    G4 G9 need a real phone/browser, G6 is the long soak, G10 needs a printer');
+  }
   if (!allOk) process.exitCode = 1;
 }
 
