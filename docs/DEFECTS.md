@@ -29,6 +29,25 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | D20 | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 26 轮新增（OPEN）
+
+| # | 缺陷 | 证据 / 复现 | 性质 |
+|---|---|---|---|
+| D24 | **角标是手机端的分辨率地板，而 reason 会说谎**：同一页降到 1/4 面积（2260×3290 → 1130×1645 ✓ 等效 150dpi ✓ 仍是清晰降采样、无模糊噪声）⇒ **24 个几何候选全部死在 `stage:markers / reason:no-hollow-corner`** ✓ 根本没走到读出。也就是说 `rectifyPage(bitmap, layout, found.quad)` 在原理上是跨尺度的（把实测四角映到 layout 画布 ✓ 我上一轮"几何搜索不跨尺度"的说法**说过头了，撤回 ✗**）✓ 真正卡住手机的是**第四空心角在低分辨率下测不出来** | `node tools/probe-curl-tolerance.mjs --down 2 --rot 0 --bend 0` ⇒ 阶段分布 `markers/no-hollow-corner×24` | **objective 第 (1) 条手机端的直接障碍** ✓ 且 `no-hollow-corner` 语义过载（`ACCEPTANCE.md` 开放缺陷 #3 ✓）本轮**又一次把我引向错误的根因** ⇒ 拆 reason 现在是承重项，不再是"以后再说" |
+| D25 | **卷曲在页级可造成大面积错读，传输级尚未验证**：native dpi 下 `bend=4px`（页中部相对四角 4 像素起伏 ✓ 真实卷纸远大于此）⇒ `bootstrapDecode` 返回 `ok:true` ✓ 而 68904 格里 **33021 格与真值不符（52.08% 一致）**；`bend≥12px` 则干脆拒绝（`no-geometry-matched` ✓ 安全）✓ **这不是误接受**——页级 ok 之上还有页间/页内 RS + 末端 SHA-256 ✓ 误接受与否由那条链定夺（G5：10000 次篡改 0 误接受 ✓）✓ 但**本探针没有替该链说话**：必须把整盘页送进组装/校验路径重测 | `node tools/probe-curl-tolerance.mjs --down 1 --rot 0 --bend 0,4,12,24,48` | **D21（对齐梳）的判决依据**：若传输级也能拒 ⇒ 梳子是鲁棒性收益、不该为此改动采样路径；若传输级**接受**了 ⇒ 属误接受家族 ✓ 优先级立刻高于 G4 ✓ 本轮未做（预算）⇒ 下一轮第一件 |
+
+### 第 26 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D16~~ | `docs/ACCEPTANCE.md` 的 G9 行仍写"未开始/零证据" | G9 行改为 🟡 并列出 9 条产物级判据与复现命令 ✓ "一句话结论"里对 G9 的**低估**一并更正 ✓ 页头"最后更新"升至第 26 轮 | CLOSED（本轮同时说明：台账虚高与虚低同样是错 ✓） |
+
+### D21 重新定标（第 26 轮 · 由意见改为量测）
+
+原记"对齐梳无实现"✓ 仍然成立 ✓ 但本轮把它从"缺一项 PLAN 特性"改成可判定的命题：**四角单应能表达平移/旋转/均匀与微分缩放/剪切/透视（仿射 6 + 射影 2 自由度）✓ 逐格另有 ±1px 整数搜索 ✓ 所以梳子唯一能补的是单应表达不了的离面形变（卷曲/起伏）** ⇒ 于是要量的不是"要不要忠于 PLAN"而是"**卷曲在什么量级开始造成什么后果**" ✓ 已有页级数据（D25）✓ 待传输级数据 ⇒ 有了它才谈得上"值不值得为此动 G3/G5/G7 压着的那条采样路径" ✓
+
+
+
 ### 第 25 轮闭掉的
 
 | # | 缺陷 | 复验 | 状态 |
