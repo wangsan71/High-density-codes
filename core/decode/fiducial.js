@@ -275,7 +275,16 @@ const SQUARE_FILL = 0.5;
 export function findMarkers(bitmap, opts = {}) {
   const base = binarize(bitmap, opts);
   if (base.inkCount < 32) return { ok: false, reason: 'blank-image', threshold: base.threshold };
-  const factors = opts.thresholds || [1, 1.35, 1.7, 2.1];
+  // The ladder used to be one-sided: 1, 1.35, 1.7, 2.1 -- it could only get
+  // STRICTER. That is the right direction when a low threshold bridges the lattice
+  // into a mesh, but it is the wrong direction when the capture leaves only the
+  // cores of each stroke. At 600 dpi (20 px/cell) with a constant physical blur the
+  // per-pixel peak coverage roughly halves, so Otsu keeps about a third of the ink
+  // and a 60 px fiducial measures 30 px: `no-square-candidates`, and the whole
+  // batch dies even though 600 dpi should be the *easier* channel. Trying looser
+  // cuts first (after the standard one, so the most likely reading still wins the
+  // race -- the first success returns immediately) covers both failure directions.
+  const factors = opts.thresholds || [1, 0.85, 0.7, 0.55, 1.35, 1.7];
   const peak = base.inkness.max;
   // A stricter cut-off is only worth trying while some pixel can survive it. On a
   // real scan the inkness maximum is ~248 while Otsu sits near 140, so the factor
