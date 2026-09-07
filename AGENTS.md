@@ -16,7 +16,7 @@
 
 | 现象 | 原因 | 做法 |
 |---|---|---|
-| `spawn EPERM` | 沙箱禁止管道 stdio 的子进程 | 测试用 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`；门限一律**进程内**跑，不要 spawn 子进程 |
+| `spawn EPERM` | 沙箱禁止管道 stdio 的子进程 | 测试用 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`；门限一律**进程内**跑，不要 spawn 子进程。**作用域仅限 node 进程内的管道 stdio**：宿主 shell（pwsh 工具）跑 `python` / `git` / `node` **是通的** ⇒ 第 40 轮我把这行读窄，误判"G2 语料只能由用户带外生成"、让门限样本量停在判据的 1/6（**D42 ✗**）；已验证命令：`python sim/channel.py --in .tmp/g2src --out .tmp/nc-scan300-N --seed N --preset scan300 --modifier nocrop` ⇒ **15 s / 26.5 MB / 份** ✓ 另：**工具的 `timeoutMs` 被执行器封顶 600 s**（传更大值无效 ✗）⇒ 长任务必须分批 |
 | `ERR_UNSUPPORTED_DIR_IMPORT` | `--test` 不吃目录参数 | 必须给 glob 字符串 |
 | 源码注释变成 U+FFFD / C1 控制字符 | PowerShell `Get-Content`+`Set-Content` 走 CP1252 往返 | **改文件只用 edit/write 工具**；出事跑 `node tools/fix-mojibake.mjs --write` |
 | `git` 刷一屏 CRLF warning | 缺 `.gitattributes` | 已有 `* text=auto eol=lf`；不要加 `core.autocrlf=true` |
@@ -29,7 +29,7 @@
 
 - Node v24.14.0；Python 3.10.9 + numpy 2.2.6 + opencv-python 4.13（**有 `cv2.aruco`，无 contrib**）+ pillow 11.1 + scipy 1.15.1；**没有** pytest/hypothesis/img2pdf/segno/pyzbar。
 - 20 核，D: 盘 2TB 空闲；本机无可枚举 WIA 扫描仪（只读沙箱里 COM 被拦）。
-- Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。**但先查工作区再上网**：`ref/` 里已 vendored 权威规范文件（如 `ref/3mf-core-1.4.0.xsd`）⇒ 第 38 轮我按记忆写表、又拿网上取来的 schema **变体**当权威，判自己发射器"违规"（D40 已撤回 / D41 OPEN ✗）。
+- Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。**但先查工作区再上网**：`ref/` 里已 vendored 权威规范文件（如 `ref/3mf-core-1.4.0.xsd`）⇒ 第 38 轮我按记忆写表、又拿网上取来的 schema **变体**当权威，判自己发射器"违规"（D40 已撤回 / D41 **第 39 轮已闭** ✓ 修法 = `tests/unit/threeMF-xsd-parity.test.mjs`：表 ⇄ 权威 XSD 自动对拍，并做过阳性对照）。
 
 ## 门限（G0–G10）
 
