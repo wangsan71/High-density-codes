@@ -39,6 +39,10 @@ const ADVICE = {
     cause: 'four markers were found but none of them is hollow -- the orientation marker is unreadable (scuffed, over-exposed, or the wrong side of an FDM plate)',
     do: 'use the top face of the plate and retake without a direct reflection on the hollow corner',
   },
+  'fourth-corner-out-of-frame': {
+    cause: 'three corner markers were found, and the rectangle they imply puts the fourth corner outside the image -- the sheet is tilted or too close, so one corner never made it into the photo',
+    do: 'back up and square the page to the frame until all four corners are visible, then retake; this is a framing problem, not a focus or cleaning problem',
+  },
   'no-rectangular-quad': {
     cause: 'the marker candidates do not form a plausible rectangle',
     do: 'remove occlusions (fingers, page edges of a neighbour) and retake with the page flat',

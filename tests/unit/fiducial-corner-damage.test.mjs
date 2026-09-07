@@ -1,20 +1,24 @@
 /**
- * PSKT unit tests -- corner-damage fixtures must never be accepted.
+ * PSKT unit tests -- the fourth corner: out of frame, or in frame and unreadable.
  *
- * This file began as the test for a new failure reason that would tell a phone "your fourth
- * corner is out of frame" apart from "the marker is there and its hole cannot be read". That
- * separation was built, measured, and refuted (docs/DEFECTS.md D36): on a real page with
- * ~159 square candidates, any three same-size squares can form a page-scale right angle, so
- * the corner it implies is not the missing marker's corner. No reason is asserted here --
- * deliberately, and the current reasons are printed instead so the day someone rebuilds the
- * split, this output shows what it has to distinguish.
+ * `no-hollow-corner` used to carry both (docs/ACCEPTANCE.md defect #3), and the first attempt
+ * at splitting them was refuted by measurement (docs/DEFECTS.md D36). What made that attempt
+ * unsound was asking whether any blob sat near the implied fourth corner -- on a data lattice
+ * something always does and off it nothing ever does, so no parameter could serve both. The
+ * version tested here asks a question with no parameter: three same-size squares forming a
+ * page-scale right angle imply a rectangle, and either its fourth corner is inside the image
+ * or it is not.
  *
- * What does get asserted is the part this contract cares about: a page whose fourth corner is
- * occluded, or whose orientation marker has been replaced by a solid blob, must be REFUSED.
- * A wrong label is a confusing message; a wrong acceptance is the one unforgivable outcome
- * (docs/PLAN.md). One test, three checks, no shared mutable state between tests -- an earlier
- * draft had two and its first assertion read a variable the second one assigned, which is the
- * fixture-authoring mistake already recorded in docs/DEFECTS.md D23.
+ * One geometric fact shapes these fixtures. For an axis-aligned page the implied corner always
+ * falls inside the bounding box of the three visible ones, so the out-of-frame branch can only
+ * fire under rotation or perspective -- which is precisely the hand-held phone case. Whitening
+ * a corner inside a full-size image is therefore NOT an out-of-frame fixture (an earlier draft
+ * of this file used it as one and was measuring the wrong thing); it is an in-frame unreadable
+ * corner, and it is kept here as that.
+ *
+ * The synthetic fixtures paint plain squares. They carry a fourth, differently sized square
+ * because detectIn refuses to look for markers at all below four candidates, and that is a
+ * property of the detector rather than of the case under test.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +40,7 @@ async function cleanPage() {
     palette: 'PAPER1',
     echoBits: echoBitsOf(it.pages[0].header),
   });
-  return { width: bmp.width, height: bmp.height, pixels: Uint8ClampedArray.from(bmp.pixels) };
+  return { width: bmp.width, height: bmp.height, pixels: Uint8Array.from(bmp.pixels) };
 }
 
 // White is paper, so painting a region white removes what was printed there.
@@ -65,28 +69,90 @@ function inkSquare(bmp, cx, cy, half) {
   }
 }
 
-test('a page missing or unable to read its fourth corner is refused, never accepted', async () => {
+// A blank RGBA canvas with a few solid squares on it. The small square is the fourth
+// candidate detectIn insists on; it is deliberately a different size so it never joins the
+// cluster under test.
+function synthetic(squares, size = 1200) {
+  const bmp = { width: size, height: size, pixels: new Uint8Array(size * size * 4) };
+  bmp.pixels.fill(255);
+  for (const [cx, cy, half] of squares) inkSquare(bmp, cx, cy, half ?? 15);
+  return bmp;
+}
+
+test('a real page with its corner damaged in frame is refused, and the report describes markers, not lattice', async () => {
   const base = await cleanPage();
 
-  const good = findMarkers({ ...base, pixels: Uint8ClampedArray.from(base.pixels) }, {});
+  const good = findMarkers({ ...base, pixels: Uint8Array.from(base.pixels) }, {});
   assert.equal(good.ok, true, `the clean fixture must be findable, got reason=${good.reason}`);
   assert.ok(good.quad && good.quad.br, `a found page must expose quad.br, got: ${Object.keys(good).join(', ')}`);
   const br = { x: Math.round(good.quad.br.x), y: Math.round(good.quad.br.y) };
 
-  // Fixture 1: the bottom-right corner of the sheet is not in the image at all.
-  const cropped = { ...base, pixels: Uint8ClampedArray.from(base.pixels) };
-  whiteOut(cropped, Math.floor(cropped.width * 0.8), Math.floor(cropped.height * 0.8));
-  const fmCropped = findMarkers(cropped, {});
-  assert.equal(fmCropped.ok, false, `occluded fourth corner must not be accepted (hollow=${fmCropped.hollowCount})`);
+  // Corner erased, image still full size: the sheet is framed, the marker cannot be read.
+  const erased = { ...base, pixels: Uint8Array.from(base.pixels) };
+  whiteOut(erased, Math.floor(erased.width * 0.8), Math.floor(erased.height * 0.8));
+  const fmErased = findMarkers(erased, {});
+  assert.equal(fmErased.ok, false, 'an unreadable corner must not be accepted');
+  assert.equal(fmErased.reason, 'no-hollow-corner', `in-frame damage is not a framing complaint, got ${fmErased.reason}`);
+  // D37: the failure must be reported from the marker cluster. Before that fix the tie-break
+  // preferred the cluster with more candidates, so this read 5 -- a data cell -- while the
+  // corner markers were 30 px, and every number a user saw described print noise.
+  assert.ok(
+    fmErased.maxBlobSide >= 20,
+    `the report must describe the markers (~30 px), not the lattice (5 px): maxBlobSide=${fmErased.maxBlobSide}, clusterPx=${fmErased.clusterPx}`,
+  );
 
-  // Fixture 2: same removed region, but a solid square of marker size sits where the marker
-  // belongs -- the corner is demonstrably present, only its hole cannot be read.
-  const solid = { ...base, pixels: Uint8ClampedArray.from(base.pixels) };
+  // Same region, plus a solid square where the marker belongs: present, but nothing is hollow.
+  const solid = { ...base, pixels: Uint8Array.from(base.pixels) };
   whiteOut(solid, Math.floor(solid.width * 0.8), Math.floor(solid.height * 0.8));
   inkSquare(solid, br.x, br.y, 14);
   const fmSolid = findMarkers(solid, {});
   assert.equal(fmSolid.ok, false, 'a marker with no readable hole must not be accepted');
+  assert.equal(fmSolid.reason, 'no-hollow-corner', `got ${fmSolid.reason}`);
+  assert.ok(fmSolid.maxBlobSide >= 20, `maxBlobSide=${fmSolid.maxBlobSide} still looks like lattice`);
 
-  // Printed, not asserted: this is what the pending reason split has to separate (D36).
-  console.log(`    D36 现状 · 第四角被遮=${fmCropped.reason}(hollow=${fmCropped.hollowCount},cand=${fmCropped.candidates}) · 角标在而孔不可读=${fmSolid.reason}(hollow=${fmSolid.hollowCount},cand=${fmSolid.candidates})`);
+  console.log(`    corner-damage · erased=${fmErased.reason}(blob=${fmErased.maxBlobSide}px,cluster=${fmErased.clusterPx}px) · solid=${fmSolid.reason}(blob=${fmSolid.maxBlobSide}px)`);
+});
+
+test('three markers whose implied fourth corner is outside the image say so', () => {
+  // Right angle at (600,600), arms to (1160,360) and (840,1160): equal length (609 px),
+  // perpendicular, page-scale. The rectangle they imply has its fourth corner at (1400,920),
+  // past the edge of a 1200 px image.
+  const fm = findMarkers(synthetic([[600, 600], [1160, 360], [840, 1160], [200, 200, 6]]), {});
+  assert.equal(fm.ok, false, 'three markers can never be accepted');
+  assert.equal(
+    fm.reason,
+    'fourth-corner-out-of-frame',
+    `expected the framing reason, got ${fm.reason} (implied=${JSON.stringify(fm.impliedCorner)})`,
+  );
+  assert.ok(fm.impliedCorner.x > 1200, `the implied corner must be off-image, got ${JSON.stringify(fm.impliedCorner)}`);
+});
+
+test('three markers whose implied fourth corner is inside the image do not blame framing', () => {
+  // Axis-aligned right angle at (400,400) with 600 px arms: the implied corner (1000,1000) is
+  // comfortably inside, so nothing here is a framing problem. Arms are kept well above the
+  // page-scale floor under either reading of the page region (whole image, or ink bounding
+  // box), because a fixture that only just clears a threshold is a fixture that will silently
+  // stop testing anything the day the threshold moves.
+  const fm = findMarkers(synthetic([[400, 400], [1000, 400], [400, 1000], [200, 200, 6]]), {});
+  assert.equal(fm.ok, false);
+  assert.equal(
+    fm.reason,
+    'no-hollow-corner',
+    `an in-frame missing corner must not be reported as out of frame, got ${fm.reason} (implied=${JSON.stringify(fm.impliedCorner)})`,
+  );
+  assert.ok(fm.impliedCorner.x < 1200 && fm.impliedCorner.y < 1200);
+});
+
+test('four solid same-size squares still take the normal path and are refused', () => {
+  // The three-marker branch must not swallow the ordinary four-marker case: all solid means
+  // the orientation marker cannot be read, which is what the four-corner path already said.
+  const fm = findMarkers(synthetic([[400, 400], [1000, 400], [400, 1000], [1000, 1000], [200, 200, 6]]), {});
+  assert.equal(fm.ok, false, 'four solid markers carry no orientation and must not be accepted');
+  assert.equal(fm.reason, 'no-hollow-corner', `got ${fm.reason}`);
+});
+
+test('three same-size squares in a row are not a rectangle (the branch cannot fire on garbage)', () => {
+  const fm = findMarkers(synthetic([[300, 600], [600, 600], [900, 600], [200, 200, 6]]), {});
+  assert.equal(fm.ok, false);
+  assert.equal(fm.reason, 'no-rectangular-quad', `collinear specks must not be dressed up as a page, got ${fm.reason}`);
 });

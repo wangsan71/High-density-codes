@@ -334,20 +334,47 @@ export function findMarkers(bitmap, opts = {}) {
 }
 
 /** How far an attempt got, so the report can name the most advanced failure. */
+const FAILURE_RANK = {
+  'blank-image': 0,
+  'no-square-candidates': 1,
+  'no-marker-size-cluster': 2,
+  'too-few-candidates': 2,
+  'quad-too-small-for-page-region': 3,
+  'no-hollow-corner': 4,
+  // Three markers forming a consistent rectangle whose fourth corner is not in the image is
+  // as far along as finding four markers and failing to read one, so it shares the rank.
+  'fourth-corner-out-of-frame': 4,
+  'no-rectangular-quad': 5,
+  'mirrored-image': 6,
+  'homography-degenerate': 7,
+  'quad-covers-little-of-the-photo': 8,
+};
+
+function reasonRank(r) {
+  return FAILURE_RANK[r.reason] ?? 0;
+}
+
 function progressScore(r) {
-  const rank = {
-    'blank-image': 0,
-    'no-square-candidates': 1,
-    'no-marker-size-cluster': 2,
-    'too-few-candidates': 2,
-    'quad-too-small-for-page-region': 3,
-    'no-hollow-corner': 4,
-    'no-rectangular-quad': 5,
-    'mirrored-image': 6,
-    'homography-degenerate': 7,
-    'quad-covers-little-of-the-photo': 8,
-  };
-  return (rank[r.reason] ?? 0) * 1000 + (r.candidates ?? 0);
+  return reasonRank(r) * 1000 + (r.candidates ?? 0);
+}
+
+/**
+ * Which of two failed cluster attempts should be the one reported.
+ *
+ * progressScore's tie-break adds candidate count, which is right for the threshold ladder in
+ * findMarkers (more candidates at a looser threshold really is more progress) and wrong inside
+ * detectIn, where the contest is between size clusters of one image: a 152-member data-cell
+ * cluster then outranks the 4-member corner-marker cluster whenever both fail for the same
+ * reason. Measured, not argued (docs/DEFECTS.md D37) -- the report carried maxBlobSide 5, a
+ * number describing the print lattice, while the markers were 30 px, and a discriminator run
+ * on that cluster is run on the lattice, where any three cells form a right angle. Four corners
+ * means four markers, so among equal-rank failures prefer the largest anchor and then the
+ * fewest members. Rank still dominates: a more advanced failure always wins.
+ */
+function betterFailure(a, b) {
+  if (a.rank !== b.rank) return a.rank > b.rank;
+  if (a.anchor !== b.anchor) return a.anchor > b.anchor;
+  return a.members < b.members;
 }
 
 function rethreshold(base, factor) {
@@ -392,21 +419,26 @@ function detectIn(bin, opts) {
     // only the first member of each cluster starts a new anchor
     if (i > 0 && Math.abs(anchor - squares[i - 1].w) <= squares[i - 1].w * sizeTol) continue;
     const members = squares.filter((c) => Math.abs(c.w - anchor) <= anchor * sizeTol);
-    if (members.length >= 4) clusters.push({ anchor, members });
+    // Three, not four: a photo that genuinely misses one corner shows three markers, and
+    // requiring four made that case undiagnosable -- it fell through to a lattice cluster or
+    // to `no-marker-size-cluster`, so the user was told "not four of the same size" about a
+    // page they had simply not framed. buildQuad decides what three means; it never reports
+    // success on three, so this widens diagnosis without widening acceptance.
+    if (members.length >= 3) clusters.push({ anchor, members });
   }
   if (!clusters.length) {
     return { ok: false, reason: 'no-marker-size-cluster', candidates: squares.length, threshold: bin.threshold, sizes: squares.slice(0, 8).map((c) => c.w) };
   }
   let bestQuad = null;
-  let bestScore = -1;
+  let bestKey = null;
   const tried = [];
   for (const cl of clusters) {
     const quad = buildQuad(cl.members, page, region);
     if (quad.ok) return { ...quad, candidates: squares.length, threshold: bin.threshold, clusterPx: cl.anchor };
-    tried.push({ clusterPx: cl.anchor, reason: quad.reason, hollowCount: quad.hollowCount ?? null });
-    const score = progressScore(quad);
-    if (score > bestScore) {
-      bestScore = score;
+    tried.push({ clusterPx: cl.anchor, members: cl.members.length, reason: quad.reason, hollowCount: quad.hollowCount ?? null });
+    const key = { rank: reasonRank(quad), anchor: cl.anchor, members: cl.members.length };
+    if (!bestKey || betterFailure(key, bestKey)) {
+      bestKey = key;
       bestQuad = quad;
     }
   }
@@ -414,6 +446,8 @@ function detectIn(bin, opts) {
     ...bestQuad,
     candidates: squares.length,
     threshold: bin.threshold,
+    clusterPx: bestKey ? bestKey.anchor : null,
+    clusterMembers: bestKey ? bestKey.members : null,
     sizes: clusters.map((c) => c.anchor).slice(0, 8),
     clustersTried: tried,
   };
@@ -426,6 +460,56 @@ function detectIn(bin, opts) {
  * at the bottom right of that ordering (which is what fixes rotation).
  */
 export function buildQuad(list, bin, region) {
+  if (list.length < 3) return { ok: false, reason: 'too-few-candidates', need: 4, have: list.length };
+  if (list.length === 3) {
+    // Exactly three same-size squares and no fourth. Two operationally opposite situations
+    // look like this from the inside: the sheet's fourth corner is not in the photo at all
+    // (reframe it), or it is in the photo and the marker there cannot be read (clean it,
+    // flip the plate, reprint). They are separated by geometry with no tolerance to tune:
+    // three points forming a page-scale right angle imply the rectangle's fourth corner, and
+    // whether that point lies inside the image is a bounds check.
+    //
+    // Note what this can and cannot fire on. For an axis-aligned page the implied corner is
+    // always inside the bounding box of the three visible ones, so the bounds check only ever
+    // trips under rotation or perspective -- which is exactly the hand-held phone case, and
+    // exactly the case the round-33 attempt got wrong (docs/DEFECTS.md D36). That attempt
+    // asked whether any blob sat near the implied corner, which is unanswerable in principle:
+    // on a data lattice something always does, and off it nothing ever does, so the two
+    // fixtures pulled the parameter in opposite directions. A bounds check has no parameter.
+    const regionW = region ? region.x1 - region.x0 + 1 : bin.width;
+    const regionH = region ? region.y1 - region.y0 + 1 : bin.height;
+    const minSpan = 0.45 * Math.min(regionW, regionH);
+    for (let i = 0; i < 3; i++) {
+      const p = list[i];
+      const u = list[(i + 1) % 3];
+      const v = list[(i + 2) % 3];
+      const ux = u.cx - p.cx;
+      const uy = u.cy - p.cy;
+      const vx = v.cx - p.cx;
+      const vy = v.cy - p.cy;
+      const lu = Math.hypot(ux, uy);
+      const lv = Math.hypot(vx, vy);
+      if (lu < minSpan || lv < minSpan) continue;
+      if (Math.min(lu, lv) / Math.max(lu, lv) < 0.4) continue; // A4 0.71, Letter 0.77
+      if (Math.abs((ux * vx + uy * vy) / (lu * lv)) > 0.25) continue; // about 15 deg of give
+      const qx = p.cx + ux + vx;
+      const qy = p.cy + uy + vy;
+      const margin = 0.5 * Math.max(list[0].w, list[1].w, list[2].w);
+      const outside = qx < -margin || qy < -margin || qx > bin.width + margin || qy > bin.height + margin;
+      const blobArea = list.reduce((m, c) => (c.area > m ? c.area : m), 0);
+      return {
+        ok: false,
+        reason: outside ? 'fourth-corner-out-of-frame' : 'no-hollow-corner',
+        impliedCorner: { x: Math.round(qx), y: Math.round(qy) },
+        hollowCount: list.filter((c) => hasHole(c, bin)).length,
+        maxBlobSide: Math.round(Math.sqrt(blobArea) * 10) / 10,
+        candidates: list.length,
+      };
+    }
+    // Three same-size squares that are not a page-scale right angle: they are cells, echo
+    // marks, or specks, and the honest complaint is that no rectangle was found.
+    return { ok: false, reason: 'no-rectangular-quad', hollowCount: 0, candidates: list.length };
+  }
   if (list.length < 4) return { ok: false, reason: 'too-few-candidates', need: 4, have: list.length };
   const ranked = list.slice().sort((a, b) => b.area - a.area).slice(0, 14);
   // Rectangularity is invariant under cyclic relabelling, so it cannot by itself
@@ -470,39 +554,21 @@ export function buildQuad(list, bin, region) {
       // not to retake the photo.
       return { ok: false, reason: 'mirrored-image', score: bestMirror };
     }
-    // Readings for whoever debugs a refusal, deliberately named so it cannot be mistaken
-    // for a marker size. Historical measurement (docs/DEFECTS.md D24/D26, both closed): on a
-    // shrinking synthetic page this tracked the largest blob, which can be a merged data
-    // cluster rather than a corner marker -- it read 15 in one failing case and 9 in another.
-    // So it is a diagnostic of what the binariser produced, nothing more, and no pixel floor
-    // may be derived from it. The non-monotonicity it was recorded against turned out to be a
-    // one-pixel sampling-point bug in hasHole (closed in round 30), not resolution.
+    // Readings for whoever debugs a refusal, deliberately named so it cannot be mistaken for
+    // a marker size. It is the largest blob of the cluster this failure was reported from,
+    // and since D37 that cluster is chosen for being marker-like rather than for having the
+    // most candidates: before that fix this read 5 px -- a data-lattice cell -- while the
+    // corner markers were 30 px, which is why two rounds of D24/D26 analysis argued over a
+    // "resolution floor" that turned out to be a one-pixel sampling bug in hasHole (closed
+    // in round 30). Treat it as a description of what the binariser produced, nothing more;
+    // no pixel floor may be derived from it.
     const maxBlobArea = ranked.reduce((m, c) => (c.area > m ? c.area : m), 0);
     const maxBlobSide = Math.round(Math.sqrt(maxBlobArea) * 10) / 10;
-    // "No hollow corner" carries two operationally opposite cases: the sheet's fourth corner
-    // is outside the photo (a framing problem -- move back), or the marker is present and its
-    // hole cannot be read (a scuff, a reflection, a print defect). They need different advice
-    // and one string cannot hold both (docs/ACCEPTANCE.md open defect #3). It still holds both
-    // today, because the obvious separation was tried and refuted below; until a sound version
-    // exists the advice entry for this reason speaks only to the second case, which is the one
-    // it can honestly address.
-    // Attempted and refuted by measurement, recorded here so nobody re-tries it blind
-    // (docs/DEFECTS.md D36): the two operationally opposite cases behind `hollow.size === 0`
-    // -- the fourth corner outside the photo, versus the marker present but its hole
-    // unreadable -- cannot be separated by "find three same-size squares that form a
-    // page-scale right angle, then look whether anything sits at the implied fourth corner".
-    // On a real 300 dpi page with a 256-byte payload there are 159 square candidates, of
-    // which the largest are merged data-cell blobs; the enumeration pool here is the top 14
-    // by AREA, so genuine 30 px markers lose their slots to lattice clusters and a bogus
-    // right angle gets built out of print noise -- its implied corner then sits nowhere near
-    // the missing marker, and a page whose corner marker was present and solid was reported
-    // as "out of frame". Switching the occupancy pool to all candidates pulls the other way
-    // (more blobs near any given point, so the scuff case swallows the framing case), which
-    // is what proves the approach rather than a parameter is wrong. A sound version has to
-    // anchor the expected fourth position on the profile's own geometry (a predicted corner
-    // from the three markers, checked against the layout the page declares), not on
-    // arbitrary triples -- and it would need the failure path to carry the marker cluster
-    // rather than a top-N area slice. Left as one reason until that exists.
+    // Four markers were found and they span a plausible rectangle, but none of them is hollow:
+    // the orientation marker cannot be read (scuff, reflection, wrong face of a plate). The
+    // operationally different case -- the fourth corner is not in the image at all -- is its
+    // own reason now, decided in the three-marker branch above by a bounds check rather than
+    // by guessing (docs/DEFECTS.md D36, docs/ACCEPTANCE.md defect #3).
     return {
       ok: false,
       reason: hollow.size === 0 ? 'no-hollow-corner' : 'no-rectangular-quad',
