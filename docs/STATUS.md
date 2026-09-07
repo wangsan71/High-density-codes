@@ -36,7 +36,7 @@
 | G6 性能 + soak | 🟡 | 性能有实测数 ✓ **30–60 min soak 未跑** ✓ | 见 `ACCEPTANCE` G6 行 |
 | G7 单色兜底 100% | ✅ | — | `verify --gate G7`（`colourAlive=false` → 整道擦除复原 ✓） |
 | G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF 未过官方 XSD**：`ref/3mf-core-1.4.0.xsd` 已 vendored 但**校验器根本没写**（`verify_model.py` 无 `--xsd` 开关 ⇒ "过 schema"目前无任何证据 ✓ 现含义仅"被第三方 stdlib 读通且结构自洽" ✓）· 无进程内 `gateG8` | `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
-| G9 Web 扫描端（Pages） | ⬜ | **`web/` 未开始 ⇒ 零外部 origin / 离线 / `?selftest=1` 三项全无证据** ✓ | 未做 |
+| G9 Web 扫描端（Pages） | 🟡（产物级全绿 ✓ 浏览器内未验证） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **8/8 全绿**：零第三方加载点、两页 CSP `default-src 'self'`、SW 78 条清单哈希逐字节对上磁盘、页面每个引用都有对应产物、`pskt-file.html` 只含 data: ✓ **`web/dist/selftest.js` 在产物内跑出 13 pass / 0 fail** ✓ **bundle 无人告知几何解磁盘页 → 摘要等于 `manifest.sourceSha256`** ✓ 差多少：**本机无浏览器** ⇒ "`?selftest=1` 在页面里绿"与"`file://` 双击→选照片→解出文件"这两条只被 Node 侧等价物证明 ✓ 摄像头授权、SW 注册、iOS 主屏图标全属推定；要人在这台机器之外点一次才算闭合 | 第 22–23 轮 ✓ |
 | G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝 ✓）⇒ 完整矩阵未跑 ✓ 未标定 MTF 前不判决 ✓ | `pskit send --profile … --nozzle …` 逐档 |
 
 **总账（不主张完成 ✓）**：`✅ 5（G0 G1 G3 G5 G7）· 🟡 4（G2 G6 G8 G10）· ⬜ 2（G4 G9）` ⇒ **"通过 G0–G10" 不成立** ✓ 全程未降低任何判据来制造"通过" ✓ 基线：单测 `231/231` ✓ `verify --gate all` `ALL GATES PASS` ✓
@@ -118,6 +118,19 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 23 轮（客户端优先：手机+电脑发送端、G9 产物级闭合、缺陷台账立规）
+
+- 用户改序：**先做客户端（手机+电脑）→ 再做 2D/3D 可打印产物；性能不管、错误先记账**。目标已重启（上限 40 ✓ `phase=active`）。
+- **发送端进浏览器**：`web/send.html` + `web/sender.js` ⇒ 选文件 → 编码 → 页预览 → **PNG / `pack.pdf`（真实物理尺寸）/ `.3mf` / `.stl` 码牌** ✓ 全部本机完成；下载走 `data:` URL ⇒ 不需 `blob:`、**不放宽 CSP** ✓
+- **CLI 的拒写护栏原样搬**：`projectionReport` / `stlSelfCheck` / `selfCheck3MF` 不过就**一个文件都不出**；纸面剖面拒绝出实体盘 ✓ `pickPalette` 规则原样移植（页面不能 import `cli/` ✓ 注释指明保持同步 ✓）
+- 新增 `tools/smoke-sender.mjs`：把 `buildArtifacts()`（DOM 已关进守卫 ⇒ Node 可 import）在纸面 `P-M1-300` 与盘面 `PL-D2` 两条路径上**真跑**，再把出的页喂回 `bootstrapDecode`（无提示）重组 ⇒ **摘要等于输入摘要** ✓ 盘面 **8 个浮雕全过三道护栏**（42 万三角形/页 ✓ bbox 189.31 mm）✓ 负例（30 dpi）在 `stage layout` 拒绝 ✓
+- `web/dist` 从 70 → **80 文件**：`send.html`/`sender.js`/`manifest.webmanifest`/`icon-page.png` 进产物 ✓ 图标由**自家 `core/render/png.js` 真渲染一页**生成（零新依赖 ✓ `package.json` 的 `dependencies` 仍是 `{}`）✓ 单文件变体剥掉 manifest 引用（否则我自己的"自包含"判据会红 ✓）
+- `tools/check-dist.mjs` 加了一条**本来就该存在**的判据：页面里每个 `src=/href=` 都必须有对应产物 —— 它抓到过 `./web/app.js` 这种"构建报成功、站点 404 自己的入口脚本"的坏构建 ✓
+- 门限：**G9 8/8（产物级）** ✓ 单测 **231/231** ✓ `verify --gate all --seeds 2` ⇒ `ALL GATES PASS`（G5 一万次篡改 **0 误接受** ✓）✓ **不打新 tag**（M4 未闭合 ✓）
+- **我这一轮的错（全部当场被执行抓住，无一次靠眼看 ✓）**：① 第 7–9 次"引用未证实的东西"——`p.plate.mm`/`p.sheet`/`prof.palette` 三个**不存在的剖面字段**、`sheetMm` 传布尔、以为 bundle 里有编码侧 `render/png.js`、`header.kind==='parity'` 取值域未证实；② 第 8 次"注释被当代码"——我在 `bootstrap.js` 写的解释性注释里放了一个 reason 字面量，**被 advice 扫描器当成发射点**，于是"给一条成功配建议"的荒谬要求出现（修法=改我的字段名与措辞 ✓ **没动判据** ✓）；③ 我用 PowerShell `Set-Content` 改源文件破了 AGENTS 的 CP1252 铁律 ⇒ 该文件变成非法 UTF-8（`read` 拒绝 ✓ 已删除重写 ✓）；④ 差点把 G9 记成 ✅（两条判据只在 Node 里跑过、浏览器内从未验证）⇒ 已回退为 🟡 并写明"要人在本机之外点一次才算闭合"；⑤ 差点把 `Select-Object -First` 掐管道导致的 `exit 1` 记成门限失败 ✓ 已写进台账的"判读提示"
+- 新建 `docs/DEFECTS.md`：闭掉 D1/D2/D3/D6 ✓ **OPEN 十一项**，其中最要紧的三条：**D7 手机连拍取页未接线**（`fiducial.js`+`warp.js` 已就绪 ✓ 下一轮第一优先）、**D11 构建中途失败会在 `web/dist` 留半套产物**（Pages 若直发即发破损站 ✓ 应改为写临时目录再原子换）、**D16 `docs/ACCEPTANCE.md` 的 G9 行仍写"未开始"** ✓ 另有 D14 一个说谎的下拉框（纸张尺寸其实来自几何 ✓ 改它不影响输出）
+
 
 - **第 22 轮（末轮·收官：撤回第 21 轮下得太快的根因 ✓ 并给下一步一份诚实工单）**
   - **第 21 轮那句"B 类 = 渗墨把 rho 推过 0.185 中点 → 整页读成 level 1"未被证实、我收回** ✓ 写它时我连错两处口径：① 真正的 level-0 边界是 `noDot = max(target0, mid0·0.55) ≈ 0.102`、**不是 0.185**；② 我拿 `levels`（`joinCellLevels({shape,colour})` 的**打包值**）按 `v===0` 切分当形状直方图用 ⇒ 把色道 bit 混进了形状计数 ✗ 决定性反例：`tools/diag-collapse-path.mjs` 实测**能逐字节复原的健康页** `nc-scan600-1/000` 在这里同样是严重偏斜的 0/1 分布且 `rho-vs-template disagree=74240` ⇒ 若"过中点即整页翻 1"成立，一个成功的页不该长这样 ⇒ **要么逐格读数远比 ECC 级成功所暗示的更噪、要么这个探针假定的"扫描页↔pristine 页按文件名对应"根本不成立** ✓ 两者都说明那条因果链没被建立 ✓

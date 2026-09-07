@@ -1,18 +1,32 @@
 # 缺陷台账（按用户指示：错误先记录、后修复；本文件只增不删，修好才划掉）
 
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
+> 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
-## 未修（第 23 轮末状态）
+## 第 23 轮闭掉的
+
+| # | 缺陷 | 复验命令 | 状态 |
+|---|---|---|---|
+| ~~D1~~ | 发送端未进 dist 拷贝清单（G9 绿 ≠ 手机那页真的发布） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ 80 文件、78 条 precache 全对字节 | CLOSED |
+| ~~D2~~ | `encodeTransfer` 选项形状与 `sheetMm` 类型未经执行验证（我曾传布尔 ✓ 真 bug） | `node tools/smoke-sender.mjs --bytes 2048` ⇒ 纸面 3 页 / 盘面 8 页全部**编好→自识几何→解回原摘要** | CLOSED |
+| ~~D3~~ | 单测红：新登记的 bootstrap reason 破了 advice 契约 | `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ 231/231 | CLOSED（修法是把成功路径的字段改名，见 D12 ✓ 未动判据） |
+| ~~D6~~ | PWA 清单与图标缺失 ⇒ 手机"添加到主屏幕"不完整 | `Test-Path web/dist/manifest.webmanifest, web/dist/icon-page.png` ⇒ True True（图标由 `core/render/png.js` 真渲染一页生成 ✓ 零新依赖） | CLOSED（遗留见 D13） |
+
+## OPEN
 
 | # | 缺陷 | 复现 | 性质 |
 |---|---|---|---|
-| D1 | `web/send.html` + `web/sender.js` 尚未进 dist 拷贝清单（构建器目前只拷 index/app/css/selftest/pskt-file），所以 `node tools/check-dist.mjs` 通过 ≠ 发送端已在产物里 | `node tools/build-web.mjs && Test-Path web/dist/send.html` ⇒ False | 接线缺失 |
-| D2 | `sender.js` 里 `encodeTransfer` 的选项形状、`pageLayout` 的 `sheetMm:true`（我传了布尔，CLI 传的是尺寸）未经执行验证 | `node --check web/sender.js`（语法）＋浏览器打开点"编码"看日志是否报 `sheetMm` | 可能崩，崩了会拒绝出文件（安全侧） |
-| D3 | 单测红 3 条：我给 `core/decode/advice.js` 登记 `no-candidate-geometry` / `no-geometry-matched` 满足了"每条失败 reason 都要有建议"，但破了"每条已登记 reason 必须是测试可发现的真实失败形状" | `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ 228/231 | 判据两边都要满足，禁止削弱测试 |
-| D4 | 首页 `index.html` 无到 `send.html` 的入口（接收端页面里点不到发送端） | 打开 dist/index.html 目视 | 可用性问题 |
-| D5 | 发送端未进 `pskt-file.html` 单文件变体（`file://` 下只能"收"，不能"发"） | 打开 `web/dist/pskt-file.html` 目视 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
-| D6 | PWA 安装（`manifest.webmanifest` + 图标）没做 ⇒ 手机"添加到主屏幕"不完整；iOS 需 PNG 图标（需自研：可用 `core/render/png.js` 在构建期生成 ✓ 无新依赖） | `Select-String -Path web/index.html -Pattern manifest` ⇒ 无 | 手机端体验 |
-| D7 | 手机摄像头**连拍取页**没做（现有 `--photo` 等价逻辑在 CLI；web 端只有单张文件/单次取景），`core/decode/fiducial.js`+`warp.js` 已就绪未接线 | 手机开 https 版本站"摄像头"按钮，观察只能一张 | 手机端核心 |
-| D8 | 浏览器打印依赖用户手选"实际大小/100%"，缩放错则几何错（帧头会拒收 ⇒ 不会静默出错，但要重扫） | 打印一页后用 300 dpi 扫描对比 cellPx | 已知限制，UI 已提示走 `pack.pdf` |
-| D9 | 我在这两个新文件里犯了本项目头号错两类：**DOM id 前后不一致**（`dl-pdf` vs `dlpdf` ✓ 已改）与**引用未证实的字段/导出**（`t.profileId`、`p.parity`、`t.dataPages`、从 `protocol.js` import `advise` ✓ 已全部改为防御式或删除） | `git show HEAD --stat`；日志现改为打印真实 `Object.keys(t.geom)` | 复发 5 次；根治办法是"先跑一遍再说"，不是再看一遍代码 |
-| D10 | `docs/STATUS.md` 第 23 轮那行没写（预算耗尽）；`docs/ACCEPTANCE.md` 的 G9 行也仍是旧结论 | `git log -1 --stat` 不含 STATUS | 台账欠账，下轮第一件事补 |
+| D4 | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
+| D5 | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
+| D7 | **手机摄像头连拍取页未接线**：`core/decode/fiducial.js`（角标定位）+ `warp.js`（`rectifyPage`/`estimateSubstrate`）已就绪，web 端仍是"一次一张" | 手机打开站点按"摄像头"：每页需手动确认一次 | 手机端核心缺口，下一轮第一优先 |
+| D8 | 浏览器打印服从用户的缩放选择；缩放错则几何错（帧头会拒收 ⇒ 不静默出错，但要重扫） | 打印后以 300 dpi 扫描，比较 `cellPx` | 已知限制；UI 与 `pack.pdf` 是正解 |
+| D11 | **构建失败会在 `web/dist` 留下半套产物**（本轮 PWA 段抛异常时 `sw.js` 缺失、其余文件仍在），Pages 若被配成"推什么发什么"就会发出破损站点 | `node -e "..."` 使 build 中途抛错，再看 `web/dist` 存在但缺 `sw.js` | 原子性：写 `dist.tmp` 再改名换入 |
+| D12 | `tests/unit/advice-coverage.test.mjs` 的正则 `/reason:\s*'(...)'/g` **会读注释里的文字**：我为解释"把成功路径的 reason 改名"而在注释里写下那个字面量，测试立刻要求给一条**成功**配建议 | `node --test tests/unit/advice-coverage.test.mjs`（改注释前后各跑一次即见） | 判据扫描器把散文当代码；与我本轮在 build-web 里犯的同一族 ✓ 修法=扫描前剥注释（不改判据强度） |
+| D13 | PWA 图标是一张 2260×3290 的**非方形**页图；`sizes` 走的是 `${w}x${h}` 分支，iOS 对非方形/`any` 支持差 ⇒ 主屏图标可能被忽略 | `node tools/build-web.mjs` 打印 `icon 211384 B (2260x3290)` | 需要在构建期裁成方形（自家编码器可重画 ✓ 不引依赖） |
+| D14 | `send.html` 上"纸张 A4/Letter"下拉框**是惰性的**：纸面尺寸实际来自 `t.geom.sheetMm`（编码器决定 ✓ 与 CLI 一致），改这个框不影响输出 | 切 A4→Letter 再编码，看日志里 `纸 W×Hmm` 不变 | UI 说了谎：应删除该控件或改为"仅提示" |
+| D15 | `sender.js` 里 `parityPages` 用 `header.kind === 'parity'` 判校验页数，`kind` 的**取值域我未证实**（不影响产物 ✓ 只影响那一句计数） | `node -e` 打印 `t.pages[0].header` | 又一个"未证实字段"实例（第 9 次 ✓ 模式未断根） |
+| D16 | `docs/ACCEPTANCE.md` 的 G9 行仍是旧结论（写"未开始"），本轮 G9 已 8/8 ✓ 台账与判据页不一致 | `Select-String docs/ACCEPTANCE.md -Pattern G9` | 记账欠账，下一轮第一件事（连同 STATUS 现况表 G9 行一起改） |
+
+## 判读提示（避免误读别人的结论）
+
+- `pwsh` 里用 `... | Select-Object -First N` 截断 node 的输出流会让 node 被杀 ⇒ **进程退出码 1**，而门限本身可能全绿。要判绿黑请看**末行**（`ALL GATES PASS`）或不要用 `-First`。本轮我差点把这条当成一次门限失败记进台账 ✓

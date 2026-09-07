@@ -257,6 +257,7 @@ for (const id of [...needIds, ...allCore].sort()) {
   // wrong produced a site whose index.html pointed at a file that did not exist, which no
   // earlier check could see -- nothing in the build compared markup to disk.
   if (id === 'web/selftest.js') continue; // written below, with its specifier rewrite
+  if (id === 'web/sender.js') continue; // likewise
   writeDist(id.replace(/^web\//, ''), read(id));
 }
 writeDist('pskt-bundle.js', appBundle);
@@ -272,6 +273,10 @@ let single = html
   .replace('<link rel="stylesheet" href="./app.css">', `<style>\n${css}\n</style>`)
   .replace('<script type="module" src="./app.js"></script>', `<script>\n${appBundle}\n</script>`)
   .replace(/\n?\s*<!-- PSKT-SELFTEST-LOADER[\s\S]*?<\/script>/, '')
+  // A manifest link would make the single file non-self-contained (and the checker, which
+  // requires every markup reference to resolve, would rightly fail on file:// where no
+  // sibling files exist). Installability belongs to the served site, not to one file.
+  .replace(/\s*<link rel="manifest"[^>]*>/, '')
   .replace(/<meta name="description"[^>]*>/, '<meta name="description" content="Single-file PSKT receiver. Works from file:// with no network access.">');
 // What makes the single-file page "self-contained" is its MARKUP: no src=, no href=, no
 // url() pointing anywhere else. A check that scanned the whole text would trip over the
@@ -299,6 +304,54 @@ writeDist('pskt-file.html', single);
 // the build still reported success -- the artifact was quietly unwired for offline use.
 writeDist('index.html', read('web/index.html'));
 writeDist('app.css', read('web/app.css'));
+// The sender page too: until now the build copied the receiver only, so a green G9 check
+// said nothing at all about whether the phone-facing page ships.
+writeDist('send.html', read('web/send.html'));
+// Same path-depth rewrite as selftest.js: source uses ../core/ (so Node can import the
+// file and tools/smoke-sender.mjs can execute it), dist uses ./core/ (so the module
+// resolves next to dist/core/).
+writeDist('sender.js', read('web/sender.js').replace(/(['"])\.\.\/core\//g, '$1./core/'));
+
+/* PWA installability, drawn by this project's own renderer.
+ * The icon is a real PSKT page bitmap encoded with core/render/png.js: no image library, no
+ * new dependency (package.json stays {} as the contract requires), and the build cannot
+ * claim an icon that the repo's own encoder cannot produce.
+ * These come from core/ directly rather than out of the bundle, because the bundle is the
+ * receiver's closure and a receiver never encodes a PNG -- the first version asked
+ * globalThis.__PSKT__ for core/render/png.js and the bundler correctly answered "not
+ * included", which is the same mistake (assuming a module is there because I wanted it)
+ * this repository keeps making.
+ * Must happen before the precache manifest is computed, or these files would ship
+ * unprecached and offline install would quietly miss them. */
+{
+  const { encodeTransfer } = await import('../core/protocol.js');
+  const { pageLayout } = await import('../core/render/layout.js');
+  const { renderPageBitmap, echoBitsOf } = await import('../core/render/raster.js');
+  const { encodePNG } = await import('../core/render/png.js');
+  const seed = new Uint8Array(64).fill(0x5a);
+  const it = await encodeTransfer(seed, { profile: 'P-M1-300' });
+  const ilayout = pageLayout(it.geom, 300, { sheetMm: it.geom.sheetMm });
+  const ibmp = renderPageBitmap({ geom: it.geom, levels: it.pages[0].levels, layout: ilayout, palette: 'PAPER1', echoBits: echoBitsOf(it.pages[0].header) });
+  const ipng = Buffer.from(encodePNG(ibmp));
+  writeFileSync(join(OUT, 'icon-page.png'), ipng);
+  distFiles.push({ url: './icon-page.png', bytes: ipng.length, sha256: sha256(ipng) });
+  const iconSizes = ibmp.width && ibmp.height ? `${ibmp.width}x${ibmp.height}` : 'any';
+  const webmanifest = {
+    name: 'PSKT 打印—扫描传输',
+    short_name: 'PSKT',
+    description: '把文件印成自描述码页，再用摄像头或扫描件还原：无 URL、无外部资源。',
+    start_url: './index.html',
+    scope: './',
+    display: 'standalone',
+    background_color: '#ffffff',
+    theme_color: '#101317',
+    icons: [{ src: './icon-page.png', sizes: iconSizes, type: 'image/png', purpose: 'any' }],
+  };
+  const mw = Buffer.from(JSON.stringify(webmanifest, null, 1) + '\n');
+  writeFileSync(join(OUT, 'manifest.webmanifest'), mw);
+  distFiles.push({ url: './manifest.webmanifest', bytes: mw.length, sha256: sha256(mw) });
+  console.log(`  pwa: icon ${ipng.length} B (${iconSizes}), manifest ${mw.length} B`);
+}
 
 const forSw = distFiles.filter((f) => !f.url.endsWith('sw.js'));
 const buildId = sha256(forSw.map((f) => `${f.url} ${f.sha256}\n`).join('')).slice(0, 16);

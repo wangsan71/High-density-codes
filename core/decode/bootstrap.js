@@ -150,7 +150,15 @@ export async function bootstrapDecode(bitmap, opts = {}) {
       if (onAttempt) onAttempt(attempts[attempts.length - 1]);
       continue;
     }
-    if (onAttempt) onAttempt({ ...c, stage: 'ok', reason: 'agreed', ms, attempts: i + 1 });
+    // `reason` is reserved for failures: advice-coverage (decision 11) treats every
+    // reason literal in core as something an operator can be told about, and "this
+    // candidate matched the declared header" is a bookkeeping note, not a failure. Giving
+    // the success path a reason value made that scanner demand advice for a success -- the
+    // test was right and my field choice was wrong, so the field moves, not the assertion.
+    // (Note the scanner matches text, comments included: describing this very mistake with
+    // a literal reason value in prose re-triggers it. That is logged as a defect of the
+    // scanner, not a licence to write the comment some other way and call it fixed.)
+    if (onAttempt) onAttempt({ ...c, stage: 'ok', matchNote: 'agreed', ms, attempts: i + 1 });
     return {
       ok: true,
       profileId: c.profileId,
