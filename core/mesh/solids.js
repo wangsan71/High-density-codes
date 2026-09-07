@@ -406,6 +406,69 @@ function emitRect(B, m, zBottom, zTop) {
 }
 
 /**
+ * 轴对齐长方体（底板/边框这类"一整块"的实体）：12 个三角形。
+ *
+ * 为什么单独有这一个原语：`prismFromMask` 也能产出一个矩形棱柱，但它的像素是
+ * **各向同性**的（`pixelMm` 同时决定 X 与 Y），所以只有当长方体是正方形时才凑得
+ * 准；底板/版面是 w×h 两个独立尺寸，硬套就要造一张 w·h 字节的满掩码。这里的三角
+ * 形绕序与 `emitRect()` **逐条一致**（同一套 12 条的排布），所以"矩形挤出"与
+ * "一整块板"在拓扑上是同一件事，不是第二套几何公式。
+ *
+ * 与 `emitRect` 一样：这是一个**独立封闭**的实体（每条无向边恰用两次），水密性由
+ * `threeMF.js:manifoldReport()` 判定，不承诺与别的实体做布尔并。
+ *
+ * @param {object}  o
+ * @param {number}  o.xMinMm o.xMaxMm o.yMinMm o.yMaxMm  闭区间的两个对角（xMax>xMin, yMax>yMin）
+ * @param {number}  o.zBottom o.zTop
+ * @returns {Float64Array} 12 个三角形 = 108 个 double
+ */
+export function boxTriangles({ xMinMm, xMaxMm, yMinMm, yMaxMm, zBottom, zTop } = {}) {
+  const label = 'boxTriangles';
+  for (const [n, v] of Object.entries({ xMinMm, xMaxMm, yMinMm, yMaxMm, zBottom, zTop })) {
+    assertFinite(`${label}: ${n}`, v);
+  }
+  if (!(xMaxMm > xMinMm + EPS)) {
+    throw new Error(`${label}: xMaxMm=${xMaxMm} must exceed xMinMm=${xMinMm} by more than EPS=${EPS}`);
+  }
+  if (!(yMaxMm > yMinMm + EPS)) {
+    throw new Error(`${label}: yMaxMm=${yMaxMm} must exceed yMinMm=${yMinMm} by more than EPS=${EPS}`);
+  }
+  requireZBand(label, zBottom, zTop);
+  const B = builder();
+  emitRect(B, { xMin: xMinMm, xMax: xMaxMm, yMin: yMinMm, yMax: yMaxMm }, zBottom, zTop);
+  return B.finish();
+}
+
+/**
+ * 把 `weldTriangles()` 的 (顶点表, 索引表) 展开回扁平三角形数组。
+ * 3MF 存的是索引化的那一份，STL 只能存展开后的那一份 —— 两边都从**同一次**焊接
+ * 结果出发，才是"同一批三角形"；各算一套就等于两个产物可能长得不一样。
+ */
+export function expandIndexedTriangles(vertices, indices) {
+  if (!(vertices instanceof Float64Array) && !(vertices instanceof Float32Array) && !Array.isArray(vertices)) {
+    throw new Error(`expand: expected a flat vertex array, got ${String(vertices)}`);
+  }
+  if (!(indices instanceof Uint32Array) && !Array.isArray(indices)) {
+    throw new Error(`expand: expected an index array (Uint32Array|array), got ${String(indices)}`);
+  }
+  if (vertices.length % 3 !== 0) throw new Error(`expand: vertex length ${vertices.length} is not a multiple of 3`);
+  if (indices.length % 3 !== 0) throw new Error(`expand: index count ${indices.length} is not a multiple of 3`);
+  const vcount = vertices.length / 3;
+  const out = new Float64Array(indices.length * 3);
+  for (let i = 0; i < indices.length; i++) {
+    const at = indices[i];
+    if (!(at >= 0 && at < vcount) || !Number.isInteger(at)) {
+      throw new Error(`expand: index #${i} = ${at} out of vertex range 0..${vcount - 1}`);
+    }
+    const o = i * 3;
+    out[o] = vertices[at * 3];
+    out[o + 1] = vertices[at * 3 + 1];
+    out[o + 2] = vertices[at * 3 + 2];
+  }
+  return out;
+}
+
+/**
  * 二值位图 → 挤出体网格（最大矩形覆盖，每矩形 12 个三角形）。
  *
  * 不做 CSG 布尔：相邻矩形在同一 Z 区间并存，共享面被各自重复生成（内部面）。
