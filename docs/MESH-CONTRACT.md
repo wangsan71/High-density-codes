@@ -25,8 +25,16 @@
 
 ## 3. 一格的几何来源（不许另写公式）
 
-格子半径/环宽/点径**必须**来自 `core/render/glyphs.js:glyphGeometry(cellEw, L)`（决策 6：所有
-半径都是整挤出宽度 EW 的量化）。`cellEw = pitchMm / 挤出宽度`，`L = 形状级数`。
+格子半径/环宽/点径**必须**来自 `core/render/glyphs.js:glyphGeometry(cellEw, shapeLevels)`（决策 6：所有
+半径都量化到整挤出宽度 EW 的半步上）。`cellEw = pitchMm / 挤出宽度`（`planPage` **不**返回它，自己算：
+`3.6/0.4 = 9`）。
+
+> **单位更正（实测，非文档措辞）**：返回的 `outer`/`inner`/`dot[i]` 是**以格宽为 1 的比例半径**，
+> 不是 EW 数——量化后等于「整数 EW 数 ÷ cellEw」。所以 **mm 半径 = `geo.outer * pitchMm`**，
+> 而 `cellEw=9, L=2` 给的是 `outer=1/3`(=3 EW)、`inner=2/9`(=2 EW)、`dot=[0,1/9]`。
+> 上一版这里写"以 EW 为单位"，会让人把半径再乘一次 pitch 而放大 cellEw 倍。
+> 同样更正：`glyphMaskForLevel(dx, dy, level, geo) -> boolean`，`dx/dy` 是以格中心为原点、
+> **格边为 1** 的归一化坐标（±0.5）；生成一格掩码要自己在像素中心上采样（测试用 24×24）。
 
 - 纸面档 `cellEw` 为 `null`（无挤出宽度概念）→ **不产出网格**，`--format stl|3mf` 必须明确拒绝并给出
   原因，不许静默按 0.4 mm 猜一个。
