@@ -265,20 +265,16 @@ export function chacha20Decrypt(key, nonce, ciphertext, counter = 1) {
  * @param {number} [iterations=150000]
  * @returns {Promise<Uint8Array>} 32-byte key
  */
+// pbkdf2 used to arrive through `await import('./hash.js')` so this module stayed
+// loadable "while that workstream lands". That premise expired a long time ago: hash.js
+// is present, passes RFC/peer witnesses in the unit suite, and imports nothing itself
+// (checked -- so there is no cycle to dodge). The laziness now only blocks the browser
+// bundle, which cannot resolve a graph decided at run time, and tools/build-web.mjs
+// refuses dynamic imports instead of guessing at them. The export check stays: a missing
+// symbol is still a failure worth naming, and it is cheap.
+import { pbkdf2Sha256 } from './hash.js';
+
 export async function deriveKey(passphrase, saltBytes, iterations = 150000) {
-  let pbkdf2Sha256;
-  try {
-    ({ pbkdf2Sha256 } = await import('./hash.js'));
-  } catch (err) {
-    if (err && (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'MODULE_NOT_FOUND')) {
-      throw new Error(
-        'chacha20.deriveKey: core/hash.js (pbkdf2Sha256) is not available yet — ' +
-        'derive keys with a peer implementation until it lands',
-        { cause: err },
-      );
-    }
-    throw err;
-  }
   if (typeof pbkdf2Sha256 !== 'function') {
     throw new Error('chacha20.deriveKey: core/hash.js does not export pbkdf2Sha256()');
   }

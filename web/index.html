@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Print-scan file transfer receiver. Decodes PSKT pages entirely in this browser. No uploads, no network, no URLs.">
+<title>PSKT 接收端 · 打印—扫描文件还原</title>
+<link rel="stylesheet" href="./app.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<header>
+  <h1>PSKT 接收端</h1>
+  <p class="sub">把打印出来的页码拍照或扫描成 PNG，在这里还原成原始文件。<b>页面不联网、不上传、不需要任何 URL</b> —— 解码全在你本机的 JavaScript 里完成。</p>
+</header>
+
+<main>
+  <section id="intake">
+    <h2>1 · 交给它几张页</h2>
+    <label class="drop">
+      <input type="file" id="files" accept="image/png" multiple>
+      <span>选择 PNG（可多选：数据页 + 校验页都给，缺页才可能补回来）</span>
+    </label>
+    <div class="row">
+      <button type="button" id="camera">用摄像头拍一页</button>
+      <span id="camera-note" class="note"></span>
+    </div>
+    <video id="video" playsinline hidden></video>
+    <canvas id="grab" hidden></canvas>
+  </section>
+
+  <section id="opts">
+    <h2>2 · 剖面（可留空，让它自己认）</h2>
+    <div class="row">
+      <label>剖面 <select id="profile"><option value="">自动识别</option></select></label>
+      <label>dpi <select id="dpi"><option value="">自动</option><option>300</option><option>600</option></select></label>
+      <label>色板 <select id="palette"><option value="">自动</option><option>INK2</option><option>INK4</option><option>PAPER1</option></select></label>
+    </div>
+    <div class="row">
+      <label>口令（若打印时加了口令）<input type="password" id="pass" autocomplete="off"></label>
+      <label class="chk"><input type="checkbox" id="strict"> 只试我指定的组合（失败就报失败，不乱猜）</label>
+    </div>
+    <p class="hint">自动识别是按候选逐个整页读，纸面 600 dpi 一档每次数秒、最多十几次；选定剖面后基本一次命中。代价会逐条打在下面的日志里，不静默。</p>
+  </section>
+
+  <section id="run">
+    <button type="button" id="go" disabled>3 · 开始还原</button>
+    <span id="status" class="note">等待文件</span>
+  </section>
+
+  <section id="out" hidden>
+    <h2>结果</h2>
+    <p id="result-line"></p>
+    <a id="download" download="received.bin"><button type="button">保存还原出的文件</button></a>
+    <p class="hint">只有 SHA-256 与页头声明的摘要一致时才会出现这个按钮。部分还原从不落盘。</p>
+  </section>
+
+  <section id="log-wrap">
+    <h2>日志</h2>
+    <pre id="log" aria-live="polite"></pre>
+  </section>
+
+  <section id="selftest-wrap" hidden>
+    <h2>自检 <span class="tag">?selftest=1</span></h2>
+    <pre id="selftest"></pre>
+  </section>
+</main>
+
+<footer>
+  <p>离线可用：本页面一旦被访问过，其全部代码与解码器都已缓存到本机（Service Worker 预缓存），断网也能继续还原。</p>
+  <p class="tiny">同一份解码核心也用于 CLI 与独立 Python 参考实现，两端交叉校验；本页不含任何第三方脚本、字体或分析代码。</p>
+</footer>
+
+<script type="module" src="./app.js"></script>
+<!-- PSKT-SELFTEST-LOADER: served-site only; stripped from the single-file build. -->
+<script type="module">
+  if (new URLSearchParams(location.search).get('selftest') === '1') import('./selftest-page.js');
+</script>
+</body>
+</html>

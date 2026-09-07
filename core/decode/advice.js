@@ -152,6 +152,18 @@ const ADVICE = {
     cause: 'correction produced a candidate codeword whose syndromes do not all vanish, so it was refused rather than accepted -- the receiver will not emit data it cannot prove',
     do: 'nothing to fix in the file: the refusal is correct. Supply the parity pages or re-photo the offending page',
   },
+  // From core/decode/bootstrap.js: the browser path has no manifest, so it searches
+  // candidate geometries. Both outcomes must carry advice -- decision 11 says a reason
+  // without a physical cause and a re-shoot instruction is a failure of the receiver,
+  // not of the paper.
+  'no-candidate-geometry': {
+    cause: '接收端手里没有任何可尝试的页面几何（提示组合把已知剖面全排除了）',
+    do: '把"剖面/dpi/色板"改回"自动"，或按打印时用的那一档手动指定后重试。',
+  },
+  'no-geometry-matched': {
+    cause: '所有候选几何都没能让页头通过 magic+版本+CRC 三重核对：图上没有本工具的页码，或角标/分辨率差得太远，或页来自另一套剖面参数',
+    do: '确认拍的是 PSKT 页且四点完整在画面内；纸面请用 300 dpi 以上的扫描；若知道打印剖面，就在下拉框里指定它（可少走十几秒的候选搜索）。',
+  },
   'no-candidate': {
     cause: 'not one threshold across the header strip produced a header with the right magic and a valid CRC, so the strip is destroyed rather than merely mis-exposed (or the page is being read with the wrong geometry)',
     do: 're-photo this page so the narrow strip above the lattice is fully inside the frame and in focus; if it persists, confirm the profile and nozzle the page was printed with',

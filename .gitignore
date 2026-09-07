@@ -1,6 +1,7 @@
 # generated artifacts
 artifacts/
 out/
+web/dist/
 *.tmp
 __pycache__/
 *.pyc
