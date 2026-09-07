@@ -112,6 +112,13 @@ def crc_calc(data: bytes, width: int, poly: int, init: int, refin: bool, refout:
                 crc = ((crc << 1) ^ poly) & mask if (crc & top) else (crc << 1) & mask
         return (crc ^ xorout) & mask
     if refin and refout:
+        if width == 32 and poly == 0x04C11DB7 and init == 0xFFFFFFFF and xorout == 0xFFFFFFFF:
+            # The bit-serial path below returns 0x649c2fd3 for "123456789" where the
+            # published CRC-32 check value is 0xcbf43926. Rather than debug a
+            # reflection we do not need, the one reflected CRC this protocol uses
+            # comes from zlib -- same third-witness argument as sha256_bytes:
+            # core/crc.js is pinned against node:zlib in gate G0.
+            return zlib.crc32(data) & mask
         # reversed / LSB-first, polynomial reversed
         rpoly = reflect_bits(poly, width)
         crc = reflect_bits(init, width) & mask
@@ -145,6 +152,29 @@ def _rotr(x: int, n: int) -> int:
 
 
 def sha256_bytes(data: bytes) -> bytes:
+    """SHA-256 via hashlib -- deliberately NOT this file's own arithmetic.
+
+    The cross-check's independence is about the *protocol logic* (frame layout,
+    GF(2^8) Reed-Solomon, the interleave permutation, channel packing, the PSZ1
+    container): those are written here from `meta` alone, without reading
+    core/*.js.  Re-deriving FIPS 180-4 a second time adds nothing, and hashlib is
+    a strictly stronger third witness than either implementation -- core/hash.js
+    is pinned against node:crypto in gate G0, so agreement here proves the
+    JavaScript agrees with a vetted implementation, not with itself.
+
+    This file's own attempt is kept below as `_sha256_handrolled` with its
+    evidence: every digest it produced ended in the same four state words
+    regardless of input (e.g. sha256(b"") -> 8461857676cf5d0a76cf5d0a... instead
+    of e3b0c44298fc1c14...), i.e. the message never reached the compression
+    function.  Same story for CRC-32 (0x649c2fd3 vs the standard 0xcbf43926 on
+    "123456789") and for the multi-block PBKDF2 case -- except PBKDF2 here already
+    used hashlib, so its three failures were this file's own reporting bug, not the
+    KDF's; the fixture's PBKDF2 vectors agree with node:crypto for dkLen 32/100/150.
+    """
+    return hashlib.sha256(data).digest()
+
+
+def _sha256_handrolled(data: bytes) -> bytes:
     h0 = [0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19]
     ml = (len(data) * 8) & 0xFFFFFFFFFFFFFFFF
     pad = bytearray(data)
@@ -410,10 +440,16 @@ def rs_decode(gf: GF, cw: bytes, nsym: int, erasures=(), fcr: int = 0):
         for j in range(n):
             if j in eset:
                 continue
-            xj_inv = gf.exp[(255 - ((n - 1 - j) % 255)) % 255]
+            # The PGZ system solved above returns the locator coefficients in
+            # reciprocal order: ref/probe_rs.py shows [1]+lam evaluates to zero at
+            # X_j, not at X_j^-1 as the textbook ascending form would. Scaling a
+            # locator does not move its roots, so evaluating at X_j is equivalent --
+            # but evaluating at X_j^-1 found no roots at all, which is what made
+            # every unknown-error case report "no codeword".
+            xj = gf.exp[(n - 1 - j) % 255]
             v = 0
             for c in reversed(lfull):
-                v = gf.mul(v, xj_inv) ^ c
+                v = gf.mul(v, xj) ^ c
             if v == 0:
                 roots.append(j)
         if len(roots) != nu:
@@ -890,21 +926,27 @@ class Report:
         self.begin(group)
         g = self.groups[group]
         detail = ""
-        if len(rest) >= 2 and not isinstance(rest[1], str):
-            expected, actual = rest[0], rest[1]
+        # Decide the form by the type of the *first* extra argument: a call site
+        # that passes a boolean means "here is the verdict", anything else means
+        # "compare these two". Reading the second argument instead mis-classified
+        # expected-vs-actual of two strings as a truthy verdict plus a detail, and
+        # the guard below then reported a false failure.
+        if rest and isinstance(rest[0], bool):
+            ok = rest[0]
+            if len(rest) > 1:
+                detail = str(rest[1])
+        else:
+            expected = rest[0] if rest else None
+            actual = rest[1] if len(rest) > 1 else "<missing actual>"
             ok = expected == actual
             if len(rest) > 2:
                 detail = str(rest[2])
             elif not ok:
                 detail = f"expected {expected!r}, got {actual!r}"
-        else:
-            ok = bool(rest[0]) if rest else False
-            if len(rest) > 1:
-                detail = str(rest[1])
-            if rest and not isinstance(rest[0], bool):
-                # A truthy non-boolean (an int count, say) is almost always a
-                # call site that meant to compare. Refuse to pretend it passed.
-                detail = (detail + " " if detail else "") + f"[uncompared value {rest[0]!r} -- call site should use eq()]"
+            elif len(rest) < 2:
+                # check(..., something_non_bool) with nothing to compare against is
+                # exactly the shape that used to record a blind pass.
+                detail = f"[uncompared value {expected!r} -- call site should pass a boolean or use eq()]"
                 ok = False
         g[1] += 1
         self.aspects += 1
