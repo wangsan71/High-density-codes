@@ -19,6 +19,22 @@
 | D4 | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
 | D5 | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | D7 | **手机摄像头连拍取页未接线**：`core/decode/fiducial.js`（角标定位）+ `warp.js`（`rectifyPage`/`estimateSubstrate`）已就绪，web 端仍是"一次一张" | 手机打开站点按"摄像头"：每页需手动确认一次 | 手机端核心缺口，下一轮第一优先 |
+
+### 第 24 轮新增
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D17 | **连拍的跨会话守卫未按预期触发**：构造"另一会话的页"时收集器返回 `kind page` 而非 `other-session`（`have 1/3`）⇒ 要么 `locate()` 读到的 sessionId 与我假设的形状不同，要么夹具仍错，二者之一，**尚未定论** | `node tools/smoke-capture.mjs --bytes 1024` ⇒ `CAPTURE SMOKE: 1 FAILED` | **只降级提示语，不降级安全**：混批在下游由 `TransferAssembler` 的 `other-session` 拒绝兜住（G0/G5 已测 ✓ 10000 次篡改 0 误接受 ✓）。禁止用"删掉这条断言"变绿 |
+| D18 | 连拍的**实机部分本机无法验证**：`getUserMedia` 授权、`facingMode/continuous` 对焦、`getImageData` 帧率、iOS Safari 的 canvas  tainted 行为 | 需真机 https 访问 | 与 D9 同类：浏览器内未验证，G9 维持 🟡 的核心理由 |
+| ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
+| D20 | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
+
+### 第 24 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D7~~ | 手机连拍取页 | `node tools/smoke-capture.mjs` ⇒ 11/12：真实 3 页**逐页收下并解回原摘要** ✓ 重复页判为 `duplicate` 不算进度 ✓ "角标 6px / 覆盖率 40%" 各出一条可执行提示 ✓ 页数声明冲突拒绝 ✓ **裁掉的页不被接受** ✓ | CLOSED（连拍外壳已接线并验证；实机部分转 D18，跨会话守卫转 D17） |
+
 | D8 | 浏览器打印服从用户的缩放选择；缩放错则几何错（帧头会拒收 ⇒ 不静默出错，但要重扫） | 打印后以 300 dpi 扫描，比较 `cellPx` | 已知限制；UI 与 `pack.pdf` 是正解 |
 | D11 | **构建失败会在 `web/dist` 留下半套产物**（本轮 PWA 段抛异常时 `sw.js` 缺失、其余文件仍在），Pages 若被配成"推什么发什么"就会发出破损站点 | `node -e "..."` 使 build 中途抛错，再看 `web/dist` 存在但缺 `sw.js` | 原子性：写 `dist.tmp` 再改名换入 |
 | D12 | `tests/unit/advice-coverage.test.mjs` 的正则 `/reason:\s*'(...)'/g` **会读注释里的文字**：我为解释"把成功路径的 reason 改名"而在注释里写下那个字面量，测试立刻要求给一条**成功**配建议 | `node --test tests/unit/advice-coverage.test.mjs`（改注释前后各跑一次即见） | 判据扫描器把散文当代码；与我本轮在 build-web 里犯的同一族 ✓ 修法=扫描前剥注释（不改判据强度） |

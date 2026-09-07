@@ -244,6 +244,7 @@ mkdirSync(OUT, { recursive: true });
 const needIds = new Set(JSON.parse(appBundle.match(/var IDS = (\[[^\]]*\])/)[1]));
 for (const m of closure('web/selftest.js')) needIds.add(m.id);
 for (const m of closure('web/sender.js')) needIds.add(m.id);
+for (const m of closure('web/capture.js')) needIds.add(m.id);
 const allCore = [];
 (function walkCore(d) {
   for (const f of readdirSync(d)) {
@@ -258,6 +259,7 @@ for (const id of [...needIds, ...allCore].sort()) {
   // earlier check could see -- nothing in the build compared markup to disk.
   if (id === 'web/selftest.js') continue; // written below, with its specifier rewrite
   if (id === 'web/sender.js') continue; // likewise
+  if (id === 'web/capture.js') continue; // likewise: written below with the same rewrite
   writeDist(id.replace(/^web\//, ''), read(id));
 }
 writeDist('pskt-bundle.js', appBundle);
@@ -277,6 +279,9 @@ let single = html
   // requires every markup reference to resolve, would rightly fail on file:// where no
   // sibling files exist). Installability belongs to the served site, not to one file.
   .replace(/\s*<link rel="manifest"[^>]*>/, '')
+  // Burst capture needs the served site (module import + camera origin policy), so the
+  // single file keeps the receiver only; leaving the tag in would break self-containment.
+  .replace(/\s*<script type="module" src="\.\/capture\.js"><\/script>/, '')
   .replace(/<meta name="description"[^>]*>/, '<meta name="description" content="Single-file PSKT receiver. Works from file:// with no network access.">');
 // What makes the single-file page "self-contained" is its MARKUP: no src=, no href=, no
 // url() pointing anywhere else. A check that scanned the whole text would trip over the
@@ -311,6 +316,7 @@ writeDist('send.html', read('web/send.html'));
 // file and tools/smoke-sender.mjs can execute it), dist uses ./core/ (so the module
 // resolves next to dist/core/).
 writeDist('sender.js', read('web/sender.js').replace(/(['"])\.\.\/core\//g, '$1./core/'));
+writeDist('capture.js', read('web/capture.js').replace(/(['"])\.\.\/core\//g, '$1./core/'));
 
 /* PWA installability, drawn by this project's own renderer.
  * The icon is a real PSKT page bitmap encoded with core/render/png.js: no image library, no

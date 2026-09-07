@@ -119,6 +119,17 @@
 
 ## 已知风险 / 待办
 
+### 第 24 轮（手机连拍外壳：挑帧 / 去重 / 缺页提示，纯函数化后可在 Node 验证）
+
+- 先证实了地面：`--photo` **不是未实现**——它是 `allowFastPath:!args.photo` ✓ 角标检测与 `rectifyPage` **本来就在 `core/decode/page.js` 里**（返回 `{path:'photo', markerPx, coverage}` ✓）⇒ 连拍不需要新的解码理论 ✓ 只缺"取哪一帧、怎么去重、怎么报缺页"的外壳 ✓（我一度推断"CLI 没实现" ✓ 只搜了 cli/ 就下结论 ✗ 幸而复核了 `allowFastPath` 与报告字段）
+- 新 `web/capture.js`：`createBurstCollector({decode, feed, gate})` 是**纯函数**（DOM 半边同样关进 `getElementById('burst')` 守卫 ✓ 于是 Node 可 import ✓），职责严格限定在三件事——质量门控（角标 <14px ⇒ "把手机靠近一点" ✓ 覆盖率 <72% ⇒ "退半步把整页拍进去" ✓）、按 `sessionId + pageIndex` 去重（手机不动 ≠ 进度 ✓）、从声明的 `totalPages` 报"缺第几页" ✓ **校正本身不重写**（已由 `tests/unit/warp.test.mjs` 用已知单应变换覆盖 ✓ 重写就是第二套真相 ✓）
+- 新 `tools/smoke-capture.mjs`：**11/12 通过** ✓ 真实 3 页逐页收下并**解回输入摘要** ✓ 重复页判 `duplicate` ✓ 两道门控各出一条可执行提示 ✓ 页数声明冲突拒绝 ✓ **把页裁掉一半的帧不被当成一页** ✓
+- **唯一红的那条不糊弄**（D17）：跨会话守卫返回 `kind page` 而非 `other-session` ⇒ `locate()` 读到的 sessionId 形状与我的假设不符，或夹具仍错 ✓ **未定论就写未定论** ✓ 并且说清风险边界：**只降级提示语、不降级安全**（混批由 `TransferAssembler` 的 `other-session` 拒绝兜住 ✓ G0/G5 已测 ✓ 10000 次篡改 0 误接受 ✓）⇒ 禁止用删断言换绿 ✓
+- 又抓到自己的 2 处凭空引用：位图字段是 **`pixels`（RGBA 4 通道 ✓）不是 `data`** ✗ 以及 `feed` 里我 import 了**不存在的 `./app-state.js`** ✗（第 11、12 次 ✓ 全部由执行当场抓获 ✓ 无一次靠阅读发现 ✓）；另修 D19（`./capture.js` 在 precache 清单里重复两项 ✓ 一行跳过）
+- 产物与门限：`web/dist` 82 文件 ✓ **G9 `check-dist` 8/8**（含"页面每个引用都要有对应产物" ✓ 新接的 `capture.js` 与 section 一并受检 ✓）✓ dist selftest **13/13** ✓ 单测 **231/231** ✓ **不打新 tag**（M4 未闭合 ✓）
+- 仍 OPEN 的头两项没变：**D11 构建中途失败会在 `web/dist` 留半套产物**（应写临时目录再原子换入 ✓）· **D16 `docs/ACCEPTANCE.md` 的 G9 行仍写"未开始"** ✓ 另有本轮新记的 D18（连拍实机部分本机无法验证 ⇒ G9 维持 🟡 的核心理由）、D20（HTML section 与 JS 里 `getElementById` 的 id 契约无判据保护 ⇒ 改一边忘一边会静默失效）
+
+
 ### 第 23 轮（客户端优先：手机+电脑发送端、G9 产物级闭合、缺陷台账立规）
 
 - 用户改序：**先做客户端（手机+电脑）→ 再做 2D/3D 可打印产物；性能不管、错误先记账**。目标已重启（上限 40 ✓ `phase=active`）。
