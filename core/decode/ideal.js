@@ -1,5 +1,5 @@
 import { getPalette } from '../palette.js';
-import { MEASURE, ANNULUS_AREA, levelFromRho, shapeThresholds, rhoFor } from '../render/glyphs.js';
+import { MEASURE, ANNULUS_AREA, levelFromRho, shapeThresholds, rhoFor, glyphMaskForLevel } from '../render/glyphs.js';
 import { joinCellLevels } from '../protocol.js';
 import { measureTargets } from '../render/raster.js';
 
@@ -78,6 +78,7 @@ export function analyseCell(bitmap, layout, c, r) {
   const uz = (bestRGB[2] - sub[2]) / Math.sqrt(denom);
 
   let dot = 0;
+  const amap = new Float64Array(n);
   let band = 0;
   let total = 0;
   let printed = 0;
@@ -94,6 +95,7 @@ export function analyseCell(bitmap, layout, c, r) {
       const a = Math.max(0, Math.min(1.2, (dr * ux + dg * uy + db * uz) / Math.sqrt(denom)));
       if (a > alphaMax) alphaMax = a;
       alphaSum += a;
+      amap[py * cellPx + px] = a;
       if (a > 0.5) printed++;
       if (a > 0.85) {
         strong[0] += pixels[o] * a;
@@ -117,7 +119,110 @@ export function analyseCell(bitmap, layout, c, r) {
   const bandA = (band / n) * m.bandScale;
   const rho = bandA > 1e-4 ? dotA / bandA : NaN;
   const ink = strongW > 0 ? [strong[0] / strongW, strong[1] / strongW, strong[2] / strongW] : bestRGB;
-  return { rho, ink, alphaMax, printed, total, band: bandA, dot: dotA, mean, blank: false };
+  return { rho, ink, alphaMax, printed, total, band: bandA, dot: dotA, mean, alphaMap: amap, blank: false };
+}
+
+/**
+ * Ideal coverage map for each shape level, sampled on the same pixel-centre grid
+ * `analyseCell` uses. The templates come from `glyphMaskForLevel` -- the very
+ * function the renderer draws with -- so the decoder cannot drift away from the
+ * encoder without the conformance vectors noticing.
+ */
+export function buildShapeTemplates(cellPx, geo, shapeLevels) {
+  const out = [];
+  for (let lv = 0; lv < shapeLevels; lv++) {
+    const t = new Float64Array(cellPx * cellPx);
+    for (let py = 0; py < cellPx; py++) {
+      for (let px = 0; px < cellPx; px++) {
+        const [nx, ny] = norm(px, py, cellPx);
+        t[py * cellPx + px] = glyphMaskForLevel(nx, ny, lv, geo) ? 1 : 0;
+      }
+    }
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Decide a cell's shape level by matched filter instead of by one ratio.
+ *
+ * `rho` throws away most of the cell: it integrates the coverage over two annuli
+ * and compares one number to a table. That is exactly why it has no tolerance for
+ * edge displacement -- EW expansion and optical MTF move ink across the annulus
+ * boundary and every level's rho drifts in the same direction at once, so the
+ * decision boundary stops meaning anything. Here the whole alpha map is compared
+ * against each level's template instead, with two deliberate invariances:
+ *
+ *   - a free per-cell gain (the residual is minimised analytically over the scale
+ *     of the template), so exposure and blur, which attenuate coverage without
+ *     changing its shape, cannot by themselves flip the decision;
+ *   - a small integer alignment search, so a registration error of a pixel does not
+ *     have to be absorbed by the shape channel.
+ *
+ * @param {Float64Array} alphaMap  cellPx*cellPx measured coverage, row-major
+ * @param {Float64Array[]} templates  from buildShapeTemplates()
+ * @param {number} cellPx
+ * @param {{offsetPx?:number}} [opts]
+ * @returns {{level:number,residual:number,margin:number,offset:number,blank:boolean,all:object[]}}
+ */
+export function matchedShapeLevel(alphaMap, templates, cellPx, opts = {}) {
+  const offsetPx = opts.offsetPx ?? 1;
+  let aa = 0;
+  for (let i = 0; i < alphaMap.length; i++) aa += alphaMap[i] * alphaMap[i];
+  const normAa = Math.max(1e-9, aa);
+  if (aa < 1e-6) {
+    // Nothing printed here at all. Do not let the filter invent a shape from noise:
+    // an unmatched 0/0 comparison would return level 0 with perfect confidence, and
+    // the caller needs this to be an erasure, not a plausible-looking symbol.
+    return { level: null, residual: 0, margin: 0, offset: 0, blank: true, all: [] };
+  }
+  const scores = [];
+  for (let lv = 0; lv < templates.length; lv++) {
+    const T = templates[lv];
+    let best = Infinity;
+    let bestOff = 0;
+    for (let oy = -offsetPx; oy <= offsetPx; oy++) {
+      for (let ox = -offsetPx; ox <= offsetPx; ox++) {
+        let at = 0;
+        let tt = 0;
+        for (let py = 0; py < cellPx; py++) {
+          const ty = py + oy;
+          if (ty < 0 || ty >= cellPx) continue;
+          const rowT = ty * cellPx;
+          const rowA = py * cellPx;
+          for (let px = 0; px < cellPx; px++) {
+            const tx = px + ox;
+            if (tx < 0 || tx >= cellPx) continue;
+            const v = T[rowT + tx];
+            if (!v) continue;
+            at += v * alphaMap[rowA + px];
+            tt += v;
+          }
+        }
+        if (tt < 1) continue;
+        // min over gain s of ||A - sT||^2  =  ||A||^2 - <A,T>^2 / ||T||^2
+        const res = aa - (at * at) / tt;
+        if (res < best) {
+          best = res;
+          bestOff = oy * cellPx + ox;
+        }
+      }
+    }
+    scores.push({ level: lv, residual: Math.max(0, best) / normAa });
+  }
+  scores.sort((a, b) => a.residual - b.residual);
+  const win = scores[0];
+  const next = scores[1];
+  return {
+    level: win.level,
+    residual: win.residual,
+    // 1.0 when the runner-up is a total mismatch; ->0 as two levels become
+    // indistinguishable, which is what the erasure decision wants to see.
+    margin: next ? (next.residual - win.residual) / Math.max(1e-9, next.residual) : 1,
+    offset: win.offset,
+    blank: false,
+    all: scores,
+  };
 }
 
 /** Nominal annulus area as a fraction of the cell, used as the rho denominator. */
@@ -140,18 +245,36 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   const quality = new Float32Array(geom.totalCells);
   const cells = [];
   const inks = [];
+  // One template set per page: the shapes are fixed by the geometry, only the
+  // measured alpha changes per cell.
+  const templates = layout.glyph && shapeChannel ? buildShapeTemplates(layout.cellPx, layout.glyph, shapeChannel.levels) : null;
+  let disagreed = 0;
   for (let r = 0; r < geom.rows; r++) {
     for (let c = 0; c < geom.cols; c++) {
       const i = r * geom.cols + c;
       const a = analyseCell(bitmap, layout, c, r);
       cells.push(a);
-      const shapeLevel = Number.isFinite(a.rho) ? levelFromRho(a.rho, thresholds) : null;
+      let shapeLevel = Number.isFinite(a.rho) ? levelFromRho(a.rho, thresholds) : null;
+      if (templates && a.alphaMap) {
+        const mf = matchedShapeLevel(a.alphaMap, templates, layout.cellPx);
+        if (!mf.blank && mf.level !== null) {
+          if (shapeLevel !== null && shapeLevel !== mf.level) disagreed++;
+          shapeLevel = mf.level;
+          // Quality becomes the matched-filter margin, which is the honest number:
+          // "how much better did the winner fit than the runner-up", not "how dark
+          // was the darkest pixel". The receiver's erasure decision reads this.
+          quality[i] = Math.min(1, Math.max(0, mf.margin));
+        } else {
+          quality[i] = 0;
+        }
+      } else {
+        quality[i] = shapeLevel === null ? 0 : Math.min(1, a.alphaMax);
+      }
       if (shapeLevel === null) {
         quality[i] = 0;
         levels[i] = 0;
         continue;
       }
-      quality[i] = Math.min(1, a.alphaMax);
       let colourLevel = 0;
       if (colourChannel) {
         colourLevel = nearestInk(a.ink, pal);
@@ -160,6 +283,9 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
       levels[i] = joinCellLevels({ shape: shapeLevel, colour: colourLevel }, geom);
     }
   }
+  // (The ratio-vs-template disagreement count is returned below rather than hidden:
+  // if the two methods disagree a lot on a clean render, one of them is wrong, and
+  // that is a fact worth seeing in the gate output instead of a silent choice.)
 
   // A single-colour print leaves the colour channel with nothing to say: every
   // cell resolves to the same ink. Detect that from the data alone (no side
@@ -174,7 +300,7 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
     const distinct = new Set(inks).size;
     colourAlive = pal.inks.length > 1 && distinct > 1;
   }
-  return { levels, quality, cells, colourAlive, thresholds, shapeChannel, colourChannel };
+  return { levels, quality, cells, colourAlive, thresholds, shapeChannel, colourChannel, matchedFilter: !!templates, ratioDisagreements: disagreed };
 }
 
 function nearestInk(rgb, pal) {
