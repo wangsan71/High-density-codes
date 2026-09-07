@@ -72,6 +72,12 @@ function readFast(bitmap, geom, layout, paletteId) {
     header: echo.header || null,
     colourAlive: read.colourAlive,
     quality: read.quality,
+    // Added because a page whose *ink* contradicts its *symbols* is a different failure
+    // from a page with a few wrong cells, and only the outer layers can tell them apart.
+    // The histogram route to that judgement was measured and rejected in round 20.
+    inkBalance: read.inkBalance,
+    ratioDisagreements: read.ratioDisagreements,
+    matchedFilter: read.matchedFilter,
   };
 }
 

@@ -64,6 +64,7 @@ for (const name of dirs) {
   const paletteId = mf.palette || 'INK2';
   for (const f of readdirSync(dir).filter((n) => /\.png$/i.test(n)).sort()) {
     let cell;
+    let ib = null;
     try {
       const bmp = decodePNG(new Uint8Array(readFileSync(join(dir, f))));
       bmp.substrate = bmp.substrate || getPalette(paletteId).background;
@@ -73,6 +74,7 @@ for (const name of dirs) {
         continue;
       }
       cell = r.levels;
+      ib = r.inkBalance || null;
     } catch (e) {
       rows.push({ dir: name, page: f, note: `error ${e.message.slice(0, 30)}` });
       continue;
@@ -92,6 +94,11 @@ for (const name of dirs) {
       // The second-most-common symbol matters as much: a real page has structure, a
       // collapsed one has one spike and nothing else.
       secondFrac: [...hist.values()].sort((a, b) => b - a)[1] / cell.length || 0,
+      // Ink balance: measured coverage over claimed coverage. Unlike the two columns
+      // above it does not depend on how compressible the payload is (round 20).
+      inkRatio: ib && Number.isFinite(ib.ratio) ? ib.ratio : null,
+      misfitFrac: ib && Number.isFinite(ib.misfitFrac) ? ib.misfitFrac : null,
+      inkCells: ib ? ib.cells : 0,
     });
   }
 }
@@ -111,6 +118,20 @@ for (const r of worst) {
 }
 const sf = read.map((r) => r.secondFrac).sort((a, b) => a - b);
 console.log(`  second-symbol fraction: min ${sf[0].toFixed(4)} p50 ${sf[Math.floor(sf.length / 2)].toFixed(4)} max ${sf[sf.length - 1].toFixed(4)}`);
+
+// The ink-balance candidate. This is the one that should not care about payload
+// compressibility, so its healthy spread is the number that decides whether it can
+// become a gate at all -- measure first, threshold second (round 20's lesson).
+const ink = read.filter((r) => Number.isFinite(r.inkRatio));
+const q = (arr, p) => (arr.length ? arr[Math.min(arr.length - 1, Math.floor(p * arr.length))] : NaN);
+const ir = ink.map((r) => r.inkRatio).sort((a, b) => a - b);
+const mf2 = ink.map((r) => r.misfitFrac).sort((a, b) => a - b);
+console.log(`ink balance across ${ink.length} pages (measured coverage / claimed coverage):`);
+console.log(`  ratio  min ${q(ir, 0).toFixed(4)} p50 ${q(ir, 0.5).toFixed(4)} p90 ${q(ir, 0.9).toFixed(4)} p99 ${q(ir, 0.99).toFixed(4)} max ${q(ir, 1).toFixed(4)}`);
+console.log(`  misfit frac (cells off by >0.5 rel) min ${q(mf2, 0).toFixed(4)} p50 ${q(mf2, 0.5).toFixed(4)} p90 ${q(mf2, 0.9).toFixed(4)} max ${q(mf2, 1).toFixed(4)}`);
+const byMisfit = [...ink].sort((a, b) => b.misfitFrac - a.misfitFrac).slice(0, 10);
+console.log(`  ten pages with the worst ink misfit:`);
+for (const r of byMisfit) console.log(`    misfit=${r.misfitFrac.toFixed(4)} ratio=${r.inkRatio.toFixed(4)} maxFrac=${r.maxFrac.toFixed(4)} ${r.dir}/${r.page}`);
 console.log('  -> if the ten above include pages that assembled fine, max-fraction alone cannot be the gate;');
 console.log('     second-symbol fraction is reported for the same reason: a genuine page keeps a tail, a');
 console.log('     constant-output collapse has none at all.');

@@ -238,13 +238,27 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   const pal = getPalette(palette);
   const shapeChannel = geom.channels.find((ch) => ch.name === 'shape');
   const colourChannel = geom.channels.find((ch) => ch.name === 'colour');
-  const thresholds = shapeThresholds(shapeChannel.levels, {
-    targets: measureTargets(layout.cellPx, shapeChannel.levels, layout.glyph),
-  });
+  // The per-level ideal ratios are hoisted because the ink-balance check below needs
+  // the same numbers the level decision was made with: measured `rho` against
+  // `targets[level]`. Both sides come from the page's own geometry, so a mismatch is a
+  // statement about the readout, not about a second implementation of the glyphs.
+  const targets = measureTargets(layout.cellPx, shapeChannel.levels, layout.glyph);
+  const thresholds = shapeThresholds(shapeChannel.levels, { targets });
   const levels = new Uint16Array(geom.totalCells);
   const quality = new Float32Array(geom.totalCells);
   const cells = [];
   const inks = [];
+  // Ink balance: does the total coverage the readout claims match the total coverage
+  // the image actually shows? A collapsed readout (one symbol everywhere, or the
+  // complement of the truth) keeps a plausible per-cell look but fails this in
+  // aggregate, and unlike a symbol-histogram test it is independent of how compressible
+  // the payload happens to be -- which is why the histogram gate was rejected in round
+  // 20 (healthy pages of a compressible payload legitimately sit at 0.9057 on one
+  // symbol, only seven points below the broken ones).
+  let rhoSum = 0;
+  let targetSum = 0;
+  let inkCells = 0;
+  let misfit = 0;
   // One template set per page: the shapes are fixed by the geometry, only the
   // measured alpha changes per cell.
   const templates = layout.glyph && shapeChannel ? buildShapeTemplates(layout.cellPx, layout.glyph, shapeChannel.levels) : null;
@@ -275,6 +289,28 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
         levels[i] = 0;
         continue;
       }
+      // Coverage the cell shows vs coverage the chosen level claims.
+      //
+      // NOT usable as a per-cell defect detector, and here is the measured reason: the
+      // level-0 target is exactly 0 (measureTargets returns [0.000, 0.370] for a
+      // two-level alphabet), and a relative error against a zero target has no meaning
+      // -- every legitimate padding cell counts as a "misfit", so misfitFrac merely
+      // reproduces the fraction of level-0 cells (0.9057 vs 0.9057 measured). Kept
+      // because it is cheap and because the aggregate below is a real quantity:
+      // rhoSum/targetSum came out 1.0651-1.0660 on pristine renders and 3.6-21.7 on
+      // channel pages at 600 dpi, i.e. it measures optical BLEED (blur sigma is fixed in
+      // mm, so it is twice as wide in cells at 600 dpi as at 300 dpi -- which matches
+      // p50 16.0 at 600 dpi against p50 4.5 at 300 dpi). Bleed is what pushes a padding
+      // cell's rho past the fixed mid-point boundary and makes a whole page read as
+      // level 1, so this number is a diagnostic of the mechanism, not a gate.
+      if (Number.isFinite(a.rho) && targets.length > shapeLevel) {
+        const tgt = targets[shapeLevel];
+        rhoSum += a.rho;
+        targetSum += tgt;
+        inkCells++;
+        const rel = Math.abs(a.rho - tgt) / (tgt > 1e-6 ? tgt : 1e-6);
+        if (rel > 0.5) misfit++;
+      }
       let colourLevel = 0;
       if (colourChannel) {
         colourLevel = nearestInk(a.ink, pal);
@@ -300,7 +336,28 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
     const distinct = new Set(inks).size;
     colourAlive = pal.inks.length > 1 && distinct > 1;
   }
-  return { levels, quality, cells, colourAlive, thresholds, shapeChannel, colourChannel, matchedFilter: !!templates, ratioDisagreements: disagreed };
+  return {
+    levels,
+    quality,
+    cells,
+    colourAlive,
+    thresholds,
+    targets,
+    shapeChannel,
+    colourChannel,
+    matchedFilter: !!templates,
+    ratioDisagreements: disagreed,
+    // Aggregate ink balance. Reported, not enforced -- the healthy population's spread
+    // has to be measured before any cut on it can be trusted (round 20's lesson).
+    inkBalance: {
+      cells: inkCells,
+      rhoSum,
+      targetSum,
+      ratio: targetSum > 1e-9 ? rhoSum / targetSum : NaN,
+      misfit,
+      misfitFrac: inkCells ? misfit / inkCells : NaN,
+    },
+  };
 }
 
 function nearestInk(rgb, pal) {
