@@ -99,6 +99,20 @@
 
 ## 已知风险 / 待办
 
+- **G2 的统计目前是可复现的手工命令，还不是门限**（本轮 8/8、7/8 那些数字的出处）：
+  ```
+  node cli/pskit.mjs send .tmp/payload.bin --profile P-M1-300 --out .tmp/sw-scan300-src
+  node cli/pskit.mjs send .tmp/payload.bin --profile P-M1-600 --out .tmp/sw-scan600-src
+  python sim/channel.py --in .tmp/sw-scan300-src --out .tmp/nc-scan300-<seed> --seed <seed> --preset scan300 --modifier nocrop
+  node cli/pskit.mjs receive .tmp/nc-scan300-<seed> --photo
+  ```
+  下一轮要把它变成 `verify --gate G2 --corpus <dir>`：**必须在进程内自己比对 manifest 摘要**（今天的判定是靠 grep CLI 打的 `received` ✓ 那是间接证据 ✓ 门限不能这样 ✓），并且**不能 spawn Python**（沙箱 `spawn EPERM` ⇒ 语料由外部预生成、门限只消费盘上目录 ✓）。
+- **600 dpi 的门限标定缺失（G2 与 G10 共同的前置）**：`pskit calibrate` 之前，任何"某个 dpi 过、另一个 dpi 不过"都必须按未解缺陷对待，不许靠预设挑一档报好消息 ✓
+- **匹配滤波的对齐搜索半径仍与像素无关地固定在 ±1 分析格**（= 格宽/10 ✓ 尺度正确 ✓）；若将来改网格，必须同步改半径，否则又回到本轮证伪的那条错误 ✓
+- `page.js` 让 448 bit、零纠错的回显条带一票否决整页；有 manifest 时应允许走数据区、由 RS 与末端摘要定夺（第 8 轮记录，仍未做）。
+- `no-hollow-corner` 语义过载（"凑不齐四角"与"角标被糊住"共用一个 reason ✓ 连续误导两轮）⇒ 拆分。
+- 仓库根目录偶有探针文件（如 `.tmp-probe.mjs`）由子代理生成 ✓ 收尾时清掉，别让它进提交。
+
 - **真实相机/扫描仪照片尚未验证**（M3 只到合成照片）。仿真里 1px 模糊就能桥接点阵 → 真实光学 MTF 更差，`PL-G` 之外的粗档可能不够。M4 信道 `sim/channel.py`（子代理在写，含 scan300/scan600/phone40/phone-hard/plate-matte/plate-glossy/identity 预设）落地后立刻把 G2/G3/G4 打在真实退化上；若 `PL-G` 也撑不住，就再抬 EW 地板（数字会变，结论不变）。
 - **`--gate G4` 依赖照片路解码的吞吐**：单页矫正 ~360-460ms，500 seed × 7 档 = 数十分钟。要么并行，要么在门限里降采样（`warp.test.mjs` 那组 68s 同理）。
 - `pskit receive` 只吃 PNG；TIFF 读回会点名跳过（不静默丢文件）。PDF 输出已接（`--format pdf|all`，超出 380 MB 组装预算时明确拒绝并让用户改打 PNG）。
