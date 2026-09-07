@@ -1153,18 +1153,26 @@ def assemble_payload(pskt: Pskt, vec: dict, report: Report, vecid: str, drop=())
             raise Reject(f"{vecid}: page {i} content {len(buf)} > dataBytesPerPage {net}")
         streams[i] = buf + b"\x00" * (net - len(buf))
     out_cols = bytearray()
-    for j in range(net):
-        col = bytearray()
-        for i in range(n_total):
-            col += bytes([streams[i][j]])
-        if not missing:
-            out_cols += col[:k_data]
-            continue
-        ok, fixed, why = rs_decode(pskt.gf, bytes(col), parity_pages, erasures=missing, fcr=pskt.fcr)
-        if not ok:
-            raise Reject(f"{vecid}: inter-page RS failed at column {j}: {why}")
-        out_cols += fixed[:k_data]
-    data = bytes(out_cols)
+    if not missing:
+        # The DATA region is page-major: page i holds the i-th net-byte slice of the
+        # payload, so reassembly is a concatenation.  The byte-offset columns exist
+        # only where the inter-page parity is *computed*; transposing the data pages
+        # into column order yields a stream whose byte 0 still matches (both orders
+        # start with page0[0]) and whose byte 1 is page1[0] instead of page0[1] --
+        # which is exactly the "first differing offset 1" this fixture reported.
+        data = b"".join(streams[i] for i in range(k_data))
+    else:
+        # Recover the missing pages column by column, then write the result back in
+        # page-major order.
+        fixed_pages = {i: bytearray(streams[i]) for i in range(k_data)}
+        for j in range(net):
+            col = bytes(streams[i][j] for i in range(n_total))
+            ok, fixed, why = rs_decode(pskt.gf, col, parity_pages, erasures=missing, fcr=pskt.fcr)
+            if not ok:
+                raise Reject(f"{vecid}: inter-page RS failed at column {j}: {why}")
+            for i in range(k_data):
+                fixed_pages[i][j] = fixed[i]
+        data = b"".join(bytes(fixed_pages[i]) for i in range(k_data))
     # prove the inter-page code really is systematic RS(k_data, n_total) over these pages
     if not missing:
         for j in range(0, net, max(1, net // 32)):
@@ -1178,14 +1186,17 @@ def assemble_payload(pskt: Pskt, vec: dict, report: Report, vecid: str, drop=())
                 break
         else:
             report.check("transfer", vecid, f"inter-page parity re-encodes ({net} columns, sampled)", True, "")
+    # meta.pages.blockPad: the page-major concatenation IS payloadLen bytes, padding
+    # included. Slice the payload region first and only then drop the trailing pad --
+    # stripping the pad before comparing against payloadLen makes a valid transfer look
+    # like an overflow ("payloadLen 768 exceeds the assembled 604 bytes").
     pad = ref["blockPad"]
-    if len(data) < pad:
-        raise Reject(f"{vecid}: blockPad {pad} longer than the assembled stream")
-    data = data[:len(data) - pad] if pad else data
     plen = ref["payloadLen"]
     if plen > len(data):
-        raise Reject(f"{vecid}: payloadLen {plen} exceeds the assembled {len(data)} bytes (blockPad?)")
-    stream = data[:plen]
+        raise Reject(f"{vecid}: payloadLen {plen} exceeds the assembled {len(data)} bytes")
+    if pad > plen:
+        raise Reject(f"{vecid}: blockPad {pad} exceeds payloadLen {plen}")
+    stream = data[:plen - pad]
     return pskt.payload_from_stream(stream, ref, vec, report, vecid)
 
 
@@ -1217,10 +1228,16 @@ def h_deflate(pskt, vec, report):
     report.eq("deflate", vec["id"], "container magic", PSZ_MAGIC, blob[:4])
     if method == 0:
         report.eq("deflate", vec["id"], "stored body == input", want, body)
-        report.note(
-            f"{vec['id']}: the vector's own `note` says to INFLATE the container body, but method 0 stores the "
-            "payload verbatim -- inflating it raises. The per-vector note is wrong for method 0."
-        )
+        # Only complain if the note actually still says "inflate": it used to, for every
+        # vector including stored ones, and the fixture has since been corrected to say
+        # that inflating a method-0 body is an error.  An unconditional note here was a
+        # stale opinion dressed up as a finding.
+        note = (vec.get("note") or "").lower()
+        if "inflate" in note and "do not" not in note and "is an error" not in note:
+            report.note(
+                f"{vec['id']}: the vector's own `note` says to inflate the container body, but method 0 stores "
+                "the payload verbatim -- inflating it raises."
+            )
     else:
         d = zlib.decompressobj(-15)
         out = d.decompress(body) + d.flush()
@@ -1403,11 +1420,19 @@ def _check_transfer_headers(pskt, vec, report):
     report.eq("transfer", vec["id"], "header totalPages", len(vec["pages"]), hdr["totalPages"])
     report.eq("transfer", vec["id"], "header dataPages", vec["dataPages"], hdr["dataPages"])
     report.eq("transfer", vec["id"], "header parityPages", vec["parityPages"], hdr["totalPages"] - hdr["dataPages"])
-    report.eq("transfer", vec["id"], "header payloadLen", len(unhex(vec["payload"])), hdr["payloadLen"])
+    # payloadLen is post-transform and includes the page-filling padding, so it must
+    # never be compared with the plaintext length (meta.pages.blockPad says so, and
+    # this fixture's encrypted vector made the difference visible: 768 in the header,
+    # 576 of plaintext, because encryption prepends salt||nonce).  What can be checked
+    # from the header alone is its own invariant.
+    report.eq("transfer", vec["id"], "header payloadLen == dataPages*dataBytesPerPage",
+              hdr["dataPages"] * hdr["dataBytesPerPage"], hdr["payloadLen"])
+    report.check("transfer", vec["id"], "header blockPad is smaller than one page",
+                 hdr["blockPad"] < hdr["dataBytesPerPage"],
+                 f"blockPad {hdr['blockPad']} >= dataBytesPerPage {hdr['dataBytesPerPage']}")
     report.eq("transfer", vec["id"], "header intraK", vec["ecc"]["intra"]["k"], hdr["intraK"])
     report.eq("transfer", vec["id"], "header intraNsym", vec["ecc"]["intra"]["nsym"], hdr["intraNsym"])
     report.eq("transfer", vec["id"], "header dataBytesPerPage", vec["ecc"]["dataBytes"], hdr["dataBytesPerPage"])
-    report.eq("transfer", vec["id"], "header blockPad", vec["ecc"]["blockPad"], hdr["blockPad"])
     pay = unhex(vec["payload"])
     digest = sha256_bytes(pay)[:meta["digestLength"]]
     report.eq("transfer", vec["id"], "header digest == sha256(payload)[:digestLength]", hx(digest), hdr["digest"])

@@ -109,7 +109,7 @@ const meta = {
     [16, 2, 'page index (u16be)'],
     [18, 1, 'total pages (data + parity)'],
     [19, 1, 'kind: 0 data, 1 parity'],
-    [20, 4, 'payload length (u32be) -- the post-transform payload (after compression and/or encryption) INCLUDING the intra-page block padding that filled out the last page: meaningful bytes = this minus blockPad, and the assembled wire region is dataPages*dataBytesPerPage. It is NOT the plaintext file size; the plaintext is identified only by the digest field.'],
+    [20, 4, 'payload length (u32be) -- ALWAYS exactly dataPages*dataBytesPerPage, i.e. the post-compression/post-encryption payload plus the page-filling padding counted by the header blockPad field at offset 30. The bytes that matter are this minus that blockPad. It is NOT the plaintext file size and NOT the intra-block padding; the plaintext is identified only by the digest field.'],
     [24, 1, 'intra-page k'],
     [25, 1, 'intra-page nsym'],
     [26, 2, 'data bytes per page (u16be)'],
@@ -118,6 +118,16 @@ const meta = {
     [32, 22, 'truncated SHA-256 of the recovered payload'],
     [54, 2, 'CRC-16/CCITT-FALSE over the first 54 bytes'],
   ],
+  // Stated as data because two readers already guessed differently here: whether the
+  // pages array is ordered, where the parity pages sit, and what "assembling the
+  // payload" means for the byte order. Getting this wrong is silent -- the result is
+  // a stream whose byte 0 happens to match and whose byte 1 does not.
+  pages: {
+    order: 'pages[] is sorted by ascending pageIndex; a decoder may not assume that from the array, it must read the header of each page.',
+    layout: 'pageIndex 0..dataPages-1 are data pages, dataPages..totalPages-1 are inter-page parity pages.',
+    assembly: 'the payload region is the PAGE-MAJOR concatenation of the data pages: page i supplies bytes [i*D, (i+1)*D) where D = dataBytesPerPage. The inter-page Reed-Solomon code is evaluated per byte offset across pages (one codeword per column, symbol i taken from page i) -- that column view is for computing and correcting parity ONLY; it never reorders the data.',
+    blockPad: 'the header field at offset 30. Zero bytes appended to the post-transform payload so that it fills the data pages exactly: payloadLen == dataPages*dataBytesPerPage, and the bytes that matter are the first payloadLen - blockPad of the page-major concatenation. Order matters -- slice the payload region FIRST and then drop blockPad; removing the padding before checking payloadLen makes a correct transfer look like an overflow. Do not confuse it with a vector\'s ecc.intraBlockPad, which is the separate padding that aligns the last intra-page RS block.',
+  },
   // Half-open ranges, stated as data rather than as prose. The prose above once
   // said "over bytes 0..53", which the independent decoder read as a half-open
   // span and required 0..54 -- both readings are defensible, so the sentence was
@@ -296,7 +306,17 @@ for (const n of [2, 7, 8, 24, 100, 255, 2401, 2273]) {
     const bytes_ = frame.encodeHeader(f);
     const dec = frame.decodeHeader(bytes_);
     add('header', `header-${kind === 0 ? 'data' : 'parity'}`, {
-      fields: { ...f, sessionId: hex(f.sessionId), digest: hex(digest) },
+      // magic and version are part of what a re-encode must reproduce. They are
+      // constants in the encoder, so a reader that only has `fields` could not have
+      // rebuilt the byte-exact header -- "re-encode these fields and compare" was not
+      // decidable from the data alone. Every field meta.headerLayout names is here.
+      fields: {
+        magic: '50534b31',
+        version: frame.VERSION,
+        ...f,
+        sessionId: hex(f.sessionId),
+        digest: hex(digest),
+      },
       bytes: hex(bytes_),
       roundTrips: dec.ok && dec.header.pageIndex === i,
       crcValid: true,
@@ -347,11 +367,16 @@ for (const { id, profile, opts, size, passphrase } of TRANSFERS) {
       dataBytes: geom.ecc.dataBytes,
       parityBytes: geom.ecc.parityBytes,
       netBytesPerPage: geom.ecc.netBytesPerPage,
-      blockPad: geom.ecc.blockPad || 0,
+      // Named intraBlockPad on purpose: the 56-byte header has a field called
+      // blockPad which counts something else entirely (the page-filling padding,
+      // payloadLen - real payload bytes). Two paddings, one word, was a trap -- an
+      // independent reader compared the header's value against this one and both
+      // were "block pad", so it concluded the encoder had lied.
+      intraBlockPad: geom.ecc.blockPad || 0,
       monoSafe: geom.ecc.monoSafe,
     },
     pages: t.pages.map((p) => ({ header: hex(p.header), levels: Array.from(p.levels) })),
-    recipe: 'per page: de-interleave levels (if FLAGS.INTERLEAVED), unpack to codeword, intra-page RS decode, take the first dataBytesPerPage bytes of content; then inter-page RS over the data-page contents (pad each to netBytesPerPage, strip blockPad); concatenate, decrypt (salt||nonce||ct) if the flag says so, inflate, and compare the SHA-256.',
+    recipe: 'per page: de-interleave levels (if FLAGS.INTERLEAVED), unpack to codeword, intra-page RS decode, take the first dataBytesPerPage bytes of content; concatenate those page-major (page i supplies bytes [i*D,(i+1)*D)) to obtain exactly payloadLen bytes, drop the trailing blockPad bytes, decrypt (salt||nonce||ct) if FLAGS.CIPHER, inflate if FLAGS.COMPRESSED, then compare the SHA-256. The inter-page RS columns exist only to correct a missing page.',
   });
   // pin one page's raw packing so a bit-order disagreement names itself
   const p0 = t.pages[0];
