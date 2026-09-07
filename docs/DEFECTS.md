@@ -16,7 +16,7 @@
 
 | # | 缺陷 | 复现 | 性质 |
 |---|---|---|---|
-| D4 | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
+| ~~D4~~ | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
 | D5 | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
@@ -28,6 +28,21 @@
 | D18 | 连拍的**实机部分本机无法验证**：`getUserMedia` 授权、`facingMode/continuous` 对焦、`getImageData` 帧率、iOS Safari 的 canvas  tainted 行为 | 需真机 https 访问 | 与 D9 同类：浏览器内未验证，G9 维持 🟡 的核心理由 |
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
+
+### 第 31 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D24~~ | 手机端"角标分辨率地板"（150dpi 等效 24 个几何候选全灭在 `no-hollow-corner` ✓ 当时据此以为手机必须靠近） | **由第 30 轮的 D26 修复顺带闭掉 ✓ 同一条命令、同一夹具重测**：`node tools/probe-curl-tolerance.mjs --down 2 --rot 0 --bend 0,4,12,24` ⇒ `CONTROL ... decode P-M1-300@300/INK2` ✓ `bend 0px DECODED 符号一致 68904/68904 = 100.00%` ✓ ⇒ **地板不存在** ✓ 那是那 1 个像素的取整 bug ✓ 本行原写的"像素预算"判断（第 28 轮已撤回 ✗）现在彻底没有残余 | CLOSED |
+| ~~D4~~ | `index.html` 里没有指向 `send.html` 的入口 ⇒ 接收端用户点不到发送端 | `web/index.html` 加 `<p class="nav"><a href="./send.html">`（链接文字明说"单文件版需从站点打开才有这一页"✓）✓ `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **9/9 PASS**（含"每条 markup 引用都落在产物里"✓ 与"单文件版除 `data:` 外不引用任何东西"✓）✓ 实测：`web/dist/pskt-file.html` 里 `send.html` 出现 **0 次** ✓ `web/dist/index.html` 里导航 **1 条** ✓ | CLOSED |
+| ~~D14~~ | `send.html` 的"纸张 A4/Letter"下拉框是惰性的 ⇒ UI 说了谎 | **删控件、不接线**：`<select id="ssheet">` 换成只读 `<span id="ssheetinfo">` + 标签写"纸张（由剖面决定）· 编好后显示在下方日志" ✓ 真值本来就在日志里（`sender.js:260` 打印 `纸 W×Hmm` ✓ 取自 `t.geom.sheetMm` ✓ **没有新造数字** ✓）✓ `check-dist` 的 DOM-id 契约断言（48→仍全绿 ✓）证明没有 JS 再去抓那个被删掉的 id | CLOSED（"改成能用的纸张选择器"属于新能力 ⇒ 若要做需连编码器一起改 ✓ 不在本轮范围 ✓） |
+
+### 第 31 轮新增（OPEN）
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D30 | 我给 `send.html` 加"回链到接收端"时**没有先看那页已有没有** ⇒ 那里本来就有 `<nav class="tabs"><a href="./index.html">→ 接收端（扫描/解码）</a></nav>` ✓ 我加出了**第二条重复回链** ✗ 由 `check-dist` 的引用计数目视复核抓获（不是我推理出来的 ✓ 是打印产物内容看到的 ✓）⇒ 撤掉我加的那条 ✓ 复验：站点 `send.html` 里 `href="./index.html"` 恰好 **1 条** | `Select-String web\dist\send.html -Pattern "href=.\./index\.html" \| Measure-Object` | 教训与 D4/D5 同源：**改 UI 前先读那页现有的东西** ✓ 本轮 index.html 也犯过一次同类（我把 `<p class="sub">` 那句"不联网、不上传、不需要 URL"**整段替换成了导航链接** ✓ 差点删掉项目最重要的那句承诺 ✗ 立刻补回 ✓）⇒ 两处都属"用 edit 时 old_string 圈大了" ✓ 圈定应只圈要改的那个元素 ✓ |
+| ~~D31~~ | 我在 `tools/build-web.mjs` 加的单文件剥离规则是 `/\s*<p class="nav">[\s\S]*?<\/p>/` ✓ 它**按 class 名**匹配 ⇒ 若将来别处也出现 `p.nav`、或站点版那条链接被误删 ✓ 现有判据**全都不会报**（它们只验"剩下的引用都能落到产物上"✓ 从不验"该在的引用还在"）✗ | 补了配对断言后：`node tools/check-dist.mjs` ⇒ 新增一条 `the served index.html keeps its link to the sender` ✓ 它同时断言**站点版必须有、单文件版必须没有** ✓ 去掉任一侧都会红 | CLOSED（同轮补断言 ✓ 没推到下轮：**"一行的事留给下轮"是这个台账里最常见的自欺 ✓**） |
 
 ### 第 30 轮闭掉的
 
@@ -86,7 +101,7 @@
 
 | # | 缺陷 | 证据 / 复现 | 性质 |
 |---|---|---|---|
-| D24 | **角标是手机端的分辨率地板，而 reason 会说谎**：同一页降到 1/4 面积（2260×3290 → 1130×1645 ✓ 等效 150dpi ✓ 仍是清晰降采样、无模糊噪声）⇒ **24 个几何候选全部死在 `stage:markers / reason:no-hollow-corner`** ✓ 根本没走到读出。也就是说 `rectifyPage(bitmap, layout, found.quad)` 在原理上是跨尺度的（把实测四角映到 layout 画布 ✓ 我上一轮"几何搜索不跨尺度"的说法**说过头了，撤回 ✗**）✓ 真正卡住手机的是**第四空心角在低分辨率下测不出来** | `node tools/probe-marker-scale.mjs` ⇒ 见 D26 ✓（本行原写的"角标像素预算地板"**已撤回** ✓ 该探针证明失败与尺度非单调 ✓） | 原判断"手机端卡在角标像素预算"**不成立** ✓ 剩下的真问题是 D26 的非单调 + `no-hollow-corner` 语义过载（`ACCEPTANCE.md` 开放缺陷 #3 ✓ 本轮又一次把我引偏 ✓）⇒ 拆 reason 阻塞在 D26 定位 ✓ |
+| ~~D24~~ | **角标是手机端的分辨率地板，而 reason 会说谎**：同一页降到 1/4 面积（2260×3290 → 1130×1645 ✓ 等效 150dpi ✓ 仍是清晰降采样、无模糊噪声）⇒ **24 个几何候选全部死在 `stage:markers / reason:no-hollow-corner`** ✓ 根本没走到读出。也就是说 `rectifyPage(bitmap, layout, found.quad)` 在原理上是跨尺度的（把实测四角映到 layout 画布 ✓ 我上一轮"几何搜索不跨尺度"的说法**说过头了，撤回 ✗**）✓ 真正卡住手机的是**第四空心角在低分辨率下测不出来** | `node tools/probe-marker-scale.mjs` ⇒ 见 D26 ✓（本行原写的"角标像素预算地板"**已撤回** ✓ 该探针证明失败与尺度非单调 ✓） | 原判断"手机端卡在角标像素预算"**不成立** ✓ 剩下的真问题是 D26 的非单调 + `no-hollow-corner` 语义过载（`ACCEPTANCE.md` 开放缺陷 #3 ✓ 本轮又一次把我引偏 ✓）⇒ 拆 reason 阻塞在 D26 定位 ✓ |
 | ~~D25~~ | **卷曲在页级可造成大面积错读，传输级尚未验证**：native dpi 下 `bend=4px`（页中部相对四角 4 像素起伏 ✓ 真实卷纸远大于此）⇒ `bootstrapDecode` 返回 `ok:true` ✓ 而 68904 格里 **33021 格与真值不符（52.08% 一致）**；`bend≥12px` 则干脆拒绝（`no-geometry-matched` ✓ 安全）✓ **这不是误接受**——页级 ok 之上还有页间/页内 RS + 末端 SHA-256 ✓ 误接受与否由那条链定夺（G5：10000 次篡改 0 误接受 ✓）✓ 但**本探针没有替该链说话**：必须把整盘页送进组装/校验路径重测 | `node tools/probe-curl-tolerance.mjs --down 1 --rot 0 --bend 0,4,12,24,48` | **D21（对齐梳）的判决依据**：若传输级也能拒 ⇒ 梳子是鲁棒性收益、不该为此改动采样路径；若传输级**接受**了 ⇒ 属误接受家族 ✓ 优先级立刻高于 G4 ✓ 本轮未做（预算）⇒ 下一轮第一件 |
 
 ### 第 26 轮闭掉的
@@ -130,7 +145,7 @@
 | ~~D11~~ | **构建失败会在 `web/dist` 留下半套产物**（本轮 PWA 段抛异常时 `sw.js` 缺失、其余文件仍在），Pages 若被配成"推什么发什么"就会发出破损站点 | `node -e "..."` 使 build 中途抛错，再看 `web/dist` 存在但缺 `sw.js` | 原子性：写 `dist.tmp` 再改名换入 |
 | D12 | `tests/unit/advice-coverage.test.mjs` 的正则 `/reason:\s*'(...)'/g` **会读注释里的文字**：我为解释"把成功路径的 reason 改名"而在注释里写下那个字面量，测试立刻要求给一条**成功**配建议 | `node --test tests/unit/advice-coverage.test.mjs`（改注释前后各跑一次即见） | 判据扫描器把散文当代码；与我本轮在 build-web 里犯的同一族 ✓ 修法=扫描前剥注释（不改判据强度） |
 | D13 | PWA 图标是一张 2260×3290 的**非方形**页图；`sizes` 走的是 `${w}x${h}` 分支，iOS 对非方形/`any` 支持差 ⇒ 主屏图标可能被忽略 | `node tools/build-web.mjs` 打印 `icon 211384 B (2260x3290)` | 需要在构建期裁成方形（自家编码器可重画 ✓ 不引依赖） |
-| D14 | `send.html` 上"纸张 A4/Letter"下拉框**是惰性的**：纸面尺寸实际来自 `t.geom.sheetMm`（编码器决定 ✓ 与 CLI 一致），改这个框不影响输出 | 切 A4→Letter 再编码，看日志里 `纸 W×Hmm` 不变 | UI 说了谎：应删除该控件或改为"仅提示" |
+| ~~D14~~ | `send.html` 上"纸张 A4/Letter"下拉框**是惰性的**：纸面尺寸实际来自 `t.geom.sheetMm`（编码器决定 ✓ 与 CLI 一致），改这个框不影响输出 | 切 A4→Letter 再编码，看日志里 `纸 W×Hmm` 不变 | UI 说了谎：应删除该控件或改为"仅提示" |
 | D15 | `sender.js` 里 `parityPages` 用 `header.kind === 'parity'` 判校验页数，`kind` 的**取值域我未证实**（不影响产物 ✓ 只影响那一句计数） | `node -e` 打印 `t.pages[0].header` | 又一个"未证实字段"实例（第 9 次 ✓ 模式未断根） |
 | ~~D16~~ | `docs/ACCEPTANCE.md` 的 G9 行仍是旧结论（写"未开始"），本轮 G9 已 8/8 ✓ 台账与判据页不一致 | `Select-String docs/ACCEPTANCE.md -Pattern G9` | 记账欠账，下一轮第一件事（连同 STATUS 现况表 G9 行一起改） |
 

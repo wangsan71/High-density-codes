@@ -161,6 +161,19 @@ check('every markup reference in a built page resolves to a built file', () => {
   return `${onDisk.size} built paths, all page references resolve`;
 });
 
+check('the served index.html keeps its link to the sender', () => {
+  // Pairing for build-web's single-file strip rule, which deletes <p class="nav"> from the
+  // inlined page. Without this, that same class-name regex could delete the link from the
+  // SERVED page too -- or a future edit could drop the link entirely -- and every other
+  // assertion would still pass, because they only check that references which remain
+  // resolve, never that a required reference is present.
+  const s = text('web/dist/index.html');
+  if (!/href="\.\/send\.html"/.test(s)) throw new Error('nav link to send.html missing from served index.html');
+  const single = text('web/dist/pskt-file.html');
+  if (/href="\.\/send\.html"/.test(single)) throw new Error('single file still links out to a sibling page');
+  return 'site has the link, single file does not';
+});
+
 check('every getElementById in built JS exists in some built page', () => {
   // web/*.js attaches behaviour behind `if (document.getElementById('burst'))` guards, so
   // a renamed or deleted markup id makes the feature quietly absent while every other

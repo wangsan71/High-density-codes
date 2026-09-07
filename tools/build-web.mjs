@@ -293,6 +293,10 @@ let single = html
   // Burst capture needs the served site (module import + camera origin policy), so the
   // single file keeps the receiver only; leaving the tag in would break self-containment.
   .replace(/\s*<script type="module" src="\.\/capture\.js"><\/script>/, '')
+  // Same reasoning for the link between the two pages: a sibling href is not something one
+  // file can carry, and opened from file:// it would point at a page the user did not get.
+  // The link stays in the served index.html, where ./send.html really exists.
+  .replace(/\s*<p class="nav">[\s\S]*?<\/p>/, '')
   .replace(/<meta name="description"[^>]*>/, '<meta name="description" content="Single-file PSKT receiver. Works from file:// with no network access.">');
 // What makes the single-file page "self-contained" is its MARKUP: no src=, no href=, no
 // url() pointing anywhere else. A check that scanned the whole text would trip over the
