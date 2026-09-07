@@ -458,9 +458,25 @@ export function buildQuad(list, bin, region) {
       // not to retake the photo.
       return { ok: false, reason: 'mirrored-image', score: bestMirror };
     }
+    // Readings for whoever debugs a refusal, deliberately named so it cannot be mistaken
+    // for a marker size. Measured on a shrinking synthetic page (see docs/DEFECTS.md D24):
+    // the failure is NOT monotonic in scale -- 105dpi and 120dpi recover the quad while
+    // 150dpi does not -- and this number read 15 in a failing case and 9 in another failing
+    // case, i.e. it tracks the largest blob, which can be a merged data cluster rather than
+    // a corner marker. So it is a diagnostic of what the binariser produced, nothing more,
+    // and no pixel floor may be derived from it.
+    const maxBlobArea = ranked.reduce((m, c) => (c.area > m ? c.area : m), 0);
+    const maxBlobSide = Math.round(Math.sqrt(maxBlobArea) * 10) / 10;
     // distinguish "no rectangle at all" from "no corner is hollow" so the caller
     // learns whether to fix exposure or to move the phone
-    return { ok: false, reason: hollow.size === 0 ? 'no-hollow-corner' : 'no-rectangular-quad', score: bestScore, hollowCount: hollow.size };
+    return {
+      ok: false,
+      reason: hollow.size === 0 ? 'no-hollow-corner' : 'no-rectangular-quad',
+      score: bestScore,
+      hollowCount: hollow.size,
+      maxBlobSide,
+      candidates: ranked.length,
+    };
   }
   // Orientation is carried by the hollow corner; the enumeration above already
   // required exactly that pattern (hollow at br, solid at the other three).
