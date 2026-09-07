@@ -78,6 +78,80 @@ const ADVICE = {
     cause: 'the decoded lattice has the wrong number of cells for the manifest profile',
     do: 'check the profile/nozzle arguments -- the page was printed with a different geometry than the one being assumed',
   },
+  // ---- frame / assembly ---------------------------------------------------
+  // These are emitted by core/frame.js and core/protocol.js, not by the camera
+  // stages, and until now they had no mapping at all: a page whose own Reed-Solomon
+  // ran out of budget printed "unmapped failure (assemble: intra-fail)" and told the
+  // user to retake the whole batch, when in fact one page is damaged and the others
+  // are fine. Advice has to carry that difference or it sends people to the wrong work.
+  'intra-fail': {
+    cause: "this page's own error correction ran out of budget: too many cells inside the page are unreadable (a smudge, a crease, or out-of-focus area)",
+    do: 're-scan or re-photo just this page -- the other pages are usable and the parity pages can also rebuild this one, so there is no need to reprint',
+  },
+  'bad-magic': {
+    cause: 'a header decoded to a length/CRC that looked valid but its magic bytes are not PSK1 -- the byte stream being read is not a PSKT header at that offset',
+    do: 'check that the input directory holds only one transfer, and that no unrelated file (or an image from another encoder) was mixed in',
+  },
+  'header-crc': {
+    cause: "the page header failed its own CRC, so the geometry metadata (page index, profile, lengths) is not trustworthy and nothing was decoded from it",
+    do: 'retake this page with the whole header echo strip and all four corners in frame and in focus -- a page cropped at the top margin fails here first',
+  },
+  'short-header': {
+    cause: 'fewer bytes than the fixed header length were available to read',
+    do: 'the input was cut short -- re-export the image (or re-copy the file) and check it is complete; partial files also cause this',
+  },
+  'other-session': {
+    cause: 'this page belongs to a different transfer (session id) than the pages already collected, so mixing them would reconstruct the wrong file',
+    do: 'separate the printouts: one scan should contain the pages of one transfer only, or re-scan each transfer on its own',
+  },
+  // ---- error-correction internals that reach the user ---------------------
+  // These come out of core/rs.js and the frame length checks. They are reachable
+  // through the same `REJECTED page N (reason)` line, so they need the same quality
+  // of advice: the point of the message is to tell someone which of the two things
+  // they can act on -- the photo, or their geometry assumption.
+  'too-many-erasures': {
+    cause: 'more cells were declared unreadable than this block can correct -- the erasure list alone exceeded the parity budget',
+    do: 'supply the parity pages for this transfer (pskit receive picks them up automatically), or re-photo the page so fewer cells are lost at once',
+  },
+  'erasure-oob': {
+    cause: 'an erasure position fell outside the block, which means the page geometry used to count cells does not match the page that was printed',
+    do: 're-select the profile and nozzle that were actually used to print -- an assumed pitch different from the printed one produces exactly this',
+  },
+  'beyond-limit': {
+    cause: "the block's errors plus erasures exceed what its Reed-Solomon parity can repair (2t + e must fit the parity symbols)",
+    do: 'improve the read: better focus and no glare across that area; if it persists, print with a stronger profile (more parity per page) rather than reprinting the payload',
+  },
+  chien: {
+    cause: 'the correction search found no error pattern consistent with the syndromes -- usually because the cells were mapped to symbol values using the wrong pitch, so the whole lattice is read at an offset',
+    do: 'confirm the profile/nozzle the page was printed with; if it is right, re-scan at higher resolution -- a page read at too few pixels per cell corrupts every symbol, not just some',
+  },
+  short: {
+    cause: 'the byte stream was shorter than this structure requires',
+    do: 'the input file or image was truncated -- re-copy it and check its size against the manifest',
+  },
+  long: {
+    cause: 'the byte stream was longer than this structure allows, so it was not framed where it should have been',
+    do: 'check that the input contains only PSKT page images and no unrelated data file',
+  },
+  // ---- Reed-Solomon internals ---------------------------------------------
+  // These name *why* correction failed, which is more actionable than the generic
+  // intra-fail the page is rejected with, so they get their own advice too.
+  'chien-mismatch': {
+    cause: 'the error search produced positions but the corrected symbols did not reproduce the syndromes, so the corruption pattern is not decodable as errors of this code',
+    do: 'treat the page as unreadable and re-photo it; a systematic mismatch like this usually means the cell grid was sampled at the wrong pitch (check profile/nozzle)',
+  },
+  'erasure-not-in-locator': {
+    cause: 'a cell was declared unreadable that the locator polynomial does not contain, which cannot happen from noise alone -- the erasure list and the symbol stream disagree',
+    do: 'report this as a decoder bug if it reproduces on an unscanned render; on real photos it means the page was read with the wrong geometry',
+  },
+  'forney-den0': {
+    cause: 'the magnitude formula divided by a zero evaluator term, i.e. an error position was found at a point where the code has no support',
+    do: 'same as erasure-not-in-locator: re-photo, and flag it if it survives a clean render',
+  },
+  'recheck-failed': {
+    cause: 'correction produced a candidate codeword whose syndromes do not all vanish, so it was refused rather than accepted -- the receiver will not emit data it cannot prove',
+    do: 'nothing to fix in the file: the refusal is correct. Supply the parity pages or re-photo the offending page',
+  },
 };
 
 /**

@@ -206,13 +206,17 @@ export function pageRegion(bin) {
  * ratio. The inset stays far below the ~one-cell clearance between the paper
  * edge and the markers, so it removes the rim without touching them.
  */
-function cropMask(bin, region) {
+export function cropMask(bin, region) {
   const { mask, width, height } = bin;
   if (!region.cropped) return mask;
-  // The rim is a couple of pixels; the markers sit ~one cell inside the paper
-  // edge. Inset far less than that clearance, or the crop eats a marker and its
-  // centroid moves -- which then skews the whole homography.
-  const inset = Math.max(2, Math.min(24, Math.round(0.008 * Math.min(region.x1 - region.x0, region.y1 - region.y0))));
+  // The rim is a couple of pixels; the markers sit ONE CELL inside the paper edge,
+  // which at 300 dpi is 10 px and does not grow with the page -- so an inset that
+  // scales with page size eventually eats the outer 8 px of every fiducial, the
+  // ring's hole merges with the outside, no candidate is hollow any more, and every
+  // page is rejected as `no-hollow-corner`. That is what this line did (0.008 *
+  // 2259 = 18 px on a 300 dpi sheet, 36 px at 600 dpi). Keep it a genuine rim trim
+  // and let keepCandidateSquares' own border rule handle anything bigger.
+  const inset = Math.max(2, Math.min(4, Math.round(0.002 * Math.min(region.x1 - region.x0, region.y1 - region.y0))));
   region.cropInset = inset;
   const x0 = Math.max(0, region.x0 + inset);
   const y0 = Math.max(0, region.y0 + inset);
