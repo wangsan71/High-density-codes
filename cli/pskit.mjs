@@ -50,9 +50,11 @@ const HELP = `pskit <command> [options]
                          required only when there is no manifest.json
 
   status                 profile / nozzle capacity table
-  verify --gate <G>      run an acceptance gate in-process (G0 G1 G3 G5 G7 all)
+  verify --gate <G>      run an acceptance gate in-process (G0 G1 G2 G3 G5 G7 all)
     --seeds <n>          G1/G3/G7 repetitions (default per gate)
     --trials <n>         G5 tamper count (default 10000)
+    --corpus <dir>       G2: a corpus dir made by sim/channel.py (or --root DIR --match GLOB)
+    --fast               G2: skip the photo-path decode (same as g2-corpus.mjs --fast)
   roundtrip --selftest   encode+decode a synthetic payload, print timings
 `;
 
@@ -910,11 +912,77 @@ async function gateG7(args) {
   return allOk;
 }
 
+/**
+ * G2 -- paper at 300/600 dpi, fixed seeds, <=1 MB payload, 100% byte-identical.
+ *
+ * The corpora are made out of band by sim/channel.py, because spawning Python is denied in
+ * this sandbox and because that split is the honest one: a gate that generated its own channel
+ * could quietly start agreeing with itself. What runs here is tools/g2-corpus.mjs, imported
+ * rather than copied, so the digest comparison, the failure classification and the
+ * 100%-or-fail arithmetic stay in exactly one place.
+ *
+ * Two ways this could print a green that is not G2, both closed here: an empty run (no corpora
+ * is a broken harness, not a pass), and a pristine corpus -- nothing on disk distinguishes one
+ * from a scanned one, so corpusProvenance measures the tone spread and refuses it.
+ */
+async function gateG2(args) {
+  if (!args.corpus && !args.root) {
+    return {
+      skipped:
+        'no --corpus DIR given; G2 consumes pages made out of band by sim/channel.py ' +
+        '(python sim/channel.py --in SRC --out DST --seed N --preset scan300 --modifier nocrop), ' +
+        'then: verify --gate G2 --corpus DST',
+    };
+  }
+  const g2 = await import('../tools/g2-corpus.mjs');
+  const opts = g2.parse([]);
+  if (args.corpus) opts.dirs.push(String(args.corpus));
+  if (args.root) {
+    opts.root = String(args.root);
+    opts.match = String(args.match || '*');
+  }
+  const dirs = g2.collect(opts);
+  if (!dirs.length) {
+    console.log('  FAIL G2: no corpus directories found (each needs manifest.json + at least one .png)');
+    return false;
+  }
+  const mod = await g2.buildMod({ photo: !args.fast });
+  const results = [];
+  const t0 = performance.now();
+  for (const d of dirs) {
+    const prov = g2.corpusProvenance(d);
+    if (!prov.channelDegraded) {
+      console.log(`  FAIL G2: ${d} looks pristine (${prov.median} grey levels in ${prov.firstPage}, floor ${prov.floor})`);
+      console.log('       a pristine render decodes byte-exact, so it would print 100% while measuring');
+      console.log('       nothing: G2 is about pages that went through the channel. Regenerate them with');
+      console.log('       sim/channel.py, or point --corpus at a directory that was.');
+      return false;
+    }
+    const r = await g2.runCorpus(d, mod);
+    results.push(r);
+    console.log(`       ${String(r.dir).padEnd(22)} ${r.ok ? 'OK  ' : 'FAIL'}  ${r.ok ? `${r.bytes} bytes, digest verified` : `FAILED (${r.reason})`}`);
+    for (const f of r.failures || []) console.log(`         - ${f}`);
+  }
+  const passed = results.filter((r) => r.ok).length;
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  const ok = passed === results.length;
+  // PLAN names 200 fixed seeds. Printing the count this run actually had keeps "G2 PASS" from
+  // being read as "the stated sample size was met" when it was not.
+  console.log(`  ${ok ? 'PASS' : 'FAIL'} G2 corpus: ${passed}/${results.length} byte-exact in ${secs}s (criterion is 100%; PLAN asks for 200 fixed seeds, this run had ${results.length})`);
+  if (!ok) {
+    const classes = {};
+    for (const r of results) if (!r.ok) classes[r.reason] = (classes[r.reason] || 0) + 1;
+    console.log(`       failure classes: ${Object.entries(classes).map(([k, v]) => `${k} x${v}`).join(', ')}`);
+  }
+  return ok;
+}
+
 async function cmdVerify(args) {
   const gate = String(args.gate || 'all');
-  const wanted = gate === 'all' ? ['G0', 'G1', 'G3', 'G5', 'G7'] : [gate.toUpperCase()];
-  const runners = { G0: gateG0, G1: gateG1, G3: gateG3, G5: gateG5, G7: gateG7 };
+  const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5', 'G7'] : [gate.toUpperCase()];
+  const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G7: gateG7 };
   let allOk = true;
+  const skipped = [];
   for (const g of wanted) {
     const r = runners[g];
     if (!r) {
@@ -924,9 +992,23 @@ async function cmdVerify(args) {
     }
     console.log(`--- ${g} ---`);
     const ok = await r(args);
+    // A runner may report that it could not evaluate anything. That is not a pass, and it
+    // cannot be left to `allOk &&= ok`: an object is truthy, so a skip would have been counted
+    // as green. Skips are named in the summary line instead of being folded into it.
+    if (ok && typeof ok === 'object' && ok.skipped) {
+      skipped.push(`${g}: ${ok.skipped}`);
+      continue;
+    }
     allOk &&= ok;
   }
-  console.log(allOk ? '\nALL GATES PASS' : '\nGATE FAILURE');
+  const evaluated = wanted.length - skipped.length;
+  // The "ALL GATES PASS" prefix stays greppable; what changed is that it now says out loud
+  // which gates were not evaluated, so a run cannot be quoted as covering more than it did.
+  console.log(
+    allOk
+      ? `\nALL GATES PASS${skipped.length ? ` -- ${evaluated}/${wanted.length} evaluated, ${skipped.length} skipped\n  ${skipped.join('\n  ')}` : ''}`
+      : '\nGATE FAILURE',
+  );
   if (!allOk) process.exitCode = 1;
 }
 

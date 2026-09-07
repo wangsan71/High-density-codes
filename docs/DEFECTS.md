@@ -29,6 +29,15 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 37 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D38~~ | **G2 存在一条"假绿"通道**：盘上没有任何东西能区分"干净渲染的语料"与"过了信道的语料" ⇒ 实测 `.tmp/g2src`（干净）与 `.tmp/g2scan`（过信道）**文件清单完全相同**（`manifest.json` + 3 张 PNG + `pskt-received.out`）✗ 也没有信道报告存在页旁 ✗ 而干净渲染**必然逐字节还原** ⇒ 把 `--gate G2` 指向 `.tmp/g2src` 就会打印 `100% byte-exact` 而**什么都没测**（G2 测的是"印出来、扫回来还对不对"✓）⇒ 这正是本仓库唯一不可原谅的输出形态 | 新增 `corpusProvenance(dir)`（`tools/g2-corpus.mjs` 导出 ✓）：**量灰阶数**——我们的渲染器只发少数电平（300dpi 页 **10 阶** = 调色板+抗锯齿），而模糊/噪声/光照把扫描铺满值域（同一页 **249–256 阶**）✓ **在盘上 119 个语料目录上实测分离：干净渲染 10–18 阶 · 过了信道的 192–256 阶 ⇒ 地板取 64，两边各留 10 倍余量 ⇒ 不是调出来的旋钮 ✓** 阳性对照：`node cli/pskit.mjs verify --gate G2 --corpus .tmp/g2src` ⇒ **`FAIL G2: .tmp/g2src looks pristine (10 grey levels in page-000.png, floor 64)` 且 exit 1** ✓ 真语料 `--corpus .tmp/g2scan` ⇒ 正常评估、`PASS ... 1/1 byte-exact` ✓ | CLOSED（**只每语料量第一页**：这一问是"这批页怎么来的"、不是"每页质量如何"✓ 后者本来就是摘要判据的事 ✓） |
+| ~~D39~~ | **`cmdVerify` 的 `allOk &&= ok` 会把任何真值当成通过** ⇒ 一个返回对象的 runner（例如"我没法评估"的 `{skipped:...}`）会被算成**绿** ✗ 接 G2 时必然踩到：G2 在没有语料时**不该算通过、也不该让其余门限的绿作废** ⇒ 需要第三种状态，而旧循环只有两种 | 循环现在显式识别 skip ⇒ 汇总行**点名**未评估的门限：`ALL GATES PASS -- 0/1 evaluated, 1 skipped` + 一行给出"要怎么才能评估它"（含生成语料的 python 命令 ✓）⇒ `ALL GATES PASS` 前缀保持可 grep ✓ 但**不能再被引用成"覆盖了比实际更多的门限"** ✓ 复现：`node cli/pskit.mjs verify --gate G2`（不给 `--corpus`）⇒ exit 0 + 点名跳过 ✓ 而 `verify --gate all --seeds 2` ⇒ 仍 `ALL GATES PASS`、G0 `247 passed, 0 failed`、并多出 G2 的跳过说明 ✓ | CLOSED |
+
+
+
 ### 第 36 轮闭掉的
 
 | # | 缺陷 | 复验 | 状态 |

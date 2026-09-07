@@ -16,6 +16,7 @@
  *   node tools/g2-corpus.mjs .tmp/nc-scan300-1 .tmp/nc-scan600-1 --json
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { join, basename } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { decodePage } from '../core/decode/page.js';
@@ -118,7 +119,7 @@ function classifyFailure(bitmap, stage, reason) {
 }
 
 
-function parse(argv) {
+export function parse(argv) {
   const out = { dirs: [], root: null, match: '*', photo: true, json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -142,11 +143,49 @@ function looksLikeCorpus(dir) {
   }
 }
 
+/**
+ * Did these pages actually go through the degradation channel?
+ *
+ * Nothing on disk says so. A pristine corpus and a channel corpus have identical file
+ * listings -- measured: .tmp/g2src and .tmp/g2scan each hold manifest.json, three PNGs and
+ * pskt-received.out -- and no channel report is stored beside the pages. So pointing G2 at a
+ * pristine render would print 100% byte-exact while proving nothing at all, which is the one
+ * kind of green this repository refuses to emit. The difference is measurable instead: our
+ * renderer emits a handful of grey levels (10 on a 300 dpi page -- palette plus antialiasing),
+ * while blur, noise and illumination spread a scan across the whole range (254-256 measured
+ * on the same page). Two orders of magnitude apart, so the floor is not a tuned knob.
+ *
+ * One page per corpus is enough: this asks how the batch was produced, not how good each page
+ * is, and per-page quality is already the business of the digest check below.
+ */
+export function corpusProvenance(dir, { floor = 64 } = {}) {
+  const pngs = readdirSync(dir).filter((n) => /\.png$/i.test(n)).sort();
+  if (!pngs.length) return { pages: 0, greyLevels: [], median: 0, floor, channelDegraded: false };
+  const bmp = decodePNG(readFileSync(join(dir, pngs[0])));
+  const ch = bmp.pixels.length / (bmp.width * bmp.height);
+  const seen = new Set();
+  for (let i = 0; i < bmp.pixels.length; i += ch) seen.add(bmp.pixels[i]);
+  const median = seen.size;
+  return { pages: pngs.length, firstPage: pngs[0], greyLevels: median, median, floor, channelDegraded: median >= floor };
+}
+
+/** The core modules runCorpus needs. Exported so the gate builds the same set, not a copy. */
+export async function buildMod({ photo = true } = {}) {
+  return {
+    profiles: await import('../core/profiles.js'),
+    protocol: await import('../core/protocol.js'),
+    layoutMod: await import('../core/render/layout.js'),
+    palette: await import('../core/palette.js'),
+    hash: await import('../core/hash.js'),
+    photo,
+  };
+}
+
 function globToRe(glob) {
   return new RegExp(`^${String(glob).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 }
 
-function collect(opts) {
+export function collect(opts) {
   const found = [...opts.dirs];
   if (opts.root) {
     const re = globToRe(opts.match);
@@ -164,7 +203,7 @@ function collect(opts) {
 }
 
 /** One corpus directory -> one verdict. Mirrors `pskit receive`, minus the printing. */
-async function runCorpus(dir, mod) {
+export async function runCorpus(dir, mod) {
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
   const profileId = manifest.profile;
   const nozzle = manifest.nozzle;
@@ -244,21 +283,19 @@ async function runCorpus(dir, mod) {
   return { dir: basename(dir), ok: true, bytes, sha: got, failures, pageClasses };
 }
 
-const opts = parse(process.argv.slice(2));
-if (opts.help) {
+// Imported by cli/pskit.mjs for `verify --gate G2`, so the executable half is guarded: the
+// gate has to reuse this arithmetic rather than copy it, or the two drift and the gate stops
+// measuring what the tool measures.
+export const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+const opts = parse(isMain ? process.argv.slice(2) : []);
+if (isMain && opts.help) {
   console.log('usage: node tools/g2-corpus.mjs [--root DIR --match GLOB] [dir...] [--fast] [--json]');
   process.exit(0);
 }
-const mod = {
-  profiles: await import('../core/profiles.js'),
-  protocol: await import('../core/protocol.js'),
-  layoutMod: await import('../core/render/layout.js'),
-  palette: await import('../core/palette.js'),
-  hash: await import('../core/hash.js'),
-  photo: opts.photo,
-};
-const dirs = collect(opts);
-if (!dirs.length) {
+const mod = await buildMod({ photo: opts.photo });
+const dirs = isMain ? collect(opts) : [];
+if (isMain && !dirs.length) {
   console.error('g2-corpus: no corpus directories found (need manifest.json + at least one .png)');
   console.error('  generate one with: python sim/channel.py --in SRC --out DST --seed N --preset scan300 --modifier nocrop');
   process.exit(2);
@@ -277,7 +314,7 @@ for (const d of dirs) {
 const passed = results.filter((r) => r.ok).length;
 const aggregate = { runs: results.length, passed, rate: passed / results.length, seconds: (performance.now() - t0) / 1000, results };
 if (opts.json) writeFileSync(join(process.cwd(), '.tmp', 'g2-corpus.json'), JSON.stringify(aggregate, null, 2));
-console.log(`G2 corpus: ${passed}/${results.length} byte-exact (${(100 * aggregate.rate).toFixed(1)}%) in ${aggregate.seconds.toFixed(1)}s`);
+if (isMain) console.log(`G2 corpus: ${passed}/${results.length} byte-exact (${(100 * aggregate.rate).toFixed(1)}%) in ${aggregate.seconds.toFixed(1)}s`);
 if (passed !== results.length) {
   // G2's criterion is 100%: anything else is a failing run, not a partial score.
   const reasons = {};

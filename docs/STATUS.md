@@ -29,7 +29,7 @@
 |---|---|---|---|
 | G0 规格可独立实现 | ✅ | — | `python ref/decode.py` → `PASS`（309 检查 ✓ 4 项已接受 geometry GAP） |
 | G1 渲染—读回零误读 | ✅ | — | `node cli/pskit.mjs verify --gate G1`（725 913 格 0 误读 ✓） |
-| G2 纸面 300/600 dpi 100%（200 seed） | 🟡 | **`30/32 = 93.8%` 且样本量差 25 倍** ✓ 两类失败：A=600 dpi 页内 ECC 余量薄（容量事实 ✓ 非 bug ✓）· B=整页读出崩塌（**根因未定 ✓ 第 22 轮已撤回第 21 轮的解释 ✓**）· 另有判据前提未明示"纸完整在成像区内" | `node tools/g2-corpus.mjs --root .tmp --match 'nc-scan*'` |
+| G2 纸面 300/600 dpi 100%（200 seed） | 🟡 | **`30/32 = 93.8%` 且样本量差 25 倍** ✓ 两类失败：A=600 dpi 页内 ECC 余量薄（容量事实 ✓ 非 bug ✓）· B=整页读出崩塌（**根因未定 ✓ 第 22 轮已撤回第 21 轮的解释 ✓**）· 另有判据前提未明示"纸完整在成像区内" | `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'nc-scan*'`（**第 37 轮起是门限** ✓ 直接 import `tools/g2-corpus.mjs` ⇒ 门限与工具不会漂移 ✓ 干净语料会被 `corpusProvenance` 拒绝 ⇒ **无法伪造 G2 绿** ✓ 工具形式 `node tools/g2-corpus.mjs --root .tmp --match 'nc-scan*'` 仍可用 ✓） |
 | G3 缺页/乱序/重复 | ✅ | 图像层乱序仅在协议层覆盖（等价于喂入序 ✓） | `verify --gate G3` + `tools/g2-corpus.mjs`（单页存活 6/6 ✓） |
 | G4 手机压力档 ≥99% | ⬜ | **500×8 一次未跑 ⇒ 零证据** ✓（分类侧 `advice.js` 已就绪 ✓） | 未做 |
 | G5 误接受 0 | ✅ | — | `verify --gate G5 --trials 10000`（9200 纠正 / 800 拒 / **0 误接受** ✓ 变异两项 ✓） |
@@ -118,6 +118,18 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 37 轮（G2 从"手工命令"变成**门限** ✓ 而它交出的第一个数字是 FAIL）
+
+- **交付**：`verify --gate G2 --corpus DIR`（也支持 `--root DIR --match GLOB`）接进 `cmdVerify` ✓ 实现方式是 **`import` 而不是复制** `tools/g2-corpus.mjs`（导出 `parse/collect/runCorpus/buildMod/corpusProvenance` + `isMain` 守卫 ⇒ 脚本与库同一份文件 ✓ 工具独立可用已复验 ✓）⇒ **门限与工具不可能漂移** ✓ 判据仍是它自己在进程内重算的 `sha256(result) === manifest.sourceSha256`、**100% 才算过** ✓ 语料由 `sim/channel.py` 带外生成（沙箱禁 spawn ✓ 而这分工本身是对的：会自造信道的门限有可能开始跟自己串供 ✓）
+- **真跑（32 份 `nc-scan*` 平板模型语料 ✓ 盘上还在）**：`FAIL G2 corpus: 30/32 byte-exact in 392.3s` ⇒ **exit 1** ✓ 失败两类：`nc-scan600-10 no-page-header`（页内 `intra-fail`）· `nc-scan600-3 short 0/1` ⇒ 都是已知的 600 dpi A/B 类 ✓ **与历史记录的 `30/32 = 93.8%` 吻合 ⇒ 门限复现了既有证据、且判决未上调** ✓（把正确拒绝剔出分母等于重定义判据 ✗ 不做 ✓）
+- **样本量差距保持可见**：门限每次打印 `PLAN asks for 200 fixed seeds, this run had N` ⇒ `G2 PASS` 不会被读成"达到了 200 seed" ✓ 现在 **32/200** ✗
+- **D38（已闭）· 堵住 G2 的假绿通道**：实测 `.tmp/g2src`（干净渲染）与 `.tmp/g2scan`（过信道）**文件清单完全相同**、页旁也没有信道报告 ⇒ 把门限指向干净语料就会打印 `100% byte-exact` 而什么都没测 ✗ 新增 `corpusProvenance()`：**量灰阶数**（渲染器只发 10 阶 = 调色板+抗锯齿 ✓ 信道把值域铺满 249–256 阶 ✓）⇒ **盘上 119 个语料目录实测分离：干净 10–18 阶 · 过信道 192–256 阶 ⇒ 地板 64 两边各留 10 倍余量（不是调出来的旋钮 ✓）** ⇒ 阳性对照 `--corpus .tmp/g2src` ⇒ `FAIL G2: looks pristine (10 grey levels ...)` **exit 1** ✓
+- **D39（已闭）· "跳过"不能算绿**：`cmdVerify` 原本是 `allOk &&= ok` ⇒ **任何真值都算通过**，而"我没法评估"只能返回对象（真值 ✗）⇒ 现在显式识别 skip 并在汇总行**点名**：`ALL GATES PASS -- 0/1 evaluated, 1 skipped` + 一行写清"要怎么才能评估它"（含生成语料的 python 命令 ✓）⇒ `ALL GATES PASS` 前缀仍可 grep ✓ 但**不能再被引用成覆盖了比实际更多的门限** ✓
+- **我第九次吃掉文档标题** ✗（上一轮刚立的规矩又违反）⇒ 但**上一轮新加的台账判据当场抓到了它**（那张表变成孤儿表 ⇒ 判据红 ⇒ 我修）✓ 这件事的两面都记：**判据有效 ✓ 而我的编辑习惯仍不可靠 ✗**
+- 证据：单测 **247/247** ✓ `verify --gate all --seeds 2` ⇒ exit 0（G0 `247 passed, 0 failed` ✓ G2 被点名跳过 ✓）· `verify --gate G2 --root .tmp --match 'nc-scan*'` ⇒ **exit 1（如实）** ✓ 四种行为逐一验过（无语料 SKIP ✓ 干净语料 FAIL ✓ 真语料真跑 ✓ 工具独立可用 ✓）✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**200 seeds 的 G2 语料**（需手跑 `python sim/channel.py ... --seed 1..200`，命令已写进 usage 与 skip 提示 ✓）→ 3MF XSD 子集校验器（G8 的另一半 ✓）→ G4 手机实机压力 500×8（**从未跑过** ✗）→ G6 soak → G10 喷嘴矩阵 → `.github/workflows/pages.yml`
+
 
 ### 第 36 轮（D36 与 D37 双闭 ✓ 而 D36 的否证记录**本身是错的**、已修正）
 
