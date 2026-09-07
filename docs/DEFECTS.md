@@ -18,7 +18,7 @@
 |---|---|---|---|
 | D4 | `index.html` 里没有指向 `send.html` 的入口：接收端用户在站内点不到发送端 | 打开 `web/dist/index.html` 目视（只能手输 `/send.html`） | 客户端可用性 |
 | D5 | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
-| D7 | **手机摄像头连拍取页未接线**：`core/decode/fiducial.js`（角标定位）+ `warp.js`（`rectifyPage`/`estimateSubstrate`）已就绪，web 端仍是"一次一张" | 手机打开站点按"摄像头"：每页需手动确认一次 | 手机端核心缺口，下一轮第一优先 |
+| ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | — | CLOSED |
 
 ### 第 24 轮新增
 
@@ -28,6 +28,25 @@
 | D18 | 连拍的**实机部分本机无法验证**：`getUserMedia` 授权、`facingMode/continuous` 对焦、`getImageData` 帧率、iOS Safari 的 canvas  tainted 行为 | 需真机 https 访问 | 与 D9 同类：浏览器内未验证，G9 维持 🟡 的核心理由 |
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | D20 | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
+
+### 第 25 轮闭掉的
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| ~~D11~~ | 构建中途失败会在 `web/dist` 留半套产物（Pages 可发布出破损站） | 把 `web/send.html` 移走 ⇒ `build exit=1` ✓ 而 `web/dist` 文件数 **49→49**、`sw.js` 仍在 ✓ 恢复后无 `dist.tmp` 残留 | CLOSED（改为 `web/dist.tmp` 写完后换入 ✓） |
+| ~~D17~~ | 连拍跨会话守卫"疑似"失效 | `node tools/smoke-capture.mjs` ⇒ **12/12 全通过** | CLOSED — **产品从来没错，是我的测试夹具错**：夹具第一帧喂了 `addFrame({})`（空对象）⇒ 被 `no-header` 拒 ✓ `current` 一直为 null ⇒ 第二帧自成新会话 ✓ 症状全部对上 ✓ 教训记在下方 D23 |
+| ~~D19~~ | `./capture.js` 在 precache 清单中重复 | 见 D22（已泛化为通用的清单紧度判据） | CLOSED |
+| ~~D20~~ | HTML 的 id 与 JS 的 `getElementById` 无判据保护 | `node tools/check-dist.mjs` ⇒ 新增第 9 条 `every getElementById in built JS exists in some built page`（48 markup ids ✓） | CLOSED |
+
+### 第 25 轮新增（OPEN）
+
+| # | 缺陷 | 复现 | 性质 |
+|---|---|---|---|
+| D21 | **PLAN §几何 L77 的"四边双频对齐梳 / 亚像素格点相位"在 `core/` 里没有实现**：fiducial 有（`layout.js:105` 三角实心 + 第四角空心 ⇒ 透视与朝向 ✓ 与 PLAN 等价 ✓），但全仓搜 `comb/梳/gridPhase` 只命中 `ideal.js:159` 的"小范围**整数**对齐搜索"，那不是梳 | `Select-String -Path core\**\*.js -Pattern "comb\|梳\|gridPhase"` ⇒ 无实现点 | **objective 第 (2) 条里唯一没证据的一块**：打印机的缩放/走纸造成的**亚像素格点相位偏移**目前只能靠整数搜索 + ECC 吸收 ⇒ 影响 G4 手机档与纸面鲁棒性，不是性能问题 |
+| D22 | **构建自报的文件数与磁盘不符**（曾报 "81 files / 78 precache entries" ✓ 而磁盘只有 49）：`writeDist` 对同一文件写两次（import 闭包与"整份 core"两份清单重叠 ✓ 我第 24 轮为修 D 类问题加的 allCore）就**再记一条账** | 对比 `node tools/build-web.mjs` 与 `Get-ChildItem -Recurse -File web\dist \| Measure-Object` | 已修（去重 + 新增双向紧度判据：清单条目数必须等于磁盘产物数、且不得有重复 url ✓ 修后 49=49 ✓ precache 47 = 49−`sw.js`−`build-manifest.json` ✓）**但我上一轮把"78 条哈希逐字节核对"当成成绩写进了 STATUS ⇒ 那个数字当时是虚的 ✓ 已在 STATUS 更正** |
+| D23 | 我这一族的错的**元缺陷**：连续 12 次"引用未证实的东西"，全部由执行抓获、**零次靠阅读发现**；而 D17 更说明**测试写错时我会先怀疑产品** ⇒ 需要一条习惯：断言红时**先打印夹具自身的中间量**（本轮就是加了 `frame1 …` 一行才看清） | 见 `docs/STATUS.md` 第 23–25 轮"我的错"段 | 流程改进，非代码缺陷 |
+
+
 
 ### 第 24 轮闭掉的
 

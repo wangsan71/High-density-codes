@@ -121,6 +121,16 @@ check('SW precache manifest hashes match the artifacts on disk', () => {
     if (got !== byName.get(r)) throw new Error(`${r}: manifest ${byName.get(r).slice(0, 12)} vs bytes ${got.slice(0, 12)}`);
   }
   if (missing.length) throw new Error(`built but not precached: ${missing.join(', ')}`);
+  // Tightness both ways. The build used to write some modules twice (import closure and the
+  // whole-core copy overlap), which padded the manifest with duplicate urls -- harmless at
+  // run time, but it made "78 entries verified" describe 49 artifacts, and a reported
+  // number that does not match the thing on disk is the failure mode this project exists to
+  // avoid, even when it is only a count.
+  if (man.entries.length !== byName.size) {
+    throw new Error(`precache list has duplicates: ${man.entries.length} entries but ${byName.size} distinct urls`);
+  }
+  const onDisk = files.filter((f) => rel(f) !== './sw.js' && rel(f) !== './build-manifest.json').length;
+  if (byName.size !== onDisk) throw new Error(`manifest covers ${byName.size} urls, ${onDisk} artifacts exist on disk`);
   return `${man.entries.length} entries verified against bytes on disk, build ${man.buildId}`;
 });
 
@@ -149,6 +159,24 @@ check('every markup reference in a built page resolves to a built file', () => {
   }
   if (broken.length) throw new Error(`references with no matching file: ${broken.join(', ')}`);
   return `${onDisk.size} built paths, all page references resolve`;
+});
+
+check('every getElementById in built JS exists in some built page', () => {
+  // web/*.js attaches behaviour behind `if (document.getElementById('burst'))` guards, so
+  // a renamed or deleted markup id makes the feature quietly absent while every other
+  // assertion stays green. That is the definition of a silent failure: check the pair.
+  const htmlIds = new Set();
+  for (const f of files.filter((x) => /\.html$/i.test(x))) {
+    for (const m of text(f).matchAll(/\bid\s*=\s*["']([^"']+)["']/gi)) htmlIds.add(m[1]);
+  }
+  const wanted = new Map();
+  for (const f of files.filter((x) => /\.js$/i.test(x))) {
+    for (const m of text(f).matchAll(/getElementById\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      if (!htmlIds.has(m[1])) wanted.set(m[1], f);
+    }
+  }
+  if (wanted.size) throw new Error(`ids referenced but never declared: ${[...wanted].map(([k, v]) => `${k} (${rel(v)})`).join(', ')}`);
+  return `${htmlIds.size} markup ids, every JS getElementById resolves`;
 });
 
 // Async checks are wrapped in IIFEs. A bare `return` inside a top-level block is a

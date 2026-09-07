@@ -83,7 +83,7 @@ await gate('too-far gate: small marker is refused with advice', { ...basePage, m
 await gate('partial gate: low coverage is refused with advice', { ...basePage, coverage: 0.4 }, 'partial');
 const foreign = { ...basePage, header: { ...hdr, sessionId: new Uint8Array(8).fill(0xee) } };
 const c3 = createBurstCollector({ decode: fakeDecode, feed: async () => ({ ok: true }) });
-await c3.addFrame({});
+const r0 = await c3.addFrame(basePage);
 const r3 = await c3.addFrame(foreign);
 step('a page from another session never joins this batch', r3.kind === 'other-session', `kind ${r3.kind} · have ${c3.progress().have}/${c3.progress().total}`);
 const c4 = createBurstCollector({ decode: fakeDecode, feed: async () => ({ ok: true }) });

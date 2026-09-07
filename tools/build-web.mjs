@@ -26,13 +26,20 @@
  *   node tools/build-web.mjs            build into web/dist
  *   node tools/build-web.mjs --print    report only, do not write
  */
-import { readFileSync, writeFileSync, rmSync, mkdirSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, mkdirSync, existsSync, statSync, readdirSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'web', 'dist');
+// The site is built into web/dist.tmp and only swapped in at the very end.
+// Why: a failure in the middle of the build (this round's PWA section threw exactly that
+// way) used to leave a *partial* web/dist -- no sw.js, everything else present -- and a
+// Pages deploy that publishes whatever is in the directory would publish a broken site
+// that still looks built. Writing aside and renaming makes "half a site" unobservable.
+const FINAL_OUT = join(ROOT, 'web', 'dist');
+const TMP_OUT = FINAL_OUT + '.tmp';
+let OUT = TMP_OUT;
 // There is no hand-written file list: dist's contents are derived from the import closure
 // plus the entries below, so a new module cannot be forgotten in a list and then 404 in
 // production while the build still looks green.
@@ -218,11 +225,15 @@ const appBundle = bundle('web/app.js');
 const selftestSrc = read('web/selftest.js').replace(/(['"])\.\.\/core\//g, '$1./core/');
 
 const distFiles = [];
+const writtenUrls = new Map(); // url -> sha256, so a file written twice is counted once
 const writeDist = (rel, content) => {
   const p = join(OUT, rel.split('/').join(sep()));
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, content);
-  distFiles.push({ url: './' + rel, bytes: Buffer.byteLength(content), sha256: sha256(Buffer.from(content)) });
+  const digest = sha256(Buffer.from(content));
+  if (writtenUrls.get(rel) === digest) return; // identical rewrite: not a new artifact
+  writtenUrls.set(rel, digest);
+  distFiles.push({ url: './' + rel, bytes: Buffer.byteLength(content), sha256: digest });
 };
 
 if (PRINT_ONLY) {
@@ -232,8 +243,8 @@ if (PRINT_ONLY) {
   process.exit(0);
 }
 
-rmSync(OUT, { recursive: true, force: true });
-mkdirSync(OUT, { recursive: true });
+rmSync(TMP_OUT, { recursive: true, force: true });
+mkdirSync(TMP_OUT, { recursive: true });
 
 // Ship every core module, not only a computed closure. selftest.js reaches some modules
 // through dynamic import() on purpose, and a closure walk cannot see those: the first dist
@@ -374,3 +385,11 @@ console.log(`web/dist: ${distFiles.length + 1} files, build ${buildId}`);
 console.log(`  bundle ${(Buffer.byteLength(appBundle) / 1024).toFixed(1)} KiB / ${JSON.parse(appBundle.match(/var IDS = (\[[^\]]*\])/)[1]).length} modules`);
 console.log(`  single-file pskt-file.html ${(statSync(join(OUT, 'pskt-file.html')).size / 1024).toFixed(1)} KiB`);
 console.log(`  precache entries ${forSw.length}`);
+
+// Everything above wrote to web/dist.tmp; only a complete build is allowed to become the
+// site. On Windows a rename cannot replace an existing directory, so the old one goes
+// first -- the window between those two calls is the only time the directory is absent,
+// and it is never a window in which a half-written site exists.
+rmSync(FINAL_OUT, { recursive: true, force: true });
+renameSync(TMP_OUT, FINAL_OUT);
+console.log(`  swapped web/dist.tmp -> web/dist (previous site replaced atomically per-dir)`);
