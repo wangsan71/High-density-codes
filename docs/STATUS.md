@@ -119,6 +119,17 @@
 
 ## 已知风险 / 待办
 
+### 第 39 轮（D41 闭合 ✓ 闭合它的方式是**先把 D40 那个错原样重演一遍**）
+
+- **交付**：`tests/unit/threeMF-xsd-parity.test.mjs`（5 条）+ `tools/check-3mf.mjs` 导出 `XSD_TABLE`（一处导出、不动声明）⇒ **表 ⇄ 权威 XSD 自动对拍**：用校验器**自己的 `scanXml`** 读 `ref/3mf-core-1.4.0.xsd`，抽出 16 个全局元素名、每个 `CT_*` 的属性名集合与 `use="required"` 集合、`xs:element ref=` 的**文档序**（= schema 的 sequence/choice 顺序）、`ST_ObjectType`(5)/`ST_Unit`(6) 枚举，与 `ELEMENTS`/`REQUIRED`/`OBJECT_TYPE`/`UNIT_ENUM` **双向逐项比对**（元素表恰好相等 ✓ 属性集恰好相等 ✓ required 集相等 ✓ 子元素顺序相等、且"schema 没有子元素的，表里也不许声明" ✓ `xml:lang` 单独按 `xs:attribute ref=` 核对 ✓）
+- **反空转**：先断言"从 XSD 数出来的是 **16 个元素**、`CT_Object` 恰 **7** 个属性且**含 `name`**、`ST_ObjectType` 恰 **5** 值、`CT_Model` 确有 `xml:lang` 引用"⇒ 抽取若空转，这些数字对不上 ✓
+- **阳性对照（本轮最该看的一行）**：5 条**第一次跑就全绿** ⇒ 按仓库规矩这不值得相信 ⇒ 于是**把 D40 那个错原样重演**（从表里删掉 `name`）⇒ **两处同时变红**：对拍测试 `<object>: the table's attribute set differs from CT_Object`（diff 里就是 `- 'name'`）✓ 与 D40 回归守卫 `object/@name and @partnumber are Core 1.4 attributes`（并打印出那条假阳性原文）✓ ⇒ **这道判据确实能挡住上一轮那个错**、不是装饰 ✓ 之后放回 ⇒ 复绿 ✓
+- 为什么它比篡改用例更根本：篡改用例证明**表里已有的规则会响**，证明不了**表抄对了**——上一轮翻车正是表抄错（凭记忆 + 网上变体）✗
+- **一处没做完的收尾（如实记 ✗）**：D41 行里那句"现在的保护只有'篡改用例 + 正例'…防不住表本身抄错"已被本轮落地取代，但我**没改到原句**（`old_string` 锚点没匹配上 ⇒ 我对原文的记忆不准 ⇒ 不硬凑）⇒ 该行现在"状态=CLOSED ✓ 但句中还留着旧口径"✗ 下一轮顺手清理（读原文再改 ✓）
+- 证据：单测 **277/277** ✓ `verify --gate all --seeds 2` ⇒ exit 0、`G0 unit suite: 277 passed, 0 failed`、`PASS G8 subset`、`ALL GATES PASS -- 6/7 evaluated, 1 skipped`（G2 无语料 ⇒ 点名跳过 ✓）· 阳性对照那一跑实测 **exit 1（30 条中 2 fail）** ✓ `core/` 未动 ⇒ 不需重建 `web/dist` ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**200 seeds 的 G2 语料**（需手跑 `python sim/channel.py --in SRC --out DST --seed N --preset scan300 --modifier nocrop`，沙箱禁 spawn ✗）→ **G4 手机实机压力 500×8（从未跑过 ✗）** → G6 soak → G10 喷嘴矩阵 → `.github/workflows/pages.yml` → 清掉上面那条 D41 行的旧口径
+
+
 ### 第 38 轮（3MF 的 XSD 子集校验器 + `--gate G8` ✓ 而本轮最大的产出是**我自己撤回的一条假发现**）
 
 - **交付**：`tools/check-3mf.mjs`（3MF Core 1.4 **XSD 子集**校验器：包部件与内容类型覆盖、部件名合法性、关系与唯一起始部件、**自解析命名空间**、元素序列与 `mesh|components` choice、属性值域、文档级 id 唯一、`pid` 悬空、三角形索引范围与退化、`ST_ResourceID/Index` 的 2³¹ 上界、`CT_Vertices` ≥3 / `CT_Triangles` ≥1、DTD 与实体声明）+ `verify --gate G8`（进程内造 `PL-D2@0.4` 板材 3MF，或 `--file a.3mf,b.3mf` 查历史产物）+ `tests/unit/threeMF-subset.test.mjs` **25 条**

@@ -162,6 +162,14 @@ const REQUIRED = {
 /** Elements whose content is character data rather than child elements. */
 const TEXT_ELEMENTS = new Set(['metadata']);
 
+/**
+ * The table, exported for tests/unit/threeMF-xsd-parity.test.mjs, which reads
+ * ref/3mf-core-1.4.0.xsd with this file's own scanXml and compares the two side by side. Tamper
+ * cases prove a known rule fires; only this comparison proves the table was copied correctly --
+ * which is exactly what went wrong in the round that produced D40/D41.
+ */
+export const XSD_TABLE = { ELEMENTS, REQUIRED, OBJECT_TYPE, UNIT_ENUM };
+
 /* ------------------------------------------------------------------ xml scanning */
 
 /** Find the end of a tag, honouring quotes: a `>` inside an attribute value is not the end. */
