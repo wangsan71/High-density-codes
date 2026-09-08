@@ -121,6 +121,17 @@
 
 ## 已知风险 / 待办
 
+### 第 67 轮（**手机连拍的取景画面接错了元素：`index.html` 里有两个 `id="video"`（D57）；顺带确认接收端没有 D56 那类内存问题**）
+
+- **修后代码上的完整 soak 仍在后台跑**（第 66 轮结束时起的），A/B 两段已在**修后代码**上出数：**编码 1 MB → 168 页 194 ms ≤ 5 s ✅**、**解码 9 张真实信道页 worst 1681 ms / mean 1587 ms ≤ 2 s ✅**（修前那次报的是 8850 ms ❌）⇒ C 段（30 min 的 RSS 与误接受）结束时收；**G6"三部分不同源"这条缺口将由它闭合**（本轮**不写判决**：没跑完就不写）。
+- **D56 那一类问题往接收端查了一遍 ⇒ 接收端干净 ✓**：`web/app.js` 的 `run()` 里 `bmp` 是**循环局部**（一次只解一张），`files` 是文件选择器给的 **File 句柄（磁盘惰性、不是内存副本）**，摄像头单拍路径还先 `files.length = 0` 再塞一帧 ⇒ 发送端那个"每页位图全程留住"的对应物**不存在**；连拍侧的状态只有 `sessions: Map(session → {totalPages, have:Set})` + 计数器（第 66 轮已查）⇒ **每帧内存有界** ✓
+- **但顺手读出 D57：`web/index.html` 声明了两个 `id="video"`** —— 第 1 节单拍的 `<video id="video" playsinline hidden>`（L33）与最后一节连拍的 `<video id="video" playsinline muted>`（L82）⇒ 同一文档重复 id，而 `getElementById('video')` 只返回**文档顺序里的第一个** ⇒ `web/capture.js` 的连拍拿到的是**隐藏的单拍元素**：**用户在连拍节看得见的那块画面永远黑屏**，而帧是从一个 `display:none` 的 video 上 `drawImage` 取的 ⇒ 浏览器相关（**iOS Safari 对不渲染的 video 是否继续解码并不可靠**）⇒ 手机路径（目标 ②）最坏是"画面全黑、一页也收不到"，而**在桌面上永远看不出来** ✗ 重复 id 同时在**单文件版** `pskt-file.html` 里（构建时由 `index.html` 生成）⇒ **两条交付路径都带着**。
+- **它为什么活了这么多轮**：既有那条检查只查"JS 里每个 `getElementById` 都能在**某个**页面找到"，把各页 id 混进一个 Set、**只看存在不看唯一** ⇒ 这类"元素在、但取到的是另一个"的静默失败没人管；而唯一能暴露它的证据（真手机跑连拍）**正是本项目在进程内造不出来的那一种** ⇒ 所以这次把它变成构建期检查，而不是只改那一行。
+- **修法 + 免费的阳性对照**：① 连拍节元素改名 `id="burst-video"`、`capture.js` 改取它，并在注释里写明**为什么不能"顺手统一"成一个 id** ② `tools/check-dist.mjs` 新增**第 13 条**断言 `no built page declares the same id twice`（**逐页**数 id 出现次数、>1 就红并报出页名与次数）⇒ 与图标那条同档次的**构建期强制** ✓ **阳性对照**：当时的 dist 还是修前构建的 ⇒ **先不重建**直接跑 ⇒ `CHECKDIST_PRE_EXIT=1`、`FAIL no built page declares the same id twice`、detail **`./index.html: video x2, ./pskt-file.html: video x2`**、`G9 CHECK: 1 of 13 FAILED` ⇒ 缺陷确实在**出厂产物**里、新检查确实抓得住（**不是空跑**）✓ **重建后**：`every id unique within its own page, across 4 built page(s)`、`13 pass / 0 skipped / 0 fail`、**`G9 CHECK: all 13 assertions pass`**、`CHECKDIST_EXIT=0`、`BUILD_EXIT=0`（precache 53）✓
+- **手册跟着改**：`docs/USE.md` §5 的 G4 行点名该按哪个按钮（拉到页面最下面「手机连拍（自动挑帧）」按「**开始连拍**」，**不是**第 1 节那个「用摄像头拍一页」——那是一次一页的手动快门，500 页要按 500 次 ✗）⇒ 用户照手册走 G4 不会走错路。
+- **验证**：单测 **`tests 307 · pass 307 · fail 0 · duration_ms 130716`**、`SUITE_EXIT=0` ✓ `smoke-capture` **`CAPTURE SMOKE: all assertions pass`**（4 帧 / 3 收 / 1 重复 / 0 拒）✓ `build-web` exit 0 ✓ `check-dist` 13/13 ✓
+- **如实**：本轮修掉的是"接错元素"这个**确定的错**，**不等于连拍在真机上已达标** ⇒ **G4 仍零证据、仍需你的手机**；600 dpi 解码仍 31786 ms（判据没分档 ⇒ 不收窄、不记绿）；D55 根因仍无正例 ⇒ **M4 仍只差 G4，不打 tag** ✓
+
 ### 第 66 轮（**收了 G6 的 soak 判决；顺着"手机端 500 页会话"查内存，量出网页发送端发一个 256 KiB 文档就要 1.34 GB（D56）**）
 
 - **上一轮记下的第一件事先做掉：G2 300 dpi × 200 份在修后代码上重跑** ⇒ **`PASS G2 corpus: 200/200 byte-exact in 1084.2s`**、**200 行 `OK` / 200 行 `digest verified` / 含 FAIL 的行 = 0**、exit 0 ⇒ **D54 的"重排不改判决"不再是"论证 + 6 页实证"，而是 200 份语料的实证** ✓ 顺带：同一门限第 57 轮记的是 1245.4 s ⇒ 本轮 **1084.2 s**（白跑的整页读少了，门限自己也快 13%）。（该次运行**只评估 G2**，它自己打印 `not evaluated by this run: G0 G1 G3 G4 G5 G6 G7 G8 G9 G10` ⇒ `ALL GATES PASS` **仍不得**被引用成"全部门限通过" ✗）

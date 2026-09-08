@@ -168,7 +168,13 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   };
 
   $('burst').addEventListener('click', async () => {
-    const video = $('video');
+    // Not 'video'. index.html carries two video elements and the single-shot one in section 1 comes
+    // first in document order, so getElementById('video') handed this burst path THAT element: the
+    // visible preview in the burst section stayed black while the frames were read from a
+    // display:none video -- which is browser-dependent and not something iOS Safari can be relied on
+    // to decode. Duplicate ids in the shipped pages are a build check now (tools/check-dist.mjs), so
+    // this cannot quietly regress, and please do not "tidy" the two ids back into one.
+    const video = $('burst-video');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       say('这个来源拿不到摄像头 API（非 https 且非 file:// localhost）。请用手机系统相机拍照存成图片，再走文件选择解码。', 'bad');
       return;

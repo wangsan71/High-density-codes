@@ -246,6 +246,27 @@ check('every getElementById in built JS exists in some built page', () => {
   return `${htmlIds.size} markup ids, every JS getElementById resolves`;
 });
 
+check('no built page declares the same id twice', () => {
+  // The sibling of the check above, and the one that was missing: existence is not uniqueness.
+  // index.html declared id="video" twice -- the single-shot camera element in section 1 and the
+  // burst preview in the last section -- so capture.js's getElementById('video') silently returned
+  // the FIRST one in document order, the hidden single-shot element. The burst preview stayed black
+  // and frames were read from a display:none video, which is browser-dependent and not something
+  // iOS Safari can be relied on to decode (DEFECTS D57). Every other assertion stayed green and so
+  // did the unit suite; the only way to see it was to run the phone path on a phone, which is
+  // precisely the evidence this project cannot produce in process. So it is checked here, per page,
+  // at build time, where it costs nothing.
+  const htmlFiles = files.filter((x) => /\.html$/i.test(x));
+  const dupes = [];
+  for (const f of htmlFiles) {
+    const seen = new Map();
+    for (const m of text(f).matchAll(/\bid\s*=\s*["']([^"']+)["']/gi)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
+    for (const [id, n] of seen) if (n > 1) dupes.push(`${rel(f)}: ${id} x${n}`);
+  }
+  if (dupes.length) throw new Error(`duplicate ids, so getElementById returns the first and the rest are dead: ${dupes.join(', ')}`);
+  return `every id unique within its own page, across ${htmlFiles.length} built page(s)`;
+});
+
 // Async checks are wrapped in IIFEs. A bare `return` inside a top-level block is a
 // SyntaxError -- that is how the first version of this file died, and it died loudly,
 // which is the correct behaviour for a checker.
