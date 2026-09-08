@@ -26,7 +26,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const n = Number(args.includes('--bytes') ? args[args.indexOf('--bytes') + 1] : 4096);
-const { buildArtifacts } = await import(pathToFileURL(join(ROOT, 'web', 'sender.js')).href);
+// previewPlan / printPlan are the two page-count policies the DOM applies. The handlers themselves sit
+// behind a `document` guard, so these pure functions are the only in-process view of them: an uncapped
+// preview costs ~35 MB of decoded raster per page, and round 67's print warning printed only after the
+// window had already been written (DEFECTS D61).
+const { buildArtifacts, previewPlan, printPlan, PREVIEW_CAP, PRINT_WINDOW_PAGE_CAP } = await import(pathToFileURL(join(ROOT, 'web', 'sender.js')).href);
 const { bootstrapDecode } = await import(pathToFileURL(join(ROOT, 'core', 'decode', 'bootstrap.js')).href);
 const { TransferAssembler } = await import(pathToFileURL(join(ROOT, 'core', 'protocol.js')).href);
 const { sha256Hex } = await import(pathToFileURL(join(ROOT, 'core', 'hash.js')).href);
@@ -48,6 +52,30 @@ const step = (label, ok, detail) => {
   console.log(`          ${detail}`);
   if (!ok) failures++;
 };
+
+// Round 68: the page-count policies are pure functions, so these two steps are the in-process check on
+// DOM behaviour nothing else can reach. Both carry a positive control -- a 3-page transfer must preview
+// all three pages, and a page count at the cap must still be printable -- otherwise a policy that
+// refused everything would "pass" these assertions while breaking the product.
+{
+  const small = previewPlan(3);
+  const big = previewPlan(168);
+  step(
+    'sender previews are capped, and the cap says what it skipped',
+    small.shown === 3 && small.hidden === 0 && small.note === '' &&
+      big.shown === PREVIEW_CAP && big.hidden === 168 - PREVIEW_CAP &&
+      big.note.includes(String(big.hidden)) && /pack\.pdf/.test(big.note) && /zip/.test(big.note),
+    `3 pages -> shown ${small.shown} hidden ${small.hidden}, no note (positive control); 168 pages -> shown ${big.shown} hidden ${big.hidden}, note states the hidden count and names pack.pdf + zip`
+  );
+  const fits = printPlan(PRINT_WINDOW_PAGE_CAP);
+  const tooMany = printPlan(168);
+  step(
+    'sender refuses the browser-print window before spending, not after',
+    fits.write === true && fits.note === '' && printPlan(0).write === true &&
+      tooMany.write === false && /pack\.pdf/.test(tooMany.note) && /GB/.test(tooMany.note),
+    `${PRINT_WINDOW_PAGE_CAP} pages -> write, 0 pages -> write (positive controls); 168 pages -> refuse, naming ${((168 * 35) / 1024).toFixed(1)} GB and offering pack.pdf`
+  );
+}
 
 for (const profile of ['P-M1-300', 'PL-D2']) {
   const r = await buildArtifacts(raw, { profile });

@@ -38,6 +38,52 @@ import { getPalette } from '../core/palette.js';
 // string and silently counted zero parity pages forever (docs/DEFECTS.md D15).
 import { PAGE_KIND } from '../core/frame.js';
 
+/**
+ * Page-count policies, as pure functions, so tools/smoke-sender.mjs can check the arithmetic.
+ *
+ * The DOM handlers that apply them sit behind a `document` guard and cannot be reached in process --
+ * which is exactly how round 67's print warning ended up printing AFTER the new window had already
+ * been written: the cost was paid first and the user was told afterwards. Everything that decides
+ * "how many pages is too many" lives here instead, and the handlers only obey.
+ *
+ * The numbers are measured, not guessed. A page at A4/300dpi is 2480x3508 px, so one RGBA raster is
+ * 34.8 MB; round 66's tools/sender-memory-probe.mjs measured 30.6 MB of RSS per page in Node for the
+ * same rasters, and a page's base64 PNG is ~0.47 MB of JS string. A browser decodes an <img> to a
+ * raster whether or not it is on screen (loading="lazy" is a hint, not a promise), so one preview
+ * costs ~35 MB decoded plus ~0.5 MB of string, and a print window holding every page is the same
+ * arithmetic with no cap at all: 168 pages is ~5.8 GB. That is why the print path now refuses instead
+ * of warning, and why previews are capped. Nothing is lost by refusing -- pack.pdf carries every page
+ * at true physical size and is already what docs/USE.md tells users to print.
+ */
+const PAGE_RASTER_MB = 35; // 2480 x 3508 x 4 B at A4/300dpi, rounded; probe measured 30.6 MB/page RSS
+export const PREVIEW_CAP = 8;
+export const PRINT_WINDOW_PAGE_CAP = 8;
+
+/** How many previews to build, and what to tell the user about the pages that get none. */
+export function previewPlan(pageCount, cap = PREVIEW_CAP) {
+  const n = Math.max(0, pageCount | 0);
+  const shown = Math.min(n, Math.max(0, cap | 0));
+  const hidden = n - shown;
+  return {
+    shown,
+    hidden,
+    // No markdown here: say() writes textContent, so asterisks would show up literally.
+    note: hidden
+      ? `预览只画了前 ${shown} 页，还有 ${hidden} 页没有预览：每张预览都是 base64 图片（约 0.5 MB 字符串），浏览器还会把它解码成位图（A4/300dpi 每页约 ${PAGE_RASTER_MB} MB），页数一多手机发送端会卡。所有页都在 pack.pdf 和 PNG（zip）里，一页不缺；要逐页看请下载它们。`
+      : '',
+  };
+}
+
+/** Whether the browser-print path may write its window at all, and if not, what to say instead. */
+export function printPlan(pageCount, cap = PRINT_WINDOW_PAGE_CAP) {
+  const n = Math.max(0, pageCount | 0);
+  if (n <= Math.max(0, cap | 0)) return { write: true, note: '' };
+  return {
+    write: false,
+    note: `不打印：这一路会把 ${n} 页位图全部写进一个新窗口再解码，每页约 ${PAGE_RASTER_MB} MB，合计约 ${((n * PAGE_RASTER_MB) / 1024).toFixed(1)} GB —— 浏览器会卡死或者根本打不开，所以超过 ${cap} 页就不再尝试（而不是先花掉再提醒）。请改用 pack.pdf：单文件、每页按真实物理尺寸放置，下载后在任何 PDF 阅读器里打印，页数不限。`,
+  };
+}
+
 export const isPlate = (id) => !!PROFILES[id] && PROFILES[id].medium === 'plate';
 
 /**
@@ -294,16 +340,25 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
       return;
     }
     state = r;
-    r.pages.forEach((p, i) => {
+    // Previews are capped (previewPlan above). Each one is ~0.5 MB of base64 string and, once the
+    // browser decodes it, up to ~35 MB of raster -- so an uncapped preview is the cost round 66
+    // removed from pack.pdf, reintroduced in the DOM (DEFECTS D61). loading/decoding are hints that
+    // keep offscreen previews from being decoded eagerly; the cap is what actually bounds it.
+    const plan = previewPlan(r.pages.length);
+    for (let i = 0; i < plan.shown; i++) {
+      const p = r.pages[i];
       const card = document.createElement('figure');
       const img = document.createElement('img');
       img.alt = p.tag;
+      img.loading = 'lazy';
+      img.decoding = 'async';
       img.src = `data:image/png;base64,${b64(p.png)}`;
-      const cap = document.createElement('figcaption');
-      cap.textContent = `${p.tag} · ${i + 1}/${r.pages.length}`;
-      card.append(img, cap);
+      const fig = document.createElement('figcaption');
+      fig.textContent = `${p.tag} · ${i + 1}/${r.pages.length}`;
+      card.append(img, fig);
       $('pages').appendChild(card);
-    });
+    }
+    if (plan.note) say(plan.note, 'hint');
     say(`编好 ${r.pages.length} 页 · ${r.ms} ms · 色板 ${r.paletteId}${r.mono ? '（单色出图）' : ''} · ${r.dpi} dpi${r.plate ? ` · 盘 ${r.plateMm}mm` : ` · 纸 ${r.sheetMm ? r.sheetMm.w + '×' + r.sheetMm.h + 'mm' : ''}`}`);
     say(`页几何字段：${r.geomKeys}`);
     say(`明文 SHA-256 ${r.sourceSha256} —— 接收端只靠这 64 个字符判定成败，不需要文件名，也不需要联网。`);
@@ -321,6 +376,13 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   $('doencode').addEventListener('click', () => encode().catch((e) => say(`异常：${e.message}`, 'bad')));
   $('doprint').addEventListener('click', () => {
     if (!state) return say('先编码。', 'bad');
+    // Decide BEFORE spending anything. Round 67 put a warning here, but it ran after window.open and
+    // document.write had already pushed every page into the new window, so the user learned the cost
+    // only once it had been paid -- and at 168 pages (~5.8 GB of decoded raster in one window) the tab
+    // may never come back to say anything at all, which is the silent failure this project refuses.
+    // printPlan() is pure, so tools/smoke-sender.mjs checks this refusal in process.
+    const plan = printPlan(state.pages.length);
+    if (!plan.write) return say(plan.note, 'bad');
     const w = window.open('', '_blank');
     if (!w) return say('浏览器拦住了新窗口：请改用 pack.pdf 打印。', 'bad');
     w.document.write(`<!doctype html><meta charset=utf-8><title>PSKT</title><style>${printableCss()}body{font:14px system-ui}</style>${state.pages
@@ -330,16 +392,6 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     w.focus();
     setTimeout(() => w.print(), 300);
     say('浏览器打印可能自行缩放：要精确物理尺寸请走 pack.pdf。', 'hint');
-    // This path writes every page into one new window as a data: URL image, so that window holds
-    // ~0.5 MB of base64 per page and the browser then decodes ~30 MB of raster per page at
-    // A4/300dpi. Round 66 measured this class of cost on the sending side (DEFECTS D56) and fixed
-    // pack.pdf's; window.print() has no lazy path, so past a handful of pages this is slow at best
-    // and unopenable at worst. It is not refused -- for a few pages it works, and it prints at the
-    // CSS-declared physical size -- but the user is told what it costs and where the artifact that
-    // does scale lives. Threshold 8 pages = roughly 240 MB of decoded rasters in one window.
-    if (state.pages.length > 8) {
-      say(`提醒：这一路把 ${state.pages.length} 页位图全部写进一个新窗口再解码（每页 base64 约 0.5 MB、解码后约 30 MB），页数多时会很慢甚至打不开。要印这么多页请用 pack.pdf：单文件、每页按真实物理尺寸放置。`, 'hint');
-    }
   });
   $('dlpng').addEventListener('click', async () => {
     if (!state) return say('先编码。', 'bad');

@@ -121,6 +121,16 @@
 
 ## 已知风险 / 待办
 
+### 第 68 轮（**发送页给每页都建一张 base64 预览 ⇒ 第 66 轮从 pack.pdf 移走的开销搬回了 DOM（D61）；顺带查出我上一轮那条打印提醒排在花钱之后**）
+
+- **上一轮挂账的这条这轮修了，而且量级比记账时大**：第 67 轮记的是"168 页 ≈ 79 MB base64 串 + 59 MB PNG"——**只算了字符串**。这轮读 `web/sender.js` L296-343 时把**浏览器解码**那一半也算进来：A4/300dpi 一页 = 2480×3508 px ⇒ 一张 RGBA 位图 **≈34.8 MB**（与第 66 轮 `tools/sender-memory-probe.mjs` 在 Node 侧对同一批位图实测的 **30.6 MB/页 RSS** 同量级）⇒ 168 页预览是 **GB 级解码位图**，不是 79 MB；而 `docs/USE.md` 明说发送页在手机上"也能开" ⇒ **手机发送端首当其冲**（`loading="lazy"` 只是提示、不是承诺）。
+- **还查出我上一轮自己留下的次序错**：第 67 轮给 `doprint` 加的"页数多会很慢"提醒排在 `window.open` + `document.write` **之后**（L326 花钱、L340 才说话）⇒ **钱花完了才提醒**；而 168 页 ≈ **5.8 GB** 解码位图塞进一个窗口时，那个标签页很可能根本回不来提醒任何人 ⇒ 正是本项目最不允许的**静默失败**。**如实：这是我上一轮的修法本身的缺陷，不是新引入的。**
+- **修法（两条策略都抽成纯函数）**：`previewPlan` / `printPlan` + 导出的上限常量 ⇒ DOM handler 在 `document` 守卫后面、进程内不可达，**抽出来才验得到**，这正是本文件头部写明的分工原则（`buildArtifacts` 当初就是这么来的）。① 预览上限 `PREVIEW_CAP = 8`，超出的页数**如实说明**（"预览只画了前 8 页，还有 160 页没有预览……**所有页都在 pack.pdf 和 PNG（zip）里，一页不缺**；要逐页看请下载它们"），并加 `loading="lazy"` + `decoding="async"` 当提示（注释写明**不指望它**）② `doprint` 改成**花之前先决定**：`printPlan` 返回 `write:false` 就**直接拒绝**，报出 GB 数字与 pack.pdf 出路（`PRINT_WINDOW_PAGE_CAP = 8`）⇒ **拒绝不是放宽判据**：pack.pdf 页数不限、且本来就是"每页按真实物理尺寸放置"的那个产物，`docs/USE.md` 也叫用户印它。
+- **验证**：`smoke-sender` 两条新断言**都带阳性对照**（3 页必须全预览且不留提示、页数正好等于上限必须仍可打印、0 页也要可打印 ⇒ 否则一个"什么都拒绝"的策略也能把断言蒙过去）：**`PASS sender previews are capped, and the cap says what it skipped`**、**`PASS sender refuses the browser-print window before spending, not after`**、`SENDER SMOKE: all assertions pass`、`SMOKE_EXIT=0`；`BUILD_EXIT=0`（`pskt-file.html` 306.4 KiB、precache 53）；`CHECKDIST_EXIT=0`（`13 pass / 0 skipped / 0 fail`、`every id unique within its own page, across 4 built page(s)`、**`G9 CHECK: all 13 assertions pass`**）；单测 **`tests 307 · pass 307 · fail 0 · duration_ms 132528`**、`SUITE_EXIT=0` ✓ `docs/USE.md` 两处同步（预览上限、打印按钮 ≤8 页与拒绝理由）⇒ 行为写在用户会看的地方，不只写在台账里。
+- **仍未修（如实记账，并入 G9 那批真浏览器验收）**：`give()` 用 data: URL 下载 ⇒ 168 页的 zip ≈ 63 MB、base64 后是**单个 ~84 MB 的 data: URL**；`blob:` + `URL.createObjectURL` 更稳，但要动页面 CSP，而**本机没有浏览器可验** ⇒ 不改（盲改可能把现在能用的弄坏，比不改更糟）。
+- **端到端 usability 冒烟：11 PASS / 0 FAIL / 122 s** ✅（**改完才跑**——它内部会跑 `smoke-sender` 与 `smoke-capture`，先跑就等于拿旧状态当证据）：204800 B 文件进 → 3 张页图 + 802 KB `pack.pdf` 出 → `sim/channel.py --preset scan300 --modifier nocrop` 模拟印扫 → `receive --photo` → **字节相同、sha256 相同（`32ec480521da27d2`）**；另外跑了 **G8**（盘 profile 的 4 个 3MF）、`check-serve`（字节一致 / 拒绝目录穿越 / 404 / HEAD / MIME）、`check-lan`（手机视角的 `web/dist`）⇒ 122 s 对比基线 297–326 s，**D54 的加速在这里也看得见**（冒烟内部同样在解码真页）。它自报的边界照实记：真墨水纸张、真手机相机、浏览器打印缩放（D8）、https 下的 PWA 安装、以及 **G4 / G6 / G9 / G10 未证**。
+- **一项长任务本轮结束时仍在跑 ⇒ 判决不写**：第 67 轮修好仪器（窗口改四分位 + `MINUTES_REQUIRED = 30` 下限）后起的 30 min soak 重跑（`.tmp/g6-30-r67.json`）到 **8.8 min / 41 cycles / 414 页解码 / 0 误接受 / 0 错误** ⇒ **G6 的 RSS 判决下一轮收**（没跑完就不写）。**M4 仍只差 G4（要你的手机），不打 tag** ✓
+
 ### 第 67 轮（**手机连拍的取景画面接错了元素：`index.html` 里有两个 `id="video"`（D57）；顺带确认接收端没有 D56 那类内存问题**）
 
 - **修后代码上的完整 soak 仍在后台跑**（第 66 轮结束时起的），A/B 两段已在**修后代码**上出数：**编码 1 MB → 168 页 194 ms ≤ 5 s ✅**、**解码 9 张真实信道页 worst 1681 ms / mean 1587 ms ≤ 2 s ✅**（修前那次报的是 8850 ms ❌）⇒ C 段（30 min 的 RSS 与误接受）结束时收；**G6"三部分不同源"这条缺口将由它闭合**（本轮**不写判决**：没跑完就不写）。
