@@ -22,7 +22,7 @@
  * No performance work, by instruction: pages are rendered serially, PNGs re-encoded for
  * each download, and the mesh is rebuilt on every click.
  */
-import { PROFILES } from '../core/profiles.js';
+import { PROFILES, planPage } from '../core/profiles.js';
 import { encodeTransfer } from '../core/protocol.js';
 import { pageLayout } from '../core/render/layout.js';
 import { renderPageBitmap, renderSheetBitmap, echoBitsOf } from '../core/render/raster.js';
@@ -93,6 +93,109 @@ export function previewPlan(pageCount, cap = PREVIEW_CAP) {
  * testable in process and the judgement is visible instead of buried in a comparison.
  */
 export const DATA_URL_RISK_BYTES = 32 * 1024 * 1024;
+
+/**
+ * The limit that actually decides how much one transfer can carry, and the numbers a user needs when they
+ * hit it.
+ *
+ * It is not a browser limit and not a judgement: a page header stores totalPages in ONE byte
+ * (core/frame.js:19), so one transfer is at most 255 pages, and core/protocol.js:318-320 spends some of
+ * those pages on inter-page parity and refuses whatever is left -- `too many pages: N data pages leave no
+ * room for parity`. At P-M1-300 with its default 20% parity that ceiling is 212 data pages of 7490 B, so
+ * about 1.5 MB of data deflate cannot shrink. Measured, not derived: 1 MiB encodes to 168 pages in
+ * ~180 ms and 2 MiB is refused in 48 ms. Everything else in this section is about browsers; this one is
+ * about the protocol, so it binds the CLI and the web page identically, and switching between them
+ * changes nothing -- which the wording below has to say out loud, because "use the CLI instead" is this
+ * project's usual escape and here it is not one.
+ */
+export const PROTOCOL_PAGE_LIMIT = 255; // core/frame.js:19, totalPages is a u8
+const PAGE_RENDER_MS = 202; // ACCEPTANCE G6: render+PNG per A4/300dpi page, measured
+// Reading a file into a tab is one synchronous allocation of its entire size. Above this, say so before
+// doing it. A judgement and not a measurement -- there is no browser here to measure with -- and it only
+// ever produces a sentence, never a refusal, so being wrong costs nothing but noise.
+const BIG_READ_BYTES = 64 * 1024 * 1024;
+
+/**
+ * {dataPages, parityPages, pages, over, limit, maxPayloadBytes, perDataPageBytes, parityPct}, or null when
+ * the geometry is unknown -- no numbers means no sentence, never a guess.
+ *
+ * This mirrors core/protocol.js:307-321: dataPages = ceil(payload / geom.ecc.dataBytes), parity =
+ * max(2, ceil(dataPages * pct / 100)), total capped by the one-byte header field. tools/smoke-sender.mjs
+ * pins the mirror against the encoder's own output instead of trusting it: at 1 MiB and default parity
+ * both say 168 pages, and at 2 MiB both say 280 data pages.
+ *
+ * It assumes deflate achieves nothing, so `pages` over-states the truth for any file that compresses, by
+ * an unbounded factor: this project's own deflate turns 4 MiB of zeroes into 6 pages. That is why these
+ * numbers may warn and may NOT refuse. Round 71's first version refused on an estimate of this shape and
+ * the smoke caught it before it shipped -- a 20 MB log that compresses into a few hundred pages would
+ * have been turned away at the file picker, which is a false refusal, and the kind that teaches a user
+ * the tool is broken. Refusing belongs to core/protocol.js, where the compressed length is a fact.
+ */
+export function transferBudget(byteLength, geom, parityPct) {
+  const D = geom && geom.ecc && geom.ecc.dataBytes > 0 ? geom.ecc.dataBytes : 0;
+  if (!(D > 0)) return null;
+  const pct = parityPct === '' || parityPct == null || !Number.isFinite(Number(parityPct))
+    ? (geom.ecc.inter ? Number(geom.ecc.inter.parityPct) || 0 : 0)
+    : Number(parityPct);
+  const n = Math.max(0, Math.floor(Number(byteLength) || 0));
+  const dataPages = Math.ceil(n / D) || 1; // protocol.js:307 has the same `|| 1`
+  const parityPages = Math.max(2, Math.ceil((dataPages * pct) / 100));
+  // The largest payload that still fits, found by asking the question the encoder asks: walk data pages
+  // down until the parity they would demand leaves the total inside the one-byte field.
+  let maxData = 0;
+  for (let d = PROTOCOL_PAGE_LIMIT - 2; d >= 1; d--) {
+    if (d + Math.max(2, Math.ceil((d * pct) / 100)) <= PROTOCOL_PAGE_LIMIT) { maxData = d; break; }
+  }
+  return {
+    dataPages,
+    parityPages,
+    pages: dataPages + parityPages,
+    limit: PROTOCOL_PAGE_LIMIT,
+    over: dataPages + parityPages > PROTOCOL_PAGE_LIMIT,
+    maxPayloadBytes: maxData * D,
+    perDataPageBytes: D,
+    parityPct: pct,
+  };
+}
+
+/**
+ * The sentence for core/protocol.js:320's page-limit refusal, with real numbers in it. '' when the
+ * geometry is unknown, so the caller keeps whatever generic hint it had rather than showing a blank.
+ */
+export function pageLimitHint(byteLength, geom, parityPct) {
+  const b = transferBudget(byteLength, geom, parityPct);
+  if (!b) return '';
+  const mb = (v) => (v / 1048576).toFixed(2);
+  const at0 = transferBudget(byteLength, geom, 0);
+  // No markdown: say() writes textContent, so asterisks would show up literally.
+  return `装不下，而且是协议装不下、不是浏览器的问题：页头的 totalPages 只有一个字节（core/frame.js:19）⇒ 一次传输最多 ${b.limit} 页，校验页挤到没位置时 core/protocol.js:320 就拒绝。这个文件按当前档（每页净 ${b.perDataPageBytes} B）与 ${b.parityPct}% 校验页需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而当前配置一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：① 把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB，代价是丢页时的恢复能力下降）；② 换每页装得更多的档（如 600 dpi 或四色档，代价是对打印与扫描的要求更高）；③ 把文件切成不超过 ${mb(b.maxPayloadBytes)} MB 的几份，分别发、分别收 —— 每份都是独立传输、各有自己的摘要校验，收到一份就落一份。注意：CLI 受同一个 255 页限制（它走同一个 encodeTransfer），所以"改用 CLI"解决不了这一条。`;
+}
+
+/**
+ * {warn, note}: what to say BEFORE the file is read into the tab. A warning and never a refusal -- see
+ * transferBudget for why an estimate must not refuse.
+ *
+ * Two things are worth saying early, because both happen before the exact page count exists: the file may
+ * be too big for one transfer at all, and reading it is a synchronous one-shot allocation of its whole
+ * size, as is the render that follows (DEFECTS D65). A user who has been told why the tab is about to
+ * stop answering is inconvenienced; one who has not been told thinks the tool broke.
+ */
+export function earlySizePlan(byteLength, geom, parityPct) {
+  const n = Math.max(0, Math.floor(Number(byteLength) || 0));
+  const b = transferBudget(n, geom, parityPct);
+  const mb = (v) => (v / 1048576).toFixed(2);
+  const parts = [];
+  if (b && b.over) {
+    const at0 = transferBudget(n, geom, 0);
+    parts.push(`这个文件有 ${mb(n)} MB：如果 deflate 压不动它，一次传输装不下 —— 需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而一次最多 ${b.limit} 页（页头 totalPages 只有一个字节：core/frame.js:19）。当前档每页净 ${b.perDataPageBytes} B、校验页 ${b.parityPct}%，一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB）、换每页装得更多的档、或把文件切成不超过 ${mb(b.maxPayloadBytes)} MB 的几份分别传。压得动就没事：我们会先压缩再按真实页数判定（本项目自己的 deflate 把 4 MiB 全零压成 6 页）。`);
+  } else if (b && b.pages * PAGE_RENDER_MS >= 10000) {
+    parts.push(`如果这个文件压不动，它约 ${b.pages} 页，渲染期间页面会有约 ${Math.round((b.pages * PAGE_RENDER_MS) / 1000)} 秒不响应（渲染是同步的，实测约 ${PAGE_RENDER_MS} ms/页）。`);
+  }
+  if (n >= BIG_READ_BYTES) {
+    parts.push(`另外：把 ${mb(n)} MB 读进标签页是一次性同步分配，本身就可能卡住几十秒，甚至让页面死掉。`);
+  }
+  return { warn: parts.length > 0, note: parts.join(' ') };
+}
 
 /** {risk, note}: note is '' unless the artifact is big enough that a data: URL download is doubtful. */
 export function downloadPlan(name, byteLength) {
@@ -182,7 +285,22 @@ export async function buildArtifacts(bytes, opts = {}) {
       passphrase: pass || undefined,
     });
   } catch (e) {
-    return { ok: false, stage: 'encode', error: e.message, hint: '常见原因：载荷超出该剖面单页容量，或校验页比例吃光预算。换更大剖面、调低校验页 %，或先分割文件。' };
+    // "too many pages: N data pages leave no room for parity" is core/protocol.js:320's own RangeError.
+    // It is true, and it is not a sentence a user can act on: it never says what the limit is, why it
+    // exists, what the file needs, or which knob to turn. The CLI has said this properly since round 47
+    // ("needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile"); this page
+    // showed the raw exception plus a generic hint instead (DEFECTS D65). The numbers come from
+    // transferBudget, whose arithmetic smoke-sender pins against the encoder's real output.
+    let hint = '常见原因：载荷超出该剖面单页容量，或校验页比例吃光预算。换更大剖面、调低校验页 %，或先分割文件。';
+    if (/too many pages/i.test(e.message)) {
+      try {
+        const g = planPage(profileId, { nozzle: opts.nozzle ? Number(opts.nozzle) : undefined, plateMm });
+        hint = pageLimitHint(bytes.length, g, opts.parityPct) || hint;
+      } catch {
+        // A failing explanation must not replace a true error: keep the generic hint.
+      }
+    }
+    return { ok: false, stage: 'encode', error: e.message, hint };
   }
 
   // sheetMm must be {w,h} taken from the geometry the encoder just chose (cli/pskit.mjs:156);
@@ -357,6 +475,24 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     state = null;
     const file = $('sfile').files[0];
     if (!file) return say('先选一个文件（任何格式，我们只搬字节）。', 'bad');
+    // Say what a big file costs BEFORE reading it, but never refuse here. The page count depends on how
+    // much of the payload deflate removes and compression has no upper bound, so any byte threshold that
+    // refuses would eventually turn away a file that fits -- a false refusal (DEFECTS D65; see
+    // transferBudget, whose comment records the version of this block that got it wrong). Refusing is
+    // core/protocol.js's job, at the 255-page limit, where the compressed length is a fact. Reading is one
+    // synchronous allocation of the whole file and the render that follows is synchronous too, so the user
+    // gets the numbers before the tab stops answering. If planPage rejects this option combination there
+    // is no estimate to offer and nothing is said.
+    try {
+      const g = planPage(sel.value, {
+        nozzle: Number($('snozzle').value) || undefined,
+        plateMm: Number($('splate').value) || undefined,
+      });
+      const early = earlySizePlan(file.size, g, $('sparity').value);
+      if (early.warn) say(early.note, 'hint');
+    } catch {
+      // No estimate for this option combination; the encoder still refuses what does not fit.
+    }
     say(`读入 ${file.name} · ${file.size.toLocaleString()} B`);
     const bytes = new Uint8Array(await file.arrayBuffer());
     const r = await buildArtifacts(bytes, {
