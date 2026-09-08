@@ -29,7 +29,7 @@
 |---|---|---|---|
 | G0 规格可独立实现 | ✅ | — | `python ref/decode.py` → `PASS`（309 检查 ✓ 4 项已接受 geometry GAP） |
 | G1 渲染—读回零误读 | ✅ | — | `node cli/pskit.mjs verify --gate G1`（725 913 格 0 误读 ✓） |
-| G2 纸面 300/600 dpi 100%（200 seed） | 🟡 | **`30/32 = 93.8%` 且样本量差 25 倍** ✓ 两类失败：A=600 dpi 页内 ECC 余量薄（容量事实 ✓ 非 bug ✓）· B=整页读出崩塌（**根因未定 ✓ 第 22 轮已撤回第 21 轮的解释 ✓**）· 另有判据前提未明示"纸完整在成像区内" | `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'nc-scan*'`（**第 37 轮起是门限** ✓ 直接 import `tools/g2-corpus.mjs` ⇒ 门限与工具不会漂移 ✓ 干净语料会被 `corpusProvenance` 拒绝 ⇒ **无法伪造 G2 绿** ✓ 工具形式 `node tools/g2-corpus.mjs --root .tmp --match 'nc-scan*'` 仍可用 ✓） |
+| G2 纸面 300/600 dpi 100%（200 seed） | 🟡 | **第 51 轮：300 dpi 侧 `200/200 = 100% 逐字节`**（`PASS G2 corpus: 200/200 byte-exact in 1085.4s` · `ALL GATES PASS` · exit 0 ⇒ **样本量已对齐 PLAN、判据未放宽** ✓ 门限自己打印 `criterion is 100%; PLAN asks for 200 fixed seeds, this run had 200`；判决里若干份带逐页提示如 `markers/no-hollow-corner [fiducial-out-of-frame] 2 of 4 corners` 而该份仍 `OK 204800 bytes, digest verified` ⇒ 冗余在起作用、不是失败 ✓）**；600 dpi 侧仍只有 seed 1–16** ⇒ **整体仍未通过**。而且**这 200/200 的前提不真实**：语料源页是"只有码区、没有纸张"的 PNG（`2260×3290@300dpi`，A4 应为 `2480×3508`；600 dpi 侧 `4530×6590` 且 manifest `sheetMm=null`）⇒ **`--sheet` 只对 PDF 生效 = D45 ✗** ⇒ 600 dpi 那 2 例"角标出画"很可能是**夹具没有纸边**造成的（角标紧贴图像边缘 ⇒ 任何姿态都出画）⇒ **第 49 轮"A4 在平板上带 0.x° 旋转是真实物理"那句归因已撤回** ✗（"不是解码器缺陷"不变 ✓ 3 点 6 方程 < 单应 8 自由度 ⇒ 拒绝正确 ✓）⇒ **顺序**：(a) 修栅格路径认 `--sheet` → (b) 用修好的渲染器重出两侧源页（同一载荷 `.tmp/payload.bin`、sha256 `91ab3f7310da452b` ⇒ 与历史语料可直接对比）→ (c) 两侧各跑 seed 1..200 ⇒ **只有 (c) 的结果才配写"达标/不达标"**（详见 `ACCEPTANCE.md` G2 段末）✓ **因为 (a) 未做，本轮刻意没有起那个约 85 分钟/2.5 小时的批**——用同一前提再测一遍是白花机器时间 ✗ 历史口径（`30/32 = 93.8%`、"A=600 dpi 页内 ECC 余量薄 · B=整页读出崩塌根因未定"）**已被后来的像素级定界取代** ⇒ 保留只为追溯，别当现状读 ✗ | `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'nc-scan*'`（**第 37 轮起是门限** ✓ 直接 import `tools/g2-corpus.mjs` ⇒ 门限与工具不会漂移 ✓ 干净语料会被 `corpusProvenance` 拒绝 ⇒ **无法伪造 G2 绿** ✓ 工具形式 `node tools/g2-corpus.mjs --root .tmp --match 'nc-scan*'` 仍可用 ✓） |
 | G3 缺页/乱序/重复 | ✅ | 图像层乱序仅在协议层覆盖（等价于喂入序 ✓） | `verify --gate G3` + `tools/g2-corpus.mjs`（单页存活 6/6 ✓） |
 | G4 手机压力档 ≥99% | ⬜ | **500×8 一次未跑 ⇒ 零证据** ✓（分类侧 `advice.js` 已就绪 ✓） | 未做 |
 | G5 误接受 0 | ✅ | — | `verify --gate G5 --trials 10000`（9200 纠正 / 800 拒 / **0 误接受** ✓ 变异两项 ✓） |
@@ -118,6 +118,19 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 51 轮（**G2 300 dpi 侧 200/200 通过 ⇒ 同轮却查出这个 200/200 的前提不真实：`--sheet` 只对 PDF 生效 = D45**）
+
+- **G2 判决（第 49 轮起的后台批跑完）**：`PASS G2 corpus: 200/200 byte-exact in 1085.4s` · `ALL GATES PASS` · `GATE exit=0`；生成 **200/200 exit 0、0 失败**（`.tmp/nc-scan300-{1..200}`，200 KB 载荷 ⇒ 每份 3 页 ⇒ 共 600 页盲解）；判决 **judged=200 ok=200 fail=0** ⇒ **样本量从判据的 1/6（29 seeds）补到 200、判据一个字没改**（门限自己打印 `criterion is 100%; PLAN asks for 200 fixed seeds, this run had 200` ✓）
+- **但同轮把它的前提查穿了（本轮最重要的事）**：语料源页 `.tmp/g2src` 的 PNG = **2260×3290 px @300dpi = 191.35×278.55 mm ⇒ 只有码区、没有纸张**（A4@300dpi 应为 **2480×3508**）；600 dpi 侧 `.tmp/sw-scan600-src` = **4530×6590**、manifest `sheetMm=null`（A4@600dpi 应为 **4960×7016**）⇒ 用**同一个载荷**（`.tmp/payload.bin` 仍在盘上、sha256 `91ab3f7310da452b` 与旧 manifest 记的一致 ✓）跑 `pskit send .tmp/payload.bin --profile P-M1-300 --sheet A4 --format png` ⇒ **exit 0、输出仍 `render 2260x3290px @ 300dpi`** ⇒ **`--sheet` 只作用于 PDF 路径、栅格路径不认** ⇒ 记 **D45**（第 48 轮 D44 只修了 PDF 那一半 ✗）
+- **⇒ 撤回我第 49 轮的一个归因**：600 dpi 那 2 例"角标出画"很可能是**夹具没有纸边**（角标紧贴图像边缘 ⇒ 任何姿态/透视都会出画），而**不是**"A4 在平板上带 0.x° 旋转的真实物理" ✗ 已在 `ACCEPTANCE.md` 就地更正；**"不是解码器缺陷"这个结论不变** ✓（3 点只给 6 个方程、单应有 8 个自由度 ⇒ 拒绝在数学上正确）
+- **⇒ 因此刻意没有起那个批**：栅格未修时"重出源页"仍是同一形状（`.tmp/g2src-sheet` 与 `.tmp/g2src` **实测同形** ✓）⇒ 跑 200 seeds（300 dpi 约 1 h、600 dpi 约 2.5 h）只是**用同一前提再测一遍、白花机器时间** ✗ 正确顺序 **(a) 修栅格认 `--sheet` → (b) 重出两侧源页 → (c) 两侧各跑 seed 1..200**，**只有 (c) 的结果才配写"达标/不达标"**（已同步写进 `ACCEPTANCE.md` G2 段末、D45、D42 与门限表 L32）
+- **冒烟升级到"手机路径不需要 Python"**：第 7 步的 `python -m http.server` 换成 `tools/serve.mjs`（**显式传端口** ⇒ 不触发走位 ⇒ 保证随后两个 check 打的是同一个端口 ✓）并插入 `check-serve` ⇒ 实测 **exit 0 / 289 s / 11 项全 PASS**：`pskit send` 纸面（png + 真尺寸 pdf）、信道仿真、`pskit receive --photo`、**字节相同**（`sha256 32ec4805… vs 32ec4805…`）、码牌 3mf/stl + G8、两条客户端冒烟、`check-serve`、`check-lan`；收尾打印 `server pid 30112 stopped, nothing left listening on 8123` ⇒ **无泄漏** ✓
+- **本轮我三个错，全由执行抓到（不是读出来的）**：① 又**按记忆引 `old_string`**（`ACCEPTANCE.md` 那段结尾真实是 `✗ 这一点必须写明…`、我写成 `⇒ …` ⇒ edit 报 not found ⇒ grep 原文后重来）② **`pskit send --in` 不是它的旗标**（真实用法是**位置参数** ⇒ 报错 `pskit send: send: no such file: …\send` ⇒ 抄 `usability.ps1` L117 的已知好用形式才对）③ 读批处理日志踩了 AGENTS 已记那条坑的**变种**：`*>>` 把 node 的判决输出追加成 **UTF-16LE**，而文件头是 UTF-8 BOM ⇒ **混编** ⇒ `Get-Content` 逐字符插 NUL（看起来像"每个字符后面多一个空格"）⇒ 用 node 直读 + 剥 `\u0000` 才看清（AGENTS 那行只写了"`>` 写 UTF-16LE"、没写**混编后的表现** ⇒ 本轮记下 ✓）
+- 另记一次**假设被否证**（第 50 轮的尾巴、本轮才查到底）：8131 绑不上 ⇒ 猜"Windows 排除端口段"被 `netsh` 否证（只有 `5357/27339/50000-50059`）、猜"我泄漏了服务"被 PID 全消失否证 ⇒ 真因是 `netstat` 原文那行 `192.168.100.104:8131 → 142.250.157.188:443 ESTABLISHED` = **出站连接占着本地端口** ⇒ 已做成产品行为（走位 + 双成因文案 + 单测 ✓）
+- 证据：G2 判决原文在 `.tmp/g2-300-batch.log`（用 node 剥 NUL 读 ✓）· 冒烟在 `.tmp/smoke51.log`（11 PASS / `SMOKE_EXIT=0`）· 源页尺寸由 **PNG IHDR 实测**（字节 16..23 大端）· `pskit send --sheet A4 --format png` 实测 exit 0 而形状未变 · 全量套件（见提交前实测）· 本轮只改 `docs/` 与 `tools/usability.ps1` ⇒ `core/`、`web/dist` 未动、不需重建 ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**修 D45**——让栅格路径认 `--sheet`（与 PDF **共用同一套居中/标记算术** ⇒ 抽成共享函数，否则两边会各自漂移 ✗）+ 单测（含"**不传 sheet 时逐字节不变**"的回归保护，因为 `web/sender.js` 与 CLI 的 PNG 输出都被现有测试盯着 ✓）→ 重出两侧源页 → 起 (c) 的 200 seeds × 两侧（后台分批）→ D43 的 https 半（**等用户**）→ G4/G6/G9/G10 的用户验收清单已在 `docs/USE.md` §5 ✓
+
 
 ### 第 50 轮（**手机路径不再需要 Python、也不需要用户自己找 IP**：`tools/serve.mjs` + `tools/check-serve.mjs`，并把一个 Windows 端口陷阱做成了产品行为）
 

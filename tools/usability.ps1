@@ -21,11 +21,16 @@
     6. client data paths   tools/smoke-sender.mjs (the web sender's real buildArtifacts path,
                            decoded blind) and tools/smoke-capture.mjs (burst-capture decisions
                            over real page bitmaps)
-    7. the phone's half    serve web/dist with python -m http.server (Start-Process, hidden,
-                           stopped by pid in a finally block) and run tools/check-lan.mjs against
-                           it: every service-worker precache entry fetched over http and hashed
-                           with core/hash.js against the build manifest, no external URL in any
-                           served page, and the thin pages' module graph resolving
+    7. the phone's half    serve web/dist with tools/serve.mjs (Node only -- Python is no longer
+                           needed for the phone path; started hidden on an explicit port, stopped
+                           by pid in a finally block) and run tools/check-serve.mjs then
+                           tools/check-lan.mjs against it: first the server's own behaviour (the
+                           page it serves is byte-identical to disk, four shapes of directory
+                           traversal refused, a missing file is a 404 and not a fallback to the
+                           index, HEAD works, the manifest's MIME is right, responses are
+                           no-store), then every service-worker precache entry fetched over http
+                           and hashed with core/hash.js against the build manifest, no external
+                           URL in any served page, and the thin pages' module graph resolving
 
   What this does NOT prove, and never claims to: real ink on real paper, a real phone camera,
   a real browser's print scaling (DEFECTS D8), PWA installation (needs https, not a LAN http
@@ -179,26 +184,45 @@ $null = Step 'tools/smoke-capture.mjs (burst-capture decisions)' {
   node tools/smoke-capture.mjs
 } (Join-Path $tmp 'step6b.log')
 
-# 7. The phone's half: what a client on this LAN would actually be served. Start-Process is
-#    verified in this sandbox (round 44: started hidden, checked, stopped by pid, zero leftovers).
+# 7. The phone's half: what a client on this LAN would actually be served -- served by the same
+#    Node-only server the manual tells the user to run (tools/serve.mjs), so this smoke covers the
+#    phone path without Python being installed. Start-Process is verified in this sandbox (round
+#    44: started hidden, checked, stopped by pid, zero leftovers).
+#    The port is passed explicitly on purpose: that makes serve.mjs refuse to bind rather than walk
+#    to the next free port, and a smoke must test the port it then checks -- a silent move would
+#    leave the two checks below hitting nothing at all.
 #    try/finally is not decoration -- a smoke that leaks a listening server is worse than one that
-#    fails, and the leftover check is by pid, not by counting python processes, because counting
-#    would blame this script for something else the user has running.
+#    fails, and the leftover check is by pid, not by counting node processes, because counting
+#    would blame this script for the node processes this harness itself runs.
+#    This does briefly expose web/dist on every interface, which is exactly what a phone needs;
+#    pass -SkipServe if that is unwanted.
 if (-not $SkipServe) {
   if (-not (Test-Path 'web\dist\index.html')) {
     $script:fails++
     Write-Host ' FAIL  web/dist does not exist: run `node tools/build-web.mjs` first (docs/USE.md section 0)'
   } else {
     $proc = $null
+    $serveOut = Join-Path $tmp 'step7-serve.out.log'
+    $serveErr = Join-Path $tmp 'step7-serve.err.log'
     try {
-      $proc = Start-Process python -ArgumentList '-m', 'http.server', "$ServePort", '--directory', 'web/dist' -WindowStyle Hidden -PassThru -ErrorAction Stop
+      $proc = Start-Process node -ArgumentList 'tools/serve.mjs', '--port', "$ServePort" -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru -RedirectStandardOutput $serveOut -RedirectStandardError $serveErr -ErrorAction Stop
       Start-Sleep -Seconds 3
+      # The banner is evidence in itself: these are the URLs a phone on this LAN would open.
+      # Read as UTF-8 -- node writes UTF-8 while Windows PowerShell 5.1 defaults to ANSI, and the
+      # mismatch turns the interface name into mojibake (round 50: my reading error, not a bug).
+      Get-Content $serveOut -Encoding UTF8 -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host ('          ' + ([string]$_).TrimEnd()) }
+      $null = Step "tools/check-serve.mjs against http://127.0.0.1:$ServePort (server behaviour: byte identity, traversal refused, 404, HEAD, MIME)" {
+        node tools/check-serve.mjs --port $ServePort
+      } (Join-Path $tmp 'step7a.log')
       $null = Step "tools/check-lan.mjs against http://127.0.0.1:$ServePort (the phone's view of web/dist)" {
         node tools/check-lan.mjs --port $ServePort
       } (Join-Path $tmp 'step7.log')
     } catch {
       $script:fails++
       Write-Host (' FAIL  could not serve web/dist for the LAN check: ' + ([string]$_.Exception.Message))
+      # Say what the server itself reported: a bind failure has two causes on Windows and only one
+      # of them is visible in a LISTENING filter (round 50, port 8131 held by an outbound socket).
+      Get-Content $serveErr -Encoding UTF8 -ErrorAction SilentlyContinue | Select-Object -First 6 | ForEach-Object { Write-Host ('          serve.mjs said: ' + ([string]$_).TrimEnd()) }
     } finally {
       if ($proc) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
