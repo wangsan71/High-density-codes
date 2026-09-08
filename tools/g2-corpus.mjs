@@ -231,8 +231,14 @@ export async function runCorpus(dir, mod) {
   const names = readdirSync(dir).filter((n) => /\.png$/i.test(n)).sort();
   const asm = new mod.protocol.TransferAssembler({ passphrase: manifest.passphraseHint || undefined });
   const opts = { allowFastPath: !mod.photo, requireFastPath: false, log: null };
+  // The gate has to measure the product, not a cousin of it: the same arbitrated feed that
+  // cli/pskit.mjs and web/app.js use (docs/DEFECTS.md D51). If this call site kept calling asm.feed
+  // directly, G2 would keep reporting the old readout while users got the new one, and the criterion
+  // would drift away from the thing it is supposed to judge.
+  const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
   const failures = [];
   const pageClasses = [];
+  let rescued = 0;
   for (const name of names) {
     let bitmap;
     try {
@@ -252,7 +258,15 @@ export async function runCorpus(dir, mod) {
       (pageClasses ||= []).push(cls ? cls.kind : `decoder/${r.reason}`);
       continue;
     }
-    const fed = await asm.feed({ levels: r.levels, header: r.headerBytes, channelMissing: r.colourAlive ? [] : ['colour'] });
+    const resc = await feedPageWithRecalibration(asm, r, { geom });
+    const fed = resc.fed;
+    if (resc.retried && fed.ok) {
+      // Recorded rather than hidden. A rescued page still had to pass intra-page RS, and the corpus
+      // still has to pass the frame CRC and the payload SHA-256 digest below, so this cannot
+      // manufacture a byte-exact result -- it can only stop throwing away pages that were readable.
+      rescued++;
+      pageClasses.push('assemble/intra-fail-rescued-by-recalibration');
+    }
     if (!fed.ok && !fed.duplicate) {
       failures.push(`${name}: assemble/${fed.reason}`);
       // The assemble stage fails for its own reasons (intra/inter RS budget exceeded),
@@ -270,17 +284,20 @@ export async function runCorpus(dir, mod) {
       reason: p.noSession ? 'no-page-header' : `short ${p.dataHave ?? '?'}/${p.dataNeed ?? '?'}`,
       failures,
       pageClasses,
+      rescued,
     };
   }
   const got = mod.hash.sha256Hex(asm.result);
   const want = manifest.sourceSha256;
   const bytes = asm.result.length;
-  if (!want) return { dir: basename(dir), ok: false, bytes, reason: 'manifest has no sourceSha256 to verify against', failures, pageClasses };
+  if (!want) return { dir: basename(dir), ok: false, bytes, reason: 'manifest has no sourceSha256 to verify against', failures, pageClasses, rescued };
   if (want !== got) {
-    // The one outcome that must never be reported as anything but a hard failure.
-    return { dir: basename(dir), ok: false, bytes, reason: `DIGEST MISMATCH got ${got.slice(0, 16)} want ${want.slice(0, 16)}`, failures, pageClasses };
+    // The one outcome that must never be reported as anything but a hard failure. `rescued` travels
+    // with it so that a mismatch can be attributed: if a recalibrated re-read ever contributed to a
+    // wrong payload, this is the line that says so.
+    return { dir: basename(dir), ok: false, bytes, reason: `DIGEST MISMATCH got ${got.slice(0, 16)} want ${want.slice(0, 16)}`, failures, pageClasses, rescued };
   }
-  return { dir: basename(dir), ok: true, bytes, sha: got, failures, pageClasses };
+  return { dir: basename(dir), ok: true, bytes, sha: got, failures, pageClasses, rescued };
 }
 
 // Imported by cli/pskit.mjs for `verify --gate G2`, so the executable half is guarded: the

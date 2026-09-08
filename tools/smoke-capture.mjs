@@ -59,9 +59,18 @@ step(
 
 /* ---- 1. real pages through the real receiver path ---- */
 const asm = new TransferAssembler({});
+// The phone path's arbitrated feed needs the geometry bootstrap recovered for THIS frame, and inside
+// one addFrame decode always runs before feed, so stashing it is exact rather than clever. This smoke
+// must exercise the same feed the product uses, or it would keep vouching for a path nobody ships.
+const { feedPageWithRecalibration } = await imp('core/decode/recalibrate.js');
+let geomSheet = null;
 const collector = createBurstCollector({
-  decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }),
-  feed: (page) => asm.feed({ levels: page.levels, header: page.headerBytes, channelMissing: page.colourAlive ? [] : ['colour'] }),
+  decode: async (bmp) => {
+    const b = await bootstrapDecode(bmp, { maxAttempts: 24 });
+    if (b.ok) geomSheet = b.geom;
+    return b;
+  },
+  feed: (page) => feedPageWithRecalibration(asm, page, { geom: geomSheet }).then((r) => r.fed),
 });
 const seen = [];
 let evt;
@@ -82,9 +91,14 @@ step('a repeated page is a duplicate, not progress', !again.accepted && again.ki
 /* ---- 2b. the bare code area must still decode: a user may scan or crop just that ---- */
 {
   const asmCode = new TransferAssembler({});
+  let geomCode = null;
   const cCode = createBurstCollector({
-    decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }),
-    feed: (page) => asmCode.feed({ levels: page.levels, header: page.headerBytes, channelMissing: page.colourAlive ? [] : ['colour'] }),
+    decode: async (bmp) => {
+      const b = await bootstrapDecode(bmp, { maxAttempts: 24 });
+      if (b.ok) geomCode = b.geom;
+      return b;
+    },
+    feed: (page) => feedPageWithRecalibration(asmCode, page, { geom: geomCode }).then((r) => r.fed),
   });
   const kinds = [];
   for (const b of code) {

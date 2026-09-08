@@ -232,7 +232,9 @@ export function nominalBandFraction() {
 
 /**
  * Read every cell of a rendered page.
- * @returns {{levels:Uint16Array, quality:Float32Array, cells:object[], colourAlive:boolean}}
+ * @returns {{levels:Uint16Array, quality:Float32Array, cells:object[], colourAlive:boolean,
+ *   rho:Float32Array, colourLevels:Uint8Array, ratioNulls:number, nanCells:number,
+ *   shapeCounts:number[], shapeMonoFrac:number, inkBalance:object}}
  */
 export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   const pal = getPalette(palette);
@@ -248,6 +250,22 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   const quality = new Float32Array(geom.totalCells);
   const cells = [];
   const inks = [];
+  // Per-cell measurements kept in compact form so that core/decode/recalibrate.js can re-decide the
+  // shape level against a cut estimated from THIS page, without re-running analyseCell and without
+  // inventing a colour for the cells it re-decides. Float32Array + Uint8Array is ~1.4 MB at 600 dpi,
+  // against the ~260 MB the `cells` objects cost -- which is why these arrays leave this function and
+  // `cells` does not (page.js passes them through to decodePage's result).
+  const rhoArr = new Float32Array(geom.totalCells);
+  const colourArr = new Uint8Array(geom.totalCells);
+  let nanCells = 0;
+  // Two decision-independent counts, added because the two statistics this function already reported
+  // cannot see a collapse (measured in round 62, DEFECTS D52): `ratioDisagreements` only counts cells
+  // where BOTH paths spoke, so a collapsed page scores 0 while healthy pages score tens of thousands;
+  // and `inkBalance.ratio` divides by the targets of the levels the readout itself chose, so collapsed
+  // pages score LOWEST. `ratioNulls` and `shapeMonoFrac` do not depend on any decision: on a collapsed
+  // page the shape histogram is a single spike, and that is visible from the outside.
+  let ratioNulls = 0;
+  const shapeCounts = new Array(shapeChannel.levels).fill(0);
   // Ink balance: does the total coverage the readout claims match the total coverage
   // the image actually shows? A collapsed readout (one symbol everywhere, or the
   // complement of the truth) keeps a plausible per-cell look but fails this in
@@ -268,7 +286,13 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
       const i = r * geom.cols + c;
       const a = analyseCell(bitmap, layout, c, r);
       cells.push(a);
-      let shapeLevel = Number.isFinite(a.rho) ? levelFromRho(a.rho, thresholds) : null;
+      rhoArr[i] = Number.isFinite(a.rho) ? a.rho : NaN;
+      if (!Number.isFinite(a.rho)) nanCells++;
+      // The ratio decision is kept separate from the final one because the two are compared below,
+      // and because "the ratio path could not decide" is a fact worth counting on its own.
+      const ratioLevel = Number.isFinite(a.rho) ? levelFromRho(a.rho, thresholds) : null;
+      if (ratioLevel === null) ratioNulls++;
+      let shapeLevel = ratioLevel;
       if (templates && a.alphaMap) {
         const mf = matchedShapeLevel(a.alphaMap, templates, layout.cellPx);
         if (!mf.blank && mf.level !== null) {
@@ -284,25 +308,39 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
       } else {
         quality[i] = shapeLevel === null ? 0 : Math.min(1, a.alphaMax);
       }
+      // The colour decision is made for EVERY cell, including one whose shape level is
+      // untrustworthy, because a recalibrated re-read has to supply a colour for each cell it
+      // re-decides and must not invent one. `inks` -- the colour-alive evidence -- keeps its old,
+      // narrower scope on purpose: widening it would change `colourAlive`, which is a decision
+      // rather than a report, and this change is required to leave every decision untouched.
+      let colourLevel = 0;
+      if (colourChannel) colourLevel = nearestInk(a.ink, pal);
+      colourArr[i] = colourLevel;
       if (shapeLevel === null) {
+        shapeCounts[0]++;
         quality[i] = 0;
         levels[i] = 0;
         continue;
       }
+      shapeCounts[shapeLevel]++;
       // Coverage the cell shows vs coverage the chosen level claims.
       //
       // NOT usable as a per-cell defect detector, and here is the measured reason: the
       // level-0 target is exactly 0 (measureTargets returns [0.000, 0.370] for a
       // two-level alphabet), and a relative error against a zero target has no meaning
       // -- every legitimate padding cell counts as a "misfit", so misfitFrac merely
-      // reproduces the fraction of level-0 cells (0.9057 vs 0.9057 measured). Kept
-      // because it is cheap and because the aggregate below is a real quantity:
-      // rhoSum/targetSum came out 1.0651-1.0660 on pristine renders and 3.6-21.7 on
-      // channel pages at 600 dpi, i.e. it measures optical BLEED (blur sigma is fixed in
-      // mm, so it is twice as wide in cells at 600 dpi as at 300 dpi -- which matches
-      // p50 16.0 at 600 dpi against p50 4.5 at 300 dpi). Bleed is what pushes a padding
-      // cell's rho past the fixed mid-point boundary and makes a whole page read as
-      // level 1, so this number is a diagnostic of the mechanism, not a gate.
+      // reproduces the fraction of level-0 cells (0.9057 vs 0.9057 measured).
+      //
+      // The aggregate below is a real quantity but is NOT comparable across pages, and round 62
+      // measured why (DEFECTS D52): rhoSum/targetSum divides by the target of the level this
+      // readout CHOSE, so it is confounded by its own decision -- collapsed pages scored the
+      // LOWEST (2.71-3.52) while healthy pages scored 11.57-20.70 and pristine renders
+      // 1.0197-1.0657 (which matches the 1.0651-1.0660 measured in round 21). Bleed really is the
+      // mechanism -- blur sigma is fixed in mm, so it is twice as wide in cells at 600 dpi as at
+      // 300 dpi, and rho rises 4-20x once a channel touches the page -- but this ratio cannot tell
+      // you WHICH page collapsed. Use `inkBalance.rhoMedian` (decision-independent, monotone in
+      // bleed: 0.0021 pristine -> 0.59 on a 300 dpi capture -> 0.62 on a healthy 600 dpi page ->
+      // 1.27 on a collapsed one) and `shapeMonoFrac` (1.0 on a collapsed page) instead.
       if (Number.isFinite(a.rho) && targets.length > shapeLevel) {
         const tgt = targets[shapeLevel];
         rhoSum += a.rho;
@@ -311,11 +349,7 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
         const rel = Math.abs(a.rho - tgt) / (tgt > 1e-6 ? tgt : 1e-6);
         if (rel > 0.5) misfit++;
       }
-      let colourLevel = 0;
-      if (colourChannel) {
-        colourLevel = nearestInk(a.ink, pal);
-        inks.push(colourLevel);
-      }
+      if (colourChannel) inks.push(colourLevel);
       levels[i] = joinCellLevels({ shape: shapeLevel, colour: colourLevel }, geom);
     }
   }
@@ -336,6 +370,14 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
     const distinct = new Set(inks).size;
     colourAlive = pal.inks.length > 1 && distinct > 1;
   }
+  // Decision-independent bleed statistic: the median measured rho over the cells that could be
+  // measured at all. Unlike `inkBalance.ratio` it does not depend on which level the readout chose,
+  // so it IS comparable across pages. A typed-array sort puts NaN last, so the median of the finite
+  // values sits at index finiteCells >> 1.
+  const sortedRho = Float32Array.from(rhoArr).sort();
+  const finiteCells = geom.totalCells - nanCells;
+  const rhoMedian = finiteCells > 0 ? sortedRho[finiteCells >> 1] : NaN;
+  const shapeMonoFrac = geom.totalCells ? Math.max(...shapeCounts) / geom.totalCells : NaN;
   return {
     levels,
     quality,
@@ -347,8 +389,19 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
     colourChannel,
     matchedFilter: !!templates,
     ratioDisagreements: disagreed,
+    // Compact per-cell measurements, kept for the recalibrated re-read in core/decode/recalibrate.js
+    // (see the comment where they are filled). page.js passes both through to decodePage's result.
+    rho: rhoArr,
+    colourLevels: colourArr,
+    // Collapse diagnostics that depend on no decision (DEFECTS D52). Reported, never enforced: a cut
+    // on either would need the healthy population's spread measured first (round 20's lesson).
+    ratioNulls,
+    nanCells,
+    shapeCounts,
+    shapeMonoFrac,
     // Aggregate ink balance. Reported, not enforced -- the healthy population's spread
-    // has to be measured before any cut on it can be trusted (round 20's lesson).
+    // has to be measured before any cut on it can be trusted (round 20's lesson), and `ratio`
+    // in particular is confounded by the readout's own choice of level (see the long comment above).
     inkBalance: {
       cells: inkCells,
       rhoSum,
@@ -356,6 +409,7 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
       ratio: targetSum > 1e-9 ? rhoSum / targetSum : NaN,
       misfit,
       misfitFrac: inkCells ? misfit / inkCells : NaN,
+      rhoMedian,
     },
   };
 }

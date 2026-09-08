@@ -108,6 +108,19 @@ const ADVICE = {
     cause: 'this page belongs to a different transfer (session id) than the pages already collected, so mixing them would reconstruct the wrong file',
     do: 'separate the printouts: one scan should contain the pages of one transfer only, or re-scan each transfer on its own',
   },
+  // ---- the recalibrated re-read seam (core/decode/recalibrate.js) -----------
+  // Neither of these is a page fault: they say why a page its own code rejected could not be offered
+  // a second read. Both mean the caller wired the seam wrongly, so the advice points at the wiring --
+  // telling the user to re-scan here would send them to the wrong work, which is exactly the failure
+  // this table exists to prevent.
+  'no-geometry': {
+    cause: 'the re-read needs the page geometry recovered for this frame and the caller did not pass it, so the rejected page could not be re-decided',
+    do: 'wiring: pass { geom } to feedPageWithRecalibration (bootstrapDecode returns it as boot.geom); the printout is not at fault',
+  },
+  'no-rho': {
+    cause: 'the decode result carried no per-cell rho measurements, so there was nothing to calibrate a second read on',
+    do: 'wiring: hand the helper a real decodePage result (it now carries rho and colourLevels); a hand-built page object does not',
+  },
   // ---- error-correction internals that reach the user ---------------------
   // These come out of core/rs.js and the frame length checks. They are reachable
   // through the same `REJECTED page N (reason)` line, so they need the same quality

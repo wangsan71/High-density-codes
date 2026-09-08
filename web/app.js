@@ -11,6 +11,9 @@
 import { decodePNG } from './core/decode/png-read.js';
 import { bootstrapDecode } from './core/decode/bootstrap.js';
 import { TransferAssembler } from './core/protocol.js';
+// 页码被本页自己的码拒绝时，用「按本页实测标定的 ρ 切点」重读一次；重读同样只有过了
+// 页内 RS + 帧 CRC + 摘要才被接受（docs/DEFECTS.md D51）。这是接收端与 CLI、G2 门限共用的同一段逻辑。
+import { feedPageWithRecalibration } from './core/decode/recalibrate.js';
 import { sha256Hex } from './core/hash.js';
 import { PROFILE_IDS, PROFILES } from './core/profiles.js';
 import { advise } from './core/decode/advice.js';
@@ -78,9 +81,18 @@ async function run() {
     const h = boot.header;
     lastHeader = h;
     log(`  ${f.name}: ${boot.profileId}@${boot.dpi}dpi ${boot.paletteId} 第 ${h.pageIndex}/${h.totalPages - 1} 页（${h.kind ? '校验' : '数据'}）· 第 ${boot.attemptCount} 次命中 · ${Math.round(performance.now() - t0)}ms`);
-    const fed = await asm.feed({ levels: boot.page.levels, header: boot.page.headerBytes, channelMissing: boot.page.colourAlive ? [] : ['colour'] });
+    const resc = await feedPageWithRecalibration(asm, boot.page, { geom: boot.geom });
+    const fed = resc.fed;
     if (fed.duplicate) { log('      重复页（已去重）'); continue; }
-    if (!fed.ok) { log(`      装配拒绝：${fed.reason}`); continue; }
+    if (!fed.ok) {
+      log(`      装配拒绝：${fed.reason}`);
+      if (resc.retried) log(`      已按本页实测的 ρ 切点重读过一次（切点 ${resc.estimate?.cut?.toFixed(4)}、改了 ${resc.changed} 格），仍被本页的码拒绝（${resc.secondReason}）⇒ 不写盘`);
+      continue;
+    }
+    if (resc.retried) {
+      log(`      救回：匹配滤波的读法被页内码拒绝，改用按本页实测 ρ 标定的切点重读（切点 ${resc.estimate.cut.toFixed(4)}、两簇 ${resc.estimate.m0.toFixed(3)}/${resc.estimate.m1.toFixed(3)}、改了 ${resc.changed} 格）`);
+      log('      接受它的理由是页内 RS + 帧 CRC + 摘要都过了，不是那个切点本身');
+    }
     accepted++;
   }
   setStatus('核对摘要…');

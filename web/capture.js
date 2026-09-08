@@ -189,12 +189,22 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     const { bootstrapDecode } = await import('./core/decode/bootstrap.js');
     const { TransferAssembler } = await import('./core/protocol.js');
     const { sha256Hex } = await import('./core/hash.js');
+    // 手机连拍这条路也要能救回「被页内码拒绝」的页：与 app.js、CLI、G2 门限共用同一段仲裁逻辑
+    // （docs/DEFECTS.md D51）。少改这一处，手机端就仍是旧读法。
+    const { feedPageWithRecalibration } = await import('./core/decode/recalibrate.js');
     const asm = new TransferAssembler({});
+    // 重读需要「这一帧认出来的几何」。addFrame 内部总是先 decode 再 feed、且逐帧 await，
+    // 所以暂存本帧几何是精确的，不是取巧。
+    let frameGeom = null;
     const collector = createBurstCollector({
-      decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }),
+      decode: async (bmp) => {
+        const b = await bootstrapDecode(bmp, { maxAttempts: 24 });
+        if (b.ok) frameGeom = b.geom;
+        return b;
+      },
       // The assembler lives here, not in app.js: a burst session must not depend on the
       // receiver page's internals (an earlier draft imported a module that does not exist).
-      feed: (page) => asm.feed({ levels: page.levels, header: page.headerBytes, channelMissing: page.colourAlive ? [] : ['colour'] }),
+      feed: (page) => feedPageWithRecalibration(asm, page, { geom: frameGeom }).then((r) => r.fed),
     });
 
     let running = true;

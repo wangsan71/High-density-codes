@@ -451,6 +451,7 @@ async function cmdReceive(args) {
   const { decodePNG } = await import('../core/decode/png-read.js');
   const { decodePage } = await import('../core/decode/page.js');
   const { advise } = await import('../core/decode/advice.js');
+  const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
   const dir = resolve(args._[0] || '.');
   const stat = statSync(dir);
   const names = stat.isDirectory()
@@ -513,11 +514,24 @@ async function cmdReceive(args) {
       console.log(`      do:    ${a.do}`);
       continue;
     }
-    const fed = await asm.feed({
-      levels: r.levels,
-      header: r.headerBytes,
-      channelMissing: r.colourAlive ? [] : ['colour'],
-    });
+    // Arbitrated feed, shared with web/app.js and the G2 harness: the matched-filter read goes first
+    // and a recalibrated re-read is offered only after the page's own code rejected it. A page that
+    // decodes today is read bit-identically today, because the retry never runs (DEFECTS D51).
+    const resc = await feedPageWithRecalibration(asm, r, { geom, log: null });
+    const fed = resc.fed;
+    if (resc.retried) {
+      const e = resc.estimate || {};
+      // The note names its own file and page. This line prints BEFORE the page's own status line, so
+      // without the name it reads as a comment on the previous page -- a misreading that is not
+      // hypothetical: it fooled me while writing this round's ledger, and a user must not have to
+      // guess which page was rescued. Ambiguous success output is how wrong conclusions get recorded.
+      console.log(
+        `      ${name} (page ${r.header?.pageIndex ?? '?'}): ${fed.ok ? 'RESCUED' : 're-read also rejected'}` +
+          ` -- shape levels re-decided against a cut measured on this page` +
+          ` (cut ${e.cut?.toFixed(4)}, clusters ${e.m0?.toFixed(3)}/${e.m1?.toFixed(3)}, separation ${e.separation?.toFixed(2)}${e.unimodal ? ', UNIMODAL' : ''},` +
+          ` ${resc.changed} cells changed)${fed.ok ? '; accepted because the page code accepted it, not because of the cut' : ` (${resc.secondReason})`}`,
+      );
+    }
     const idx = r.header ? r.header.pageIndex : undefined;
     if (!fed.ok && !fed.duplicate) {
       const a = advise({ stage: 'assemble', reason: fed.reason });
@@ -888,6 +902,84 @@ async function gateG5(args) {
   ok &&= crcFired;
   console.log(`  ${crcFired ? 'PASS' : 'FAIL'} trial mix exercises the frame CRC/magic guards (mutation check on the suite itself)`);
 
+  // ---- the recalibrated re-read seam must not be able to manufacture bytes ----
+  // Added in round 63 together with the seam itself (DEFECTS D51). The tamper mix above feeds
+  // asm.feed directly, so on its own it says nothing about the new acceptance path: a page whose
+  // read the page code rejects is now offered a second read against a cut measured on that page.
+  // These trials give that second read every chance to do harm -- rho is made consistent with a
+  // THIRD reading, neither the damaged one nor the true one, so a re-read trusted on its own authority
+  // would hand the assembler a page that is self-consistent and wrong. Acceptance still has to come
+  // from the page's own RS, then the frame CRC, then the payload digest, so the only pass is "exact
+  // original bytes or a refusal".
+  //
+  // It runs on P-M1-300 rather than this gate's PL-M1 because two-level paper is where the collapse
+  // was measured and where a single cut means anything; shapeLevelsOf is asserted so that if the
+  // alphabet ever grows past two levels this block fails loudly instead of quietly testing nothing.
+  {
+    const { feedPageWithRecalibration, shapeLevelsOf } = await import('../core/decode/recalibrate.js');
+    const seamPid = 'P-M1-300';
+    const seamGeom = mod.profiles.planPage(seamPid);
+    if (shapeLevelsOf(seamGeom) !== 2) throw new Error(`G5 seam trials assume a two-level shape alphabet, ${seamPid} has ${shapeLevelsOf(seamGeom)}`);
+    // Incompressible, or DEFLATE shrinks it to one page and the victim page never decides anything
+    // (the same trap the foreign-page case below documents).
+    const seamPayload = new Uint8Array(seamGeom.ecc.netBytesPerPage * 3);
+    let y = 630063 >>> 0;
+    for (let i = 0; i < seamPayload.length; i++) {
+      y ^= y << 13; y >>>= 0; y ^= y >>> 17; y ^= y << 5; y >>>= 0;
+      seamPayload[i] = y & 255;
+    }
+    const seamBase = await encodeTransfer(seamPayload, { profile: seamPid });
+    const seamClone = (p) => ({ levels: p.levels.slice(), header: p.header.slice() });
+    const seamTrials = 2000;
+    let seamFalse = 0;
+    let seamRecovered = 0;
+    let seamRefused = 0;
+    let seamRetried = 0;
+    for (let k = 0; k < seamTrials; k++) {
+      const pages = seamBase.pages.map(seamClone);
+      const victimIdx = (rnd() * pages.length) | 0;
+      const victim = pages[victimIdx];
+      const truth = seamBase.pages[victimIdx].levels;
+      // Heavy damage: 20-80% of the page rewritten, the mode that actually reaches intra-fail.
+      const n = Math.floor(victim.levels.length * (0.2 + rnd() * 0.6));
+      for (let i = 0; i < n; i++) victim.levels[(rnd() * victim.levels.length) | 0] = (rnd() * (1 << seamGeom.bitsPerCell)) | 0;
+      // rho consistent with a third reading: the truth with a further random subset of shape bits
+      // flipped, so the re-read is neither a repair nor a copy of the damage.
+      const rho = new Float32Array(victim.levels.length);
+      const colourLevels = new Uint8Array(victim.levels.length);
+      for (let i = 0; i < victim.levels.length; i++) {
+        const truthShape = mod.protocol.splitCellLevel(truth[i], seamGeom).shape;
+        const third = rnd() < 0.35 ? truthShape ^ 1 : truthShape;
+        rho[i] = (third ? 1.68 : 1.27) + rnd() * 0.02;
+        colourLevels[i] = mod.protocol.splitCellLevel(victim.levels[i], seamGeom).colour | 0;
+      }
+      const asm2 = new TransferAssembler();
+      for (let pi = 0; pi < pages.length; pi++) {
+        const p = pages[pi];
+        const decoded =
+          pi === victimIdx
+            ? { levels: p.levels, headerBytes: p.header, colourAlive: true, rho, colourLevels }
+            : { levels: p.levels, headerBytes: p.header, colourAlive: true };
+        const res = await feedPageWithRecalibration(asm2, decoded, { geom: seamGeom });
+        if (res.retried) seamRetried++;
+      }
+      if (asm2.result) {
+        const same = asm2.result.length === seamPayload.length && asm2.result.every((v, i) => v === seamPayload[i]);
+        if (same) seamRecovered++;
+        else seamFalse++;
+      } else {
+        seamRefused++;
+      }
+    }
+    // Anti-vacuity: if the seam never fired, this block proved nothing and must not print PASS.
+    const seamOk = seamFalse === 0 && seamRetried > 0;
+    ok &&= seamOk;
+    console.log(
+      `  ${seamOk ? 'PASS' : 'FAIL'} ${seamTrials} recalibrated-seam trials on ${seamPid}: ${seamRecovered} recovered exactly, ${seamRefused} refused, ${seamFalse} FALSE ACCEPTS` +
+        ` (re-read offered ${seamRetried} times; rho described a third reading, so the seam had every chance to invent bytes)`,
+    );
+  }
+
   // ---- the digest is load-bearing: structurally perfect foreign page -------
   // The transfer must be *short* one data page before the forgery arrives, or the
   // assembly completes from the honest pages alone and the forged page never
@@ -1198,6 +1290,7 @@ async function cmdCalibrate(args) {
   const { decodePNG } = await import('../core/decode/png-read.js');
   const { decodePage } = await import('../core/decode/page.js');
   const { advise } = await import('../core/decode/advice.js');
+  const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
   const { inkness } = await import('../core/decode/fiducial.js');
   const { expectedInkArea, integratedInkArea } = await import('../core/decode/calibrate.js');
 
@@ -1264,11 +1357,24 @@ async function cmdCalibrate(args) {
       rows.push({ name, stage: r.stage, reason: r.reason, ms });
       continue;
     }
-    const fed = await asm.feed({
-      levels: r.levels,
-      header: r.headerBytes,
-      channelMissing: r.colourAlive ? [] : ['colour'],
-    });
+    // Arbitrated feed, shared with web/app.js and the G2 harness: the matched-filter read goes first
+    // and a recalibrated re-read is offered only after the page's own code rejected it. A page that
+    // decodes today is read bit-identically today, because the retry never runs (DEFECTS D51).
+    const resc = await feedPageWithRecalibration(asm, r, { geom, log: null });
+    const fed = resc.fed;
+    if (resc.retried) {
+      const e = resc.estimate || {};
+      // The note names its own file and page. This line prints BEFORE the page's own status line, so
+      // without the name it reads as a comment on the previous page -- a misreading that is not
+      // hypothetical: it fooled me while writing this round's ledger, and a user must not have to
+      // guess which page was rescued. Ambiguous success output is how wrong conclusions get recorded.
+      console.log(
+        `      ${name} (page ${r.header?.pageIndex ?? '?'}): ${fed.ok ? 'RESCUED' : 're-read also rejected'}` +
+          ` -- shape levels re-decided against a cut measured on this page` +
+          ` (cut ${e.cut?.toFixed(4)}, clusters ${e.m0?.toFixed(3)}/${e.m1?.toFixed(3)}, separation ${e.separation?.toFixed(2)}${e.unimodal ? ', UNIMODAL' : ''},` +
+          ` ${resc.changed} cells changed)${fed.ok ? '; accepted because the page code accepted it, not because of the cut' : ` (${resc.secondReason})`}`,
+      );
+    }
     const h = r.header || {};
     const ink = integratedInkArea(inkness(bitmap));
     const ratio = ink.ok && exp.ok ? ink.fraction / exp.expectedFraction : NaN;

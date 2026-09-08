@@ -78,6 +78,15 @@ function readFast(bitmap, geom, layout, paletteId) {
     inkBalance: read.inkBalance,
     ratioDisagreements: read.ratioDisagreements,
     matchedFilter: read.matchedFilter,
+    // Per-cell rho and the colour decision, so a caller can re-decide the shape level against a cut
+    // estimated from THIS page (core/decode/recalibrate.js) without re-running the readout. The two
+    // collapse diagnostics ride along because they are the only reported numbers that do not depend
+    // on a decision (DEFECTS D52: `inkBalance.ratio` is confounded by the chosen level and
+    // `ratioDisagreements` is blind to a collapse, scoring 0 exactly when the page collapsed).
+    rho: read.rho,
+    colourLevels: read.colourLevels,
+    ratioNulls: read.ratioNulls,
+    shapeMonoFrac: read.shapeMonoFrac,
   };
 }
 
