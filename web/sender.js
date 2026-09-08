@@ -41,6 +41,28 @@ import { PAGE_KIND } from '../core/frame.js';
 export const isPlate = (id) => !!PROFILES[id] && PROFILES[id].medium === 'plate';
 
 /**
+ * G2 measured the paper side at 300 dpi as 200/200 byte-exact, and at 600 dpi as 162/200 with only
+ * 43% of pages read directly (docs/DEFECTS.md D49, docs/ACCEPTANCE.md G2 section). The picker below
+ * is built from *every* profile in core/profiles.js, so without a label a user can pick the
+ * unqualified one and lose a file about one time in five -- and nothing warns them until the
+ * receiver names the missing pages.
+ *
+ * The profile is deliberately NOT hidden: hiding it would quietly remove a capability, and today's
+ * measurement may be superseded (calibration is unimplemented, so a capability gap cannot even be
+ * ruled out). When the 600 dpi side passes G2, delete this predicate and the label suffix; the guard
+ * test `tests/unit/profile-picker-warning.test.mjs` pins both to the ledger so they cannot rot.
+ */
+export const isUnqualifiedPaper = (p) => !!p && p.medium !== 'plate' && (p.dpi || 0) >= 600;
+
+/**
+ * The dropdown label. Measured numbers stay in the ledger rather than in this string, so the UI
+ * cannot go stale the way a hardcoded ratio would (the same rule the CLI manifest note follows).
+ */
+export const profileOptionLabel = (id, p) =>
+  `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}` +
+  (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '');
+
+/**
  * Ported verbatim from cli/pskit.mjs pickPalette (a page cannot import from cli/, and a
  * diverged copy would mean the web sender and the CLI sender produce different ink for the
  * same profile -- so keep this in sync if that function ever changes).
@@ -214,7 +236,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   for (const [id, p] of Object.entries(PROFILES)) {
     const o = document.createElement('option');
     o.value = id;
-    o.textContent = `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}`;
+    o.textContent = profileOptionLabel(id, p);
     sel.appendChild(o);
   }
   sel.value = 'P-M1-300';

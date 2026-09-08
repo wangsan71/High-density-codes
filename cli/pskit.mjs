@@ -332,6 +332,35 @@ async function cmdSend(args) {
   }
   const t2 = performance.now();
 
+  // The note travels with the artefacts, so it must describe the artefacts that were actually written.
+  // It used to tell paper users to "verify the plate fits" and quoted the code area as though it were
+  // the sheet (DEFECTS D46), and it said nothing about the 600 dpi paper profiles that the G2 gate
+  // measured below its 100% criterion (D49). `layout.sheetMm` is `{w,h}` in mm and is null for plate
+  // profiles; note that `renderPageBitmap` hands back the same fact as an ARRAY `[w,h]` -- do not mix
+  // the two shapes here (getting it wrong prints "NaN x NaN mm" into the user's manifest).
+  const codeAreaMm = layout.physicalMm.wMm.toFixed(1) + 'x' + layout.physicalMm.hMm.toFixed(1) + 'mm';
+  const dpi600Warning =
+    dpi >= 600
+      ? ' WARNING: 600 dpi paper profiles are NOT qualified -- the G2 gate measured this side below its 100% criterion (docs/DEFECTS.md D49); prefer a 300 dpi paper profile unless you need this one.'
+      : '';
+  const note = layout.sheetMm
+    ? 'Print at 100% scale (no "fit to page"). Sheet ' +
+      layout.sheetMm.w.toFixed(1) +
+      'x' +
+      layout.sheetMm.h.toFixed(1) +
+      'mm carries the ' +
+      codeAreaMm +
+      ' code area centred, with crop marks and registration crosses in the margin; scan colour at ' +
+      dpi +
+      ' dpi with auto-crop OFF.' +
+      dpi600Warning
+    : modelReports.length
+      ? 'Print at 100% scale (no "fit to page"). Verify the plate fits: ' + codeAreaMm
+      : 'Print at 100% scale (no "fit to page"). No sheet was requested, so these images carry only the ' +
+        codeAreaMm +
+        ' code area: the printer decides where it lands and there are no crop marks. Pass --sheet A4 for a printable sheet.' +
+        dpi600Warning;
+
   const manifest = {
     tool: 'pskit',
     version: 1,
@@ -366,13 +395,30 @@ async function cmdSend(args) {
     files,
     ...(modelReports.length ? { model: modelReports } : {}),
     timingsMs: { encode: Math.round(t1 - t0), render: Math.round(t2 - t1) },
-    note: 'Print at 100% scale (no "fit to page"). Verify the plate fits: ' + layout.physicalMm.wMm.toFixed(1) + 'x' + layout.physicalMm.hMm.toFixed(1) + 'mm',
+    note,
   };
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   console.log(
     `  wrote      ${t.pages.length} page(s) (${t.dataPages} data + ${t.pages.length - t.dataPages} parity) as ${files.length} file(s) + manifest.json in ${outDir}`,
   );
-  console.log(`  render     ${(layout.width)}x${layout.height}px @ ${dpi}dpi, printed area ${(inkSum * 100).toFixed(1)}%`);
+  // Report the artefact the user actually received, not only the code area: with a sheet chosen the
+  // PNG/TIFF on disk IS the sheet (D45), so quoting just `layout.width x layout.height` tells the user
+  // a size that does not match the file they are about to print -- the same class of lie as the
+  // manifest note that D46 fixed (recorded as D50).
+  const sheetPx = layout.sheetMm
+    ? [Math.round((layout.sheetMm.w / 25.4) * dpi), Math.round((layout.sheetMm.h / 25.4) * dpi)]
+    : null;
+  console.log(
+    `  render     ${(layout.width)}x${layout.height}px code area${sheetPx ? ` on a ${sheetPx[0]}x${sheetPx[1]}px sheet (${layout.sheetMm.w}x${layout.sheetMm.h}mm)` : ''} @ ${dpi}dpi, printed area ${(inkSum * 100).toFixed(1)}%`,
+  );
+  if (!modelReports.length && dpi >= 600) {
+    // D49: the 600 dpi paper side of G2 measured below criterion, so say it where the user is looking
+    // (stdout), not only inside manifest.json. The measured numbers live in the ledger, not here, so
+    // this string cannot go stale the way a hardcoded ratio would.
+    console.log(
+      '  warning    600 dpi paper profile: the G2 gate measured this side BELOW its 100% criterion (docs/DEFECTS.md D49) -- prefer a 300 dpi paper profile unless you need this one',
+    );
+  }
   for (const r of modelReports) {
     const bbox = r.bboxMm.map((v) => v.toFixed(3)).join(' x ');
     console.log(`  ${r.kind.padEnd(9)} ${r.file}: ${r.triangles} tris, bbox ${bbox} mm, ${r.bytes} B, sha256 ${r.sha256}`);
