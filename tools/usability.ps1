@@ -21,6 +21,11 @@
     6. client data paths   tools/smoke-sender.mjs (the web sender's real buildArtifacts path,
                            decoded blind) and tools/smoke-capture.mjs (burst-capture decisions
                            over real page bitmaps)
+    7. the phone's half    serve web/dist with python -m http.server (Start-Process, hidden,
+                           stopped by pid in a finally block) and run tools/check-lan.mjs against
+                           it: every service-worker precache entry fetched over http and hashed
+                           with core/hash.js against the build manifest, no external URL in any
+                           served page, and the thin pages' module graph resolving
 
   What this does NOT prove, and never claims to: real ink on real paper, a real phone camera,
   a real browser's print scaling (DEFECTS D8), PWA installation (needs https, not a LAN http
@@ -28,9 +33,12 @@
   G10 (nozzle matrix). Those are listed in docs/STATUS.md with the steps a user can run.
 
 .EXAMPLE
-  . .\tools\usability.ps1                       # scan300, seed 7, 200 KiB payload
-  . .\tools\usability.ps1 -Preset phone40       # the camera preset instead of the scanner
-  . .\tools\usability.ps1 -Skip3D               # paper only, faster
+  & .\tools\usability.ps1                       # everything: paper, 3D, client paths, LAN serve
+  & .\tools\usability.ps1 -Preset phone40       # the camera preset instead of the scanner
+  & .\tools\usability.ps1 -Skip3D               # paper only, faster
+  & .\tools\usability.ps1 -SkipServe            # no local http server (-ServePort N moves it)
+  # Call it with &, never by dot-sourcing: the script ends in `exit`, and dot-sourcing would take
+  # the calling shell down with it (AGENTS.md trap table). The earlier examples here were wrong.
 #>
 param(
   [int]$Seed = 7,
@@ -38,8 +46,10 @@ param(
   [string]$Preset = 'scan300',
   [int]$Bytes = 204800,
   [int]$PlateBytes = 384,
+  [int]$ServePort = 8123,
   [switch]$Skip3D,
-  [switch]$SkipChannel
+  [switch]$SkipChannel,
+  [switch]$SkipServe
 )
 
 # 'Continue', not 'Stop': node and python both write progress to stderr, and with 'Stop' a
@@ -168,6 +178,43 @@ $null = Step 'tools/smoke-sender.mjs (web sender path, decoded blind)' {
 $null = Step 'tools/smoke-capture.mjs (burst-capture decisions)' {
   node tools/smoke-capture.mjs
 } (Join-Path $tmp 'step6b.log')
+
+# 7. The phone's half: what a client on this LAN would actually be served. Start-Process is
+#    verified in this sandbox (round 44: started hidden, checked, stopped by pid, zero leftovers).
+#    try/finally is not decoration -- a smoke that leaks a listening server is worse than one that
+#    fails, and the leftover check is by pid, not by counting python processes, because counting
+#    would blame this script for something else the user has running.
+if (-not $SkipServe) {
+  if (-not (Test-Path 'web\dist\index.html')) {
+    $script:fails++
+    Write-Host ' FAIL  web/dist does not exist: run `node tools/build-web.mjs` first (docs/USE.md section 0)'
+  } else {
+    $proc = $null
+    try {
+      $proc = Start-Process python -ArgumentList '-m', 'http.server', "$ServePort", '--directory', 'web/dist' -WindowStyle Hidden -PassThru -ErrorAction Stop
+      Start-Sleep -Seconds 3
+      $null = Step "tools/check-lan.mjs against http://127.0.0.1:$ServePort (the phone's view of web/dist)" {
+        node tools/check-lan.mjs --port $ServePort
+      } (Join-Path $tmp 'step7.log')
+    } catch {
+      $script:fails++
+      Write-Host (' FAIL  could not serve web/dist for the LAN check: ' + ([string]$_.Exception.Message))
+    } finally {
+      if ($proc) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) {
+          $script:fails++
+          Write-Host (" FAIL  the smoke leaked its own server process (pid {0})" -f $proc.Id)
+        } else {
+          Write-Host ("          server pid {0} stopped, nothing left listening on {1}" -f $proc.Id, $ServePort)
+        }
+      }
+    }
+  }
+} else {
+  Write-Host ' SKIP  LAN serving check (-SkipServe)'
+}
 
 $script:t0.Stop()
 Write-Host ''

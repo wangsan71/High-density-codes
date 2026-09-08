@@ -119,6 +119,16 @@
 
 ## 已知风险 / 待办
 
+### 第 45 轮（"一条命令"名副其实了：端到端冒烟**接上了手机端的服务面**，10 步全 PASS）
+
+- **`tools/usability.ps1` 加第 7 步**：`Start-Process python -m http.server <port> --directory web/dist`（隐藏启动）→ `tools/check-lan.mjs --port <port>` → `finally` 里**按 pid** `Stop-Process` 并断言"自己起的那个进程确实没了"⇒ 实测 **10 步全 PASS / exit 0 / 286 s** ✓ 收尾打印 `server pid 36120 stopped, nothing left listening on 8123` ✓ 默认开着（`-SkipServe` 可关、`-ServePort` 可移）
+- **刻意的设计取舍（都写进脚本注释，不是随手写的）**：① 残留检查**按 pid**、**不数 python 进程**——数数会把用户自己在跑的东西算到脚本头上，制造假失败 ✗ ② `try/finally` 不是装饰：**漏一个还在监听的服务，比冒烟失败更糟** ③ `web/dist` 不存在时**直接 FAIL 并给可操作指引**（`node tools/build-web.mjs`，指向 `docs/USE.md` §0）⇒ 刚 clone 的人不会被一句光秃秃的 FAIL 糊弄 ④ **修了我自己头注释里的错例子**：原先写 `. .\tools\usability.ps1`（点源）⇒ 脚本以 `exit` 结尾，点源会把调用它的 shell 一起带走 ✗ 改成 `& .\...` 并写明原因（AGENTS 陷阱表里那条正是上一轮踩出来的 ✓）
+- **防"跑了个空还报 PASS"**：第 7 步计时显示 `0s`（本地回环 51 个小文件确实快 ✓），但**不看计时看日志**——`step7.log` 里必须有 `51 entries` 与逐条 PASS 才算真跑过 ⇒ 提交前把这一行打出来核对 ✓（这正是本仓库反复吃亏的那类假绿：**什么都没做的步骤也会 exit 0** ✗）
+- 脚本收尾自己就如实打印**它没证明什么**：真墨真纸、真手机摄像头、浏览器打印缩放（D8）、PWA 安装（需 https）、G4/G6/G9/G10 ⇒ 并指向 `docs/USE.md` 的用户验收清单 ✓
+- 证据：`& .\tools\usability.ps1` ⇒ **exit 0 / 10 PASS / 286 s**：`send` 3 页 + 800 KB 真实尺寸 PDF → `sim/channel.py` 15 s → `receive --photo` 4 s → **sha256 `32ec4805…` 收发一致** → 板材 `PL-D2@0.4` 写出 4×(`.3mf`+`.stl`) → `verify --gate G8 --file` 5 s → `smoke-sender` 193 s → `smoke-capture` 40 s → `check-lan` ✓ 无残留进程 ✓ · 单测 **277/277** ✓ 本轮只改 `tools/`（`core/` 与 `web/dist` 未动 ⇒ 不需重建 ✓）· **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：客户端缺陷 **D12**（advice scanner 对注释盲）/ **D5** 残余站点链接 / **D8** 打印缩放中可自动化的部分 → G2 补到 200 seeds（分批 ≤600 s）→ D43 剩下的 https 半（**等用户**：仓库 URL + 凭据 + `pages.yml`）
+
+
 ### 第 44 轮（**D43 的图标阻塞真修掉了**——修在构建器里、零依赖，并加了构建期强制断言）
 
 - **修复**：`tools/build-web.mjs` 的图标块里加**盒式降采样 + 亮度阈值**，产出 `icon-192.png`(1279 B)、`icon-512.png`(6093 B)、`icon-maskable-512.png`(6084 B)；`manifest.webmanifest` 的 `icons` 现在是 192/512(`any`) + 512(`maskable`) + 原 `icon-page.png`(3290×3290, 283808 B，保留给想要更大图的启动器)。**先平均再阈值**是必要的：6× 缩小时单纯平均会把码页糊成灰泥，阈值化才保住角上的基准块与格子纹理 ✓ **maskable 画在 80% 安全区内**：自适应启动器从中间裁圆/裁方角，裁掉的正好是基准块——这张图里唯一有意义的部分 ✓ **没有新建 `make-icons.mjs`**（原计划）⇒ 因为构建器里本来就有一块"用 `renderPageBitmap`+`encodePNG` 画真页图当图标"的代码（D13 的方形补丁 ⇒ `3290x3290` 正是它来的）⇒ 在那里加降采样更省、且仍然是**本项目自己的编码器画的**（零依赖 ✓ 构建不可能声称一张它画不出的图 ✓）
