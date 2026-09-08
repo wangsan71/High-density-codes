@@ -36,7 +36,16 @@ ipconfig        # 看 IPv4 地址，例如 192.168.1.23
 手机连**同一个 Wi-Fi**，浏览器打开：`http://192.168.1.23:8000/index.html`（把 IP 换成你的）
 自检：`http://192.168.1.23:8000/index.html?selftest=1`
 
-**如实说明（别期待错）**：PWA 的"添加到主屏幕/离线安装"要求 **https 或 localhost**，局域网 http 源会被浏览器拒绝 ⇒ 代码里也照实处理了（`pskt-file.html` 只在 `secure` 时才注册 `sw.js`）⇒ **手机上能用，但装不成离线 PWA**。要真装需要 https 托管：`.github/workflows/pages.yml` 还没写（见 `docs/STATUS.md`），而且 GitHub 推送本身还等你的仓库地址与凭据。
+**如实说明（别期待错）**：PWA 的"添加到主屏幕/离线安装"要求 **https 或 localhost**，局域网 http 源会被浏览器拒绝 ⇒ 代码里也照实处理了（`pskt-file.html` 只在 `secure` 时才注册 `sw.js`）⇒ **手机上能用，但装不成离线 PWA**。要真装需要 https 托管：`.github/workflows/pages.yml` 还没写（见 `docs/STATUS.md`），而且 GitHub 推送本身还等你的仓库地址与凭据。**第二个安装阻塞**：manifest 里唯一的图标是 `icon-page.png`、尺寸写的是 `3290x3290`（整页渲染被当图标用 ✗），而安装性要求 **192×192 与 512×512** ⇒ 记在 `docs/DEFECTS.md` **D43**，修法要动构建（`tools/build-web.mjs`）而不是手改 dist。
+
+**不用手机也能先验一遍"服务端这半是真的"**（本轮实测 exit 0）：
+
+```powershell
+python -m http.server 8123 --directory web/dist     # 一个终端
+node tools/check-lan.mjs --port 8123                # 另一个终端
+```
+
+它做的是浏览器会做的事：把 SW 预缓存清单里**每一条**资源 fetch 下来、用我们自己的 `core/hash.js` 比对 sha256（**48/48 一致** ⇒ `cache.add()` 无从失败 ✓）；扫 4 个页面有没有**外部 URL**（`src=`/`href=`/`fetch()`/`import()`，只豁免 `xmlns` 命名空间串 ⇒ 气隙契约在 http 源上同样成立 ✓）；确认瘦页的模块图能解析、manifest 的 `start_url` 可取；并**报告** CSP meta 是否存在（实测 4 页都有 ✓）。它**不能**证明 SW 注册、安装提示、摄像头权限——那要真浏览器（G9 / D18），而且它会把上面两个安装阻塞**打印出来但不计入通过与否**（报出来 ≠ 通过 ✓）。
 
 发送端在手机上也能开（`.../pskt-send-file.html`），但小屏拖拽体验差 ⇒ 建议**电脑发送、手机接收**。
 

@@ -29,6 +29,12 @@
 | ~~D19~~ | `build-web` 的闭包写循环未跳过 `web/capture.js` ⇒ precache 清单里 `./capture.js` 出现两次 | 第 24 轮内即修（与 selftest/sender 同处加跳过 ✓ `node tools/build-web.mjs && node tools/check-dist.mjs` 仍 8/8） | CLOSED |
 | ~~D20~~ | `web/dist` 里 `capture.js` 的 DOM 半边引用的 id（`burst`/`video`/`burst-log`/`burstprog`/`burststop`）来自本轮新加的 section，**没有判据保证二者不脱钩**（改 HTML 忘改 JS ⇒ 静默失效，因入口是 `getElementById('burst')` 的守卫） | 删掉 section 后 `node tools/check-dist.mjs` 仍全绿 | 需要一个"页面引用的 id 必须存在于对应脚本守卫里"的检查，或至少 selftest 里加一条 DOM 契约 |
 
+### 第 43 轮新增（OPEN）
+
+| # | 缺陷 | 复验 | 状态 |
+|---|---|---|---|
+| D43 | **手机侧 PWA 装不上：两个各自独立的阻塞，本轮把第二个量出来了** ✗ ① 局域网 http 源**不是 secure context** ⇒ 浏览器拒绝注册 SW 与安装（代码照实处理：`pskt-file.html` 只在 `secure` 时 `navigator.serviceWorker.register('./sw.js')` ✓ 我在 dist 里读到那一行才敢这么写 ✓）⇒ 需 https 托管，而 `.github/workflows/pages.yml` 不存在、GitHub 推送还等用户的仓库与凭据 ② **`manifest.webmanifest` 只有一个图标 `./icon-page.png`、`sizes` 写着 `3290x3290`**——那是**整页渲染被拿来当图标** ✗ 安装性要求 **192×192 与 512×512** ⇒ 即使有了 https，这个 manifest 也过不了安装检查 | 本轮实测（新工具 `tools/check-lan.mjs`，**真起** `python -m http.server 8123 --directory web/dist` 后逐条 fetch）：**48/48** 条预缓存资源全部 200 且 **sha256 与构建清单一致**（用我们自己的 `core/hash.js` 算 ⇒ 浏览器 `cache.add()` 无从失败 ✓）· 4 个页面**无任何外部 http(s) 引用**（扫 `src=`/`href=`/`fetch()`/`import()`，只豁免 `xmlns` 命名空间串 ⇒ **气隙契约 ③ 在 http 源上同样成立** ✓）· 4 个页面**都带 CSP meta** ✓ · 瘦页模块图（`index.html`→`app.js`/`capture.js`/manifest；`send.html`→`sender.js`）在 http 上全部 200 ✓ · manifest 解析成功、`start_url ./index.html` 可取 ✓ ⇒ **exit 0**；两个安装阻塞被工具**打印但不计入 exit code**（那不是它声称要验的东西 ⇒ **报出来 ≠ 通过** ✓） | **OPEN ✗** 修法（**必须动构建，不能只手改 dist** ✗ dist 是生成物、且 SW 清单带哈希）：① 新增 `tools/make-icons.mjs`，用 `core/render/raster.js` + `png.js` 画 **192/512** 两个图标（深底 + 角上基准块 + 几个数据格 ⇒ 与产物同一套视觉语言、零依赖 ✓）② 改 `tools/build-web.mjs`：生成这两个文件、写进 `manifest.webmanifest` 的 `icons`（192/512，`purpose: any` 各一 + 一个 `maskable`）、并纳入 SW 预缓存清单 ③ **重建 `web/dist`** 并跑 `tools/check-dist.mjs`（12 条断言可加一条"icons 至少含 192 与 512"）④ 再跑 `node tools/check-lan.mjs --port 8123` 确认新资源被服务且哈希一致 ⑤ https 那半**只能等用户**（仓库 URL + 交互凭据 + `pages.yml`）⇒ 在它之前：**手机端可用、但装不成离线 PWA**，`docs/USE.md` 已如实写明 ✓ |
+
 ### 第 40 轮新增（OPEN）
 
 | # | 缺陷 | 复验 | 状态 |

@@ -119,6 +119,20 @@
 
 ## 已知风险 / 待办
 
+### 第 43 轮（把"手机路径的服务端半"从**文档里这么说**变成**实测**；顺带量出 PWA 的第二个安装阻塞）
+
+- **交付 `tools/check-lan.mjs`**：真起 `python -m http.server 8123 --directory web/dist`（后台作业，用完 `job_kill`，不留游离服务 ✓），然后做**浏览器会做的事** ⇒ 实测 **exit 0**：
+  - SW 预缓存清单 **48/48** 条逐条 fetch，并用**我们自己的 `core/hash.js`** 比对 sha256 ⇒ 全一致（`sw.js` 的 install 对每条做 `cache.add(new Request(url))`，**任一 404 就装不上** ⇒ 这条等价于"安装不会失败在取资源上"✓）；`tools/check-dist.mjs` 查的是"清单 ⇄ 磁盘"，本工具查的是"清单 ⇄ **服务器真交出来的字节**"，两半互补 ✓
+  - **4 个页面无任何外部 http(s) 引用**（扫 `src=`/`href=`/`fetch()`/`import()`，只豁免 `xmlns` 命名空间串）⇒ **气隙契约 ③ 在 http 源上同样成立** ✓
+  - **4 个页面都带 CSP meta** ✓ ⇒ D18 里"待人工确认 CSP"的一半有答案了（meta 在 ✓ 浏览器如何执行仍需真机 ✗）；并如实注明 `python -m http.server` 不发 CSP 头，策略只可能来自 meta ✓
+  - 瘦页模块图在 http 上全部解析（`index.html`→`app.js`/`capture.js`/`manifest.webmanifest`；`send.html`→`sender.js`）✓ manifest 解析成功、`start_url ./index.html` 可取 ✓
+- **量出并记账 D43（OPEN）**：PWA 安装有**两个各自独立的阻塞**——① 局域网 http **不是 secure context** ⇒ 浏览器拒绝注册 SW 与安装（代码照实处理：只在 `secure` 时注册 ✓）⇒ 需 https 托管，等用户的仓库/凭据 + `pages.yml` ② **manifest 唯一图标是 `./icon-page.png`、`sizes` 写着 `3290x3290`**（**整页渲染被当图标用** ✗ 安装性要 192×192 与 512×512）⇒ 修法**必须动构建**（`tools/make-icons.mjs` 用 `core/render/raster.js`+`png.js` 画两个图标 → `tools/build-web.mjs` 写进 manifest 的 `icons` 并纳入 SW 清单 → **重建 `web/dist`** → `check-dist` 加断言 → `check-lan` 复验）；**手改 dist 是错的**（dist 是生成物、SW 清单带哈希 ⇒ 会与 `check-dist` 打架 ✗）
+- **工具的自我约束**（都是刻意写的）：两个安装阻塞**打印但不计入 exit code**——那不是它声称要验的东西 ⇒ **报出来 ≠ 通过** ✓；服务没起时**一次性说清怎么起并退出**，不刷 48 条失败噪声 ✓；`redirect:'manual'`、fetch 异常当结果不当崩溃 ✓；清单条数**从文件里读**、不写死（头注释里的"48"是实测值并注明"as built"✓）
+- 文档：`docs/USE.md` §2 增补"**不用手机也能先验服务端这半**"的两条命令与实测结论、以及 D43 的第二个阻塞 ✓ `tools/check-lan.mjs` 头注释写明"这条指令在写下这个文件之前只是散文"⇒ 现在不是了 ✓
+- 证据：`node tools/check-lan.mjs --port 8123` ⇒ **exit 0**（日志 `.tmp/lan1.txt` ✓）· `core/` 与 `web/dist` **未动** ⇒ 不需重建 ✓ 单测提交前重跑 ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**照 D43 的修法真把图标做出来**（这是"每轮必须修掉真正阻塞的东西、不是记账了事"的直接对象 ✓）→ 把 `check-lan` 接进 `usability.ps1`（需**先验** `Start-Process`/`Stop-Process` 能否在沙箱里起停 python ✗ 未验 ⇒ 在那之前**不在文档里承诺"一条命令"**）→ D12 / D5 残余 / D8 可自动化部分 → G2 补到 200 seeds（分批 ≤600 s）
+
+
 ### 第 42 轮（目标改为"**能跑起来并且可以用**" ⇒ 一条命令的端到端 usability 冒烟**跑通了** ✓）
 
 - **目标已改写并重新武装**：按用户口径（"能跑起来并且可以用，一直循环直到完成"）⇒ `update_goal edit`（objective 换成可验证的可用性定义；`max_goal_rounds` 40 → **80**——已用 40，上限必须大于它，否则改完仍是 blocked ✗）+ `resume`（原 `phase: blocked / round-limit`、`disarmed` ⇒ 现 **active / armed**，revision 12 ✓）
