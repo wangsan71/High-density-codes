@@ -131,4 +131,4 @@ node cli/pskit.mjs verify --gate all            # 进程内门限（会打印本
 - **一页都读不出**：先确认扫描没被"自动裁剪"、没被转成灰度（只有 `monoSafe` 的 profile 才保证单色可恢复 ✓）。
 - **缺页**：接收页会点名缺哪几页；补拍那几页即可。冗余比例由发送时的 `--parity` 决定。
 - **报 `digest mismatch`**：这是**设计行为**——宁可失败也绝不交出"看起来成功但是错"的数据（误接受为 0 是本项目的硬约束）。
-- **想自己验内核**：`node cli/pskit.mjs verify --gate all`（G0 单测 + G1/G3/G5/G7/G8 进程内），或接收页 `?selftest=1`。单测条数每轮都在长 ⇒ **别背数字**：第 52 轮实测 **296/296**、第 53 轮加了纸面斜拍 1 例后 `exit 0`（当轮我没抄下汇总数字 ⇒ 就不写没量过的数 ✗）⇒ 以 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` 自己打印的汇总为准，**只看 exit code 判定** ✓
+- **想自己验内核**：`node cli/pskit.mjs verify --gate all`（G0 单测 + G1/G3/G5/G7/G8 进程内），或接收页 `?selftest=1`。单测条数每轮都在长 ⇒ **别背数字**：**第 59 轮实测 `tests 297 · pass 297 · fail 0 · duration_ms 136148`（≈136 s）、`exit 0`**（第 52 轮是 296/296，第 53 轮加了"纸面斜拍"1 例 ⇒ 297；第 53 轮当轮没抄下汇总数字、那时就没写 ✗ 现在补上了 ✓）⇒ 以 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` 自己打印的汇总为准，**只看 exit code 判定** ✓

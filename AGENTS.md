@@ -26,6 +26,7 @@
 | `git show ... > f` 再读回，内容"查无此串" | PowerShell 重定向写的是 **UTF-16LE**（首字节 `255 254`）| **跨工具取文本一律 `node -e` 直读真文件**；要用 shell 落地就显式 `-Encoding utf8NoBOM` 并按同编码读回。判"某判据是不是空跑"之前**必做阳性对照**（拿已知命中的字符串测同一个正则）——第 32 轮就是这条差点让我把真判据误判成空跑 |
 | `node -e "...$1m:..."` 报 `Variable reference is not valid` | **PowerShell 双引号字符串先插值** ⇒ 内联 JS 里的正则替换 `$1`/`$2` 被当成 PS 变量 | 含 `$` 的内联脚本**落地成 `.mjs` 文件再跑**（本轮就这么绕过的）；另 `2>&1 \| ForEach-Object { $_.TrimEnd() }` 会在 ErrorRecord 上报 `MethodNotFound` ⇒ 改用 `{ [string]$_ }` |
 | 自己写的 `.ps1` 报 `#requires ... 5.1` 而整脚本拒跑；或 `node -e "..."` 里的双引号被吃掉变成语法错 | **本 harness 的 pwsh 工具实际跑在 Windows PowerShell 5.1**（第 42 轮实测，不是 pwsh 7）；5.1 还会嚼碎传给原生程序的参数里的内嵌双引号 | `.ps1` **不要写 `#Requires -Version 7`**（不是降级、是整脚本不跑 ✗）；复杂内联 JS **落地成 `.mjs` 文件**再跑；脚本里 `$ErrorActionPreference` 用 `'Continue'` 并**只按 exit code 判定**（`'Stop'` 会让 node/python 的 stderr 把脚本当场打死 ✗）；调用脚本用 `& .\x.ps1`（点源 `. .\x.ps1` 时脚本里的 `exit` 会连宿主一起退 ✗） |
+| 重定向测试输出后"取不到汇总数字"（`SUITE_EXIT=0`，但按 `^# ` 过滤一条也不中） | Node 24 的 test runner 在**非 TTY**（输出被重定向）时用 **spec** 报告器 ⇒ 汇总行以 `ℹ` 开头、**不是** TAP 的 `# `；而 `ℹ` 经 UTF-16LE → 剥 NUL 会变成 `9!` 这类残留 | 判"跑没跑"**只看 exit code**；要取数字就按内容过滤（`(tests\|pass\|fail\|duration_ms)\s+\d+`）或显式加 `--test-reporter=tap`（第 59 轮实测 `tests 297 · pass 297 · fail 0 · 136 s`） |
 
 ## 环境事实（探测过，别再探）
 
