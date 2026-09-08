@@ -19,11 +19,26 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * fine, because they add no contradiction. The check reads every table row in the file and
  * ignores prose mentions, since only a row claims a state.
  */
+/**
+ * Cells of a markdown table row, honouring the `\|` escape.
+ *
+ * Splitting on a bare '|' is wrong for this file: rows legitimately contain escaped pipes (a grep
+ * pattern such as `crop\|registration`, a flag list such as `A4\|Letter`), and a naive split slices
+ * such a row into extra cells, so a guard then reads the *state* and *reproduce* columns out of the
+ * wrong fragments. That is exactly what both guards below did until round 48: for the D44 row they
+ * happened to land on the right cells only because every escaped pipe in that row sits before them,
+ * which is the worst outcome -- a guard that is wrong and still green. Round 48 found this while
+ * inspecting that row by hand and first blamed the ledger; the ledger was fine and the inspection
+ * was not. Splitting on unescaped pipes only, then asserting the cell count, makes both the escape
+ * and a genuinely malformed row visible.
+ */
+const cellsOf = (line) => line.split(/(?<!\\)\|/).slice(1, -1).map((c) => c.trim());
+
 function rowsOf(md) {
   const out = [];
   md.split('\n').forEach((line, i) => {
     if (!line.startsWith('|')) return;
-    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    const cells = cellsOf(line);
     if (cells.length < 2) return;
     const m = /^~{0,2}(D\d+)~{0,2}$/.exec(cells[0]);
     if (!m) return; // header row, separator row, or a non-defect table
@@ -58,10 +73,35 @@ test('docs/DEFECTS.md keeps its rule lines and every row reproducible', () => {
   const bad = [];
   md.split('\n').forEach((line, i) => {
     if (!line.startsWith('|')) return;
-    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    const cells = cellsOf(line);
     if (cells.length < 4 || !/^~{0,2}D\d+~{0,2}$/.test(cells[0])) return;
     const repro = cells[cells.length - 2];
     if (!/[A-Za-z0-9]/.test(repro.replace(/^[—-]+$/, ''))) bad.push(`line ${i + 1} (${cells[0]}): no reproduce column content`);
   });
   assert.deepEqual(bad, [], `ledger rows without a reproduce entry:\n  ${bad.join('\n  ')}`);
+});
+
+test('the cell splitter honours an escaped pipe, so the guards above are not reading fragments', () => {
+  // Positive control first: if cellsOf were the old naive split, both of these would be wrong and
+  // every guard in this file would be judging the wrong columns while staying green.
+  assert.deepEqual(cellsOf('| D1 | a\\|b | c | d |'), ['D1', 'a\\|b', 'c', 'd'], 'an escaped pipe must stay inside its cell');
+  assert.deepEqual(cellsOf('| D1 | a|b | c | d |'), ['D1', 'a', 'b', 'c', 'd'], 'a bare pipe really does split, which is what the next test forbids in the ledger');
+  assert.deepEqual(cellsOf('| ~~D9~~ | x | y | CLOSED |'), ['~~D9~~', 'x', 'y', 'CLOSED'], 'a struck id and a state cell must survive intact');
+});
+
+test('every defect row has exactly the four columns the header declares', () => {
+  const md = readFileSync(join(ROOT, 'docs', 'DEFECTS.md'), 'utf8');
+  const bad = [];
+  let rows = 0;
+  md.split('\n').forEach((line, i) => {
+    if (!line.startsWith('|')) return;
+    const cells = cellsOf(line);
+    if (!/^~{0,2}D\d+~{0,2}$/.test(cells[0] || '')) return;
+    rows++;
+    if (cells.length !== 4) {
+      bad.push(`line ${i + 1} (${cells[0]}): ${cells.length} cells, expected 4 -- a bare '|' inside a cell splits the row and silently reparents the state and reproduce columns; write '\\|' instead`);
+    }
+  });
+  assert.ok(rows >= 20, `expected a populated ledger, found ${rows} defect rows -- this guard would otherwise pass on an empty file`);
+  assert.deepEqual(bad, [], `malformed ledger rows:\n  ${bad.join('\n  ')}`);
 });
