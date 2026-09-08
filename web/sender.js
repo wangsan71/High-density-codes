@@ -30,7 +30,7 @@ import { encodePNG } from '../core/render/png.js';
 import { encodePDFDocument } from '../core/render/pdf.js';
 import { buildPlateModel, projectionReport } from '../core/mesh/plate.js';
 import { encodeSTLSolid, stlSelfCheck } from '../core/mesh/stl.js';
-import { encode3MF, selfCheck3MF } from '../core/mesh/threeMF.js';
+import { encode3MF, selfCheck3MF, buildZip } from '../core/mesh/threeMF.js';
 import { sha256Hex } from '../core/hash.js';
 import { getPalette } from '../core/palette.js';
 // header.kind is a u8 (0 = data page, 1 = parity page), so the constant has to come from the
@@ -330,11 +330,33 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     w.focus();
     setTimeout(() => w.print(), 300);
     say('浏览器打印可能自行缩放：要精确物理尺寸请走 pack.pdf。', 'hint');
+    // This path writes every page into one new window as a data: URL image, so that window holds
+    // ~0.5 MB of base64 per page and the browser then decodes ~30 MB of raster per page at
+    // A4/300dpi. Round 66 measured this class of cost on the sending side (DEFECTS D56) and fixed
+    // pack.pdf's; window.print() has no lazy path, so past a handful of pages this is slow at best
+    // and unopenable at worst. It is not refused -- for a few pages it works, and it prints at the
+    // CSS-declared physical size -- but the user is told what it costs and where the artifact that
+    // does scale lives. Threshold 8 pages = roughly 240 MB of decoded rasters in one window.
+    if (state.pages.length > 8) {
+      say(`提醒：这一路把 ${state.pages.length} 页位图全部写进一个新窗口再解码（每页 base64 约 0.5 MB、解码后约 30 MB），页数多时会很慢甚至打不开。要印这么多页请用 pack.pdf：单文件、每页按真实物理尺寸放置。`, 'hint');
+    }
   });
-  $('dlpng').addEventListener('click', () => {
+  $('dlpng').addEventListener('click', async () => {
     if (!state) return say('先编码。', 'bad');
-    for (const p of state.pages) give(p.png, `${p.tag}.png`, 'image/png');
-    say(`${state.pages.length} 张 PNG 逐个下载（浏览器会问很多次：不打包，是为了零第三方依赖）。`);
+    // One zip, one download. This used to call give() once per page, i.e. N automatic downloads from
+    // a single click, and browsers block that after the first couple behind a "allow multiple
+    // downloads?" prompt -- so a 168-page transfer could land two files in the Downloads folder
+    // while the log below claimed "N 张 PNG 逐个下载". A claim this code cannot verify is exactly the
+    // silent partial success the project forbids: the user has no way to know 166 were dropped.
+    // The zip writer is our own (core/mesh/threeMF.js packs 3MF with it), so this adds no dependency,
+    // and entries are STORED rather than deflated because PNGs already are compressed. buildZip is
+    // imported statically at the top of this file, and please leave it there: tools/build-web.mjs
+    // refuses dynamic import() in web/*.js, and the first version of this handler used one -- the
+    // guard fired and the build went red, which is the guard working. (A lazy './core/...' specifier
+    // would also be wrong in the source tree, where the core modules live at ../core/.)
+    const zip = buildZip(state.pages.map((p) => ({ name: `${p.tag}.png`, data: p.png, method: 'store' })));
+    give(zip, `pskt-pages-${state.pages.length}.zip`, 'application/zip');
+    say(`${state.pages.length} 张 PNG 打成一个 zip（${zip.length.toLocaleString()} B）：一次下载，不必跟浏览器的批量下载拦截打交道。想逐张看就用上面的预览或 pack.pdf。`);
   });
   $('dlpdf').addEventListener('click', () => {
     if (!state) return say('先编码。', 'bad');

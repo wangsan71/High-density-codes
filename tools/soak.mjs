@@ -340,30 +340,58 @@ export async function runSoak(opts = {}) {
   const elapsedMin = (Date.now() - started) / 60000;
 
   const n = rss.length;
-  const head = Math.max(3, Math.round(n * 0.1));
+  // Window length is an instrument-resolution question, and round 67 measured the answer instead of
+  // guessing it. RSS in this process swings between 449.3 and 641.4 MB with GC around a FLAT median:
+  // per-minute medians over the 30.2 min post-fix run were 510.6 MB (3-8 min), 512.8 (8-20 min) and
+  // 515.5 (20-31 min), i.e. +0.95% across 28 minutes -- no leak, and no startup ramp either (the
+  // first three minutes were HIGHER, 581.9 MB, than the plateau). But a window of 10% of the samples
+  // is only ~3 minutes once a cycle takes 13 s, which is SHORTER THAN ONE SAWTOOTH SWING, so what it
+  // reported was whichever GC phase each window happened to land in: this same tool on this same code
+  // said +2.50% when a cycle took ~80 s (3 samples = 4 min) and +13.98% when a cycle took 13 s
+  // (14 samples = 3 min). The criterion is untouched at <=10%; the window became a quartile so each
+  // side averages ~7 minutes of sawtooth. Both statistics are computed, both are printed, and both go
+  // into the JSON, so the switch hides nothing and the old number stays comparable across runs.
+  const head = Math.max(8, Math.round(n * 0.25));
   const base = median(rss.slice(0, head));
   const fin = median(rss.slice(Math.max(0, n - head)));
   const growthPct = ((fin - base) / base) * 100;
+  const narrowHead = Math.max(3, Math.round(n * 0.1));
+  const narrowBase = median(rss.slice(0, narrowHead));
+  const narrowPct = ((median(rss.slice(Math.max(0, n - narrowHead))) - narrowBase) / narrowBase) * 100;
+  // Quartile medians: a leak is a monotone climb across these four numbers, GC noise is not. Printed
+  // so a human can see the shape rather than trust one endpoint difference.
+  const q = [0, 1, 2, 3].map((k) => median(rss.slice(Math.floor((n * k) / 4), Math.max(Math.floor((n * k) / 4) + 1, Math.floor((n * (k + 1)) / 4)))));
   const peak = n ? Math.max(...rss) : NaN;
+  const floor = n ? Math.min(...rss) : NaN;
   const mb = (v) => (v / 1048576).toFixed(1);
   const early = median(cycleMs.slice(0, Math.max(3, Math.round(cycleMs.length * 0.1))));
   const late = median(cycleMs.slice(Math.max(0, cycleMs.length - Math.max(3, Math.round(cycleMs.length * 0.1)))));
 
   say(`C. soak ran ${elapsedMin.toFixed(1)} min, ${cycles} cycles, ${pagesDecoded} pages decoded, ${trials} corruption trials`);
-  say(`   rss baseline ${mb(base)} MB (median of first ${head} samples) -> final ${mb(fin)} MB (median of last ${head}) = ${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(2)}%  ${growthPct <= RSS_BUDGET_PCT ? '<= budget' : 'OVER BUDGET'}; peak ${mb(peak)} MB; ${n} samples`);
+  say(`   rss baseline ${mb(base)} MB (median of first ${head} samples = first quartile) -> final ${mb(fin)} MB (median of last ${head}) = ${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(2)}%  ${growthPct <= RSS_BUDGET_PCT ? '<= budget' : 'OVER BUDGET'}; peak ${mb(peak)} MB, floor ${mb(floor)} MB; ${n} samples`);
+  say(`   rss quartile medians Q1..Q4 ${q.map(mb).join(' / ')} MB -- a leak climbs monotonically across these four, GC noise does not`);
+  say(`   (the pre-round-67 window, 10% of samples = ${narrowHead}, would report ${narrowPct >= 0 ? '+' : ''}${narrowPct.toFixed(2)}%; printed, not judged: with a ${mb(floor)}-${mb(peak)} MB sawtooth that window is shorter than one swing)`);
   say(`   cycle time median early ${early.toFixed(0)} ms -> late ${late.toFixed(0)} ms (reported, not judged: PLAN puts no bound on drift)`);
   say(`   false accepts ${falseAccepts}, digest mismatches / non-closing round trips ${mismatches}, thrown errors ${errors}, page refusals ${refusalsSeen} (refusals are correct behaviour, counted not judged), arbitrated re-reads offered ${rescued}`);
   if (firstErr.length) for (const e of firstErr) say(`   !! ${e}`);
 
   const rssOk = Number.isFinite(growthPct) && growthPct <= RSS_BUDGET_PCT;
   const cleanOk = falseAccepts === 0 && mismatches === 0 && errors === 0;
-  const minutesOk = elapsedMin >= Math.min(minutes, 30) * 0.98; // a 30 min soak must actually be 30 min
+  // 30 min is a FLOOR of the criterion, which --minutes may raise but never lower. This line used to
+  // read `elapsedMin >= Math.min(minutes, 30) * 0.98`, so a 72-second run printed
+  // `PASS G6: encode 196 ms <= 5000; ... 1.2 min >= 30 min` -- a green G6 from `--minutes 1`, and
+  // reachable from the documented gate command (`verify --gate G6 --minutes 1`). A gate that can be
+  // satisfied by running it for less time than the criterion names is the falsest output there is,
+  // and the comment that sat beside it ("a 30 min soak must actually be 30 min") already said the
+  // right thing; the code did not do it. Round 67's one-minute trial is what exposed both.
+  const MINUTES_REQUIRED = 30;
+  const minutesOk = elapsedMin >= MINUTES_REQUIRED * 0.98;
   const ok = encOk && decOk && rssOk && cleanOk && minutesOk;
 
   say('');
   say(`covers: encode 1MB, per-page decode timing (${decSource}), ${cycles} full desktop-path transfers, ${trials} corruption trials, ${n} RSS samples over ${elapsedMin.toFixed(1)} min`);
   say(`does NOT cover: the optical channel model in sim/channel.py (Python, not spawnable from Node here), real ink/paper, a real phone camera, browsers -- those are G2/G4/G9 evidence, not G6`);
-  say(`${ok ? 'PASS' : 'FAIL'} G6: encode ${encMs.toFixed(0)} ms ${encOk ? '<=' : '>'} ${ENCODE_BUDGET_MS}; worst decode ${decWorst.toFixed(0)} ms/page ${decWorst <= DECODE_BUDGET_MS ? '<=' : '>'} ${DECODE_BUDGET_MS}; rss ${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(2)}% ${rssOk ? '<=' : '>'} ${RSS_BUDGET_PCT}%; false accepts ${falseAccepts}; mismatches ${mismatches}; errors ${errors}; ${elapsedMin.toFixed(1)} min ${minutesOk ? '>=' : '<'} 30 min`);
+  say(`${ok ? 'PASS' : 'FAIL'} G6: encode ${encMs.toFixed(0)} ms ${encOk ? '<=' : '>'} ${ENCODE_BUDGET_MS}; worst decode ${decWorst.toFixed(0)} ms/page ${decWorst <= DECODE_BUDGET_MS ? '<=' : '>'} ${DECODE_BUDGET_MS}; rss ${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(2)}% ${rssOk ? '<=' : '>'} ${RSS_BUDGET_PCT}%; false accepts ${falseAccepts}; mismatches ${mismatches}; errors ${errors}; ${elapsedMin.toFixed(1)} min ${minutesOk ? '>=' : '<'} ${MINUTES_REQUIRED} min`);
   if (!ok && !minutesOk) say(`  note: the run was shorter than the criterion asks (${elapsedMin.toFixed(1)} min); a short run cannot pass G6, only fail it`);
 
   const result = {
@@ -371,7 +399,7 @@ export async function runSoak(opts = {}) {
     minutes: elapsedMin,
     encode: { bytes: oneMB, pages: bigPages, ms: encMs, budgetMs: ENCODE_BUDGET_MS, ok: encOk },
     decode: { pages: decPages, worstMs: decWorst, meanMs: decMean, source: decSource, budgetMs: DECODE_BUDGET_MS, ok: decOk },
-    soak: { cycles, pagesDecoded, trials, rssSamples: n, rssBaselineBytes: base, rssFinalBytes: fin, rssPeakBytes: peak, growthPct, budgetPct: RSS_BUDGET_PCT, ok: rssOk, cycleMsEarly: early, cycleMsLate: late },
+    soak: { cycles, pagesDecoded, trials, rssSamples: n, rssWindowSamples: head, rssBaselineBytes: base, rssFinalBytes: fin, rssPeakBytes: peak, rssFloorBytes: floor, rssQuartileMediansBytes: q, growthPct, narrowWindowSamples: narrowHead, narrowGrowthPct: narrowPct, budgetPct: RSS_BUDGET_PCT, ok: rssOk, cycleMsEarly: early, cycleMsLate: late },
     integrity: { falseAccepts, mismatches, errors, refusalsSeen, rescued, ok: cleanOk, firstErrors: firstErr },
     corpora: corpora.map((c) => c.dir),
   };
