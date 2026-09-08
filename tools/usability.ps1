@@ -1,0 +1,183 @@
+# Runs on Windows PowerShell 5.1 and on pwsh 7 alike -- do not add a #Requires line: the pwsh
+# tool in this harness executes under Windows PowerShell 5.1 (probed, round 42), and a
+# "#requires -Version 7" makes the script refuse to run at all rather than degrade.
+<#
+.SYNOPSIS
+  One command that proves PSKT actually runs and can be used: file -> printable pages ->
+  simulated print+scan -> the user-facing receive command -> the same bytes back.
+
+.DESCRIPTION
+  Every step here is a command a real user would type, not an in-process shortcut:
+
+    1. pskit send          the sender's own CLI, writing page PNGs and a true-size pack.pdf
+    2. sim/channel.py      the deterministic print+capture channel (Python), which is the
+                           only honest stand-in for a printer and a scanner on this machine
+    3. pskit receive       the receiver's own CLI, --photo, i.e. markers -> perspective ->
+                           read, with no manifest hints from step 1 beyond what the pages carry
+    4. SHA-256 compare     payload in vs payload out. This is the whole claim of the project:
+                           the bytes come back identical, or the run is a failure.
+    5. 3D side             pskit send --format 3mf,stl on a plate profile, then the Core 1.4
+                           subset checker on the files it wrote (gate G8 --file)
+    6. client data paths   tools/smoke-sender.mjs (the web sender's real buildArtifacts path,
+                           decoded blind) and tools/smoke-capture.mjs (burst-capture decisions
+                           over real page bitmaps)
+
+  What this does NOT prove, and never claims to: real ink on real paper, a real phone camera,
+  a real browser's print scaling (DEFECTS D8), PWA installation (needs https, not a LAN http
+  origin), or the gates that need hardware -- G4 (phone 500x8), G6 (soak), G9 (browser),
+  G10 (nozzle matrix). Those are listed in docs/STATUS.md with the steps a user can run.
+
+.EXAMPLE
+  . .\tools\usability.ps1                       # scan300, seed 7, 200 KiB payload
+  . .\tools\usability.ps1 -Preset phone40       # the camera preset instead of the scanner
+  . .\tools\usability.ps1 -Skip3D               # paper only, faster
+#>
+param(
+  [int]$Seed = 7,
+  [ValidateSet('identity', 'scan300', 'scan600', 'phone40', 'phone-hard', 'plate-matte', 'plate-glossy')]
+  [string]$Preset = 'scan300',
+  [int]$Bytes = 204800,
+  [int]$PlateBytes = 384,
+  [switch]$Skip3D,
+  [switch]$SkipChannel
+)
+
+# 'Continue', not 'Stop': node and python both write progress to stderr, and with 'Stop' a
+# NativeCommandError kills this script before it can look at the exit code. Every step here is
+# judged by its exit code, which is the only signal that cannot be faked by chatty output.
+$ErrorActionPreference = 'Continue'
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+$tmp = Join-Path $root '.tmp\usability'
+$payload = Join-Path $tmp 'payload.bin'
+$src = Join-Path $tmp 'pages-src'
+$scan = Join-Path $tmp 'pages-scan'
+$got = Join-Path $tmp 'received.bin'
+$plate = Join-Path $tmp 'plate'
+$platePayload = Join-Path $tmp 'plate-payload.bin'
+$script:fails = 0
+$script:t0 = [Diagnostics.Stopwatch]::StartNew()
+
+# Run a command, keep its output in a log, and judge it by its exit code -- never by grepping
+# for a word, which is how a run that printed nothing at all once looked like a pass.
+function Step {
+  param([string]$Label, [scriptblock]$Run, [string]$Log)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  & $Run *> $Log
+  $code = $LASTEXITCODE
+  $sw.Stop()
+  $ok = ($code -eq 0)
+  if (-not $ok) { $script:fails++ }
+  Write-Host ("{0}  {1}  ({2}s, exit {3})" -f ($(if ($ok) { ' PASS' } else { ' FAIL' })), $Label, [int]$sw.Elapsed.TotalSeconds, $code)
+  if (-not $ok) {
+    Get-Content $Log -Tail 6 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) }
+  }
+  return $ok
+}
+
+Write-Host ""
+Write-Host "PSKT usability smoke -- preset $Preset, seed $Seed, payload $Bytes B"
+Write-Host ""
+
+# 0. A deterministic payload, so two runs of this script are comparable.
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+foreach ($d in $src, $scan, $plate) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+# Generated here rather than by `node -e "..."`: Windows PowerShell 5.1 mangles embedded double
+# quotes when handing an argument to a native executable (AGENTS.md trap table), so node received
+# a script with the quotes stripped and failed. Same formula as tools/smoke-sender.mjs, so the
+# payload is reproducible from either side.
+function New-Payload {
+  param([string]$Path, [int]$N)
+  $buf = New-Object 'byte[]' $N
+  for ($i = 0; $i -lt $N; $i++) { $buf[$i] = [byte](($i * 167 + ($i -shr 3)) -band 255) }
+  [IO.File]::WriteAllBytes($Path, $buf)
+  if (-not (Test-Path $Path) -or (Get-Item $Path).Length -ne $N) { throw "could not write $Path" }
+}
+New-Payload -Path $payload -N $Bytes
+$wantHash = (Get-FileHash -Algorithm SHA256 -Path $payload).Hash.ToLower()
+Write-Host ("        payload sha256 {0}" -f $wantHash.Substring(0, 16))
+
+# 1. send: what a user does to make something printable.
+$null = Step 'pskit send (paper P-M1-300, png + true-size pdf)' {
+  node cli/pskit.mjs send $payload --profile P-M1-300 --format png,pdf --out $src
+} (Join-Path $tmp 'step1.log')
+$pngs = @(Get-ChildItem -Path $src -Filter 'page-*.png' -ErrorAction SilentlyContinue)
+$pdf = Get-ChildItem -Path $src -Filter '*.pdf' -ErrorAction SilentlyContinue | Select-Object -First 1
+Write-Host ("          wrote {0} page PNG(s){1}" -f $pngs.Count, $(if ($pdf) { ", " + $pdf.Name + " (" + [int]($pdf.Length / 1KB) + " KB)" } else { ", NO PDF" }))
+if ($pngs.Count -eq 0) { Write-Host ' FAIL  nothing to print -- stopping here'; exit 1 }
+
+# 2. channel: the printer and the scanner this machine does not have.
+if ($SkipChannel) {
+  Write-Host ' SKIP  sim/channel.py (-SkipChannel): decoding the pristine pages instead, which proves less'
+  Copy-Item -Path $src -Destination $scan -Recurse -Force
+} else {
+  $null = Step "sim/channel.py --preset $Preset --seed $Seed --modifier nocrop" {
+    python sim/channel.py --in $src --out $scan --seed $Seed --preset $Preset --modifier nocrop
+  } (Join-Path $tmp 'step2.log')
+  if (-not (Test-Path $scan)) { Write-Host ' FAIL  the channel wrote nothing -- stopping here'; exit 1 }
+}
+
+# 3. receive: what a user does with the scans. --photo, because that is the path a camera or
+#    a skewed flatbed scan needs, and it is the harder of the two.
+$null = Step 'pskit receive --photo (markers -> perspective -> read)' {
+  node cli/pskit.mjs receive $scan --photo --out $got
+} (Join-Path $tmp 'step3.log')
+
+# 4. The only verdict that matters.
+if (Test-Path $got) {
+  $gotHash = (Get-FileHash -Algorithm SHA256 -Path $got).Hash.ToLower()
+  $same = ($gotHash -eq $wantHash)
+  $gotLen = (Get-Item $got).Length
+  if (-not $same) { $script:fails++ }
+  Write-Host ("{0}  bytes came back identical  ({1} B, sha256 {2} vs {3})" -f ($(if ($same) { ' PASS' } else { ' FAIL' })), $gotLen, $gotHash.Substring(0, 16), $wantHash.Substring(0, 16))
+} else {
+  $script:fails++
+  Write-Host ' FAIL  receive wrote no file at all'
+}
+
+# 5. The 3D side, on files this run actually wrote.
+if (-not $Skip3D) {
+  # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
+  # bytes per page, and the inter-page RS caps one transfer at 255 pages -- so this step gets its
+  # own small payload. Feeding it the paper-sized one is not a product bug: the CLI refuses with an
+  # actionable message ("needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a
+  # denser profile"), which is exactly the fail-closed behaviour the contract asks for. The first
+  # version of this script asked for the impossible and reported it as a product failure.
+  New-Payload -Path $platePayload -N $PlateBytes
+  $null = Step "pskit send (plate PL-D2@0.4, $PlateBytes B payload, 3mf + stl)" {
+    node cli/pskit.mjs send $platePayload --profile PL-D2 --nozzle 0.4 --format 3mf,stl --out $plate
+  } (Join-Path $tmp 'step5a.log')
+  $threemf = @(Get-ChildItem -Path $plate -Filter '*.3mf' -ErrorAction SilentlyContinue)
+  $stl = @(Get-ChildItem -Path $plate -Filter '*.stl' -ErrorAction SilentlyContinue)
+  Write-Host ("          wrote {0} .3mf and {1} .stl" -f $threemf.Count, $stl.Count)
+  if ($threemf.Count -gt 0) {
+    $list = ($threemf | ForEach-Object { $_.FullName }) -join ','
+    $null = Step "gate G8 --file on those .3mf (Core 1.4 subset)" {
+      node cli/pskit.mjs verify --gate G8 --file $list
+    } (Join-Path $tmp 'step5b.log')
+  } else {
+    $script:fails++
+    Write-Host ' FAIL  the plate profile wrote no .3mf'
+  }
+}
+
+# 6. The client's own data paths, executed rather than read.
+$null = Step 'tools/smoke-sender.mjs (web sender path, decoded blind)' {
+  node tools/smoke-sender.mjs
+} (Join-Path $tmp 'step6a.log')
+$null = Step 'tools/smoke-capture.mjs (burst-capture decisions)' {
+  node tools/smoke-capture.mjs
+} (Join-Path $tmp 'step6b.log')
+
+$script:t0.Stop()
+Write-Host ''
+if ($script:fails -eq 0) {
+  Write-Host ("USABILITY: everything above passed in {0}s -- a file went in, printable pages came out," -f [int]$script:t0.Elapsed.TotalSeconds)
+  Write-Host '           a simulated print+scan came back, and the bytes were identical.'
+  Write-Host '           Not proven here: real ink/paper, a real phone camera, browser print scaling (D8),'
+  Write-Host '           PWA install (needs https), and G4/G6/G9/G10. See docs/USE.md for those steps.'
+  exit 0
+} else {
+  Write-Host ("USABILITY: {0} step(s) FAILED in {1}s -- logs in {2}" -f $script:fails, [int]$script:t0.Elapsed.TotalSeconds, $tmp)
+  exit 1
+}

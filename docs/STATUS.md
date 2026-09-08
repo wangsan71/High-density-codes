@@ -119,6 +119,18 @@
 
 ## 已知风险 / 待办
 
+### 第 42 轮（目标改为"**能跑起来并且可以用**" ⇒ 一条命令的端到端 usability 冒烟**跑通了** ✓）
+
+- **目标已改写并重新武装**：按用户口径（"能跑起来并且可以用，一直循环直到完成"）⇒ `update_goal edit`（objective 换成可验证的可用性定义；`max_goal_rounds` 40 → **80**——已用 40，上限必须大于它，否则改完仍是 blocked ✗）+ `resume`（原 `phase: blocked / round-limit`、`disarmed` ⇒ 现 **active / armed**，revision 12 ✓）
+- **交付 `tools/usability.ps1`（一条命令，全是用户真会敲的命令）**：`send`（纸面 `P-M1-300` ⇒ 3 张页图 + **800 KB 真实尺寸 `pack.pdf`**）→ `sim/channel.py --preset scan300 --seed 7 --modifier nocrop`（确定性"打印+扫描"替身）→ **`receive --photo`**（标记 → 透视 → 读）→ **SHA-256 逐字节比对** → 板材 `send --profile PL-D2 --nozzle 0.4 --format 3mf,stl` → **`verify --gate G8 --file` 校验这次真写出来的 4 个 `.3mf`** → `smoke-sender.mjs`（网页发送端真实数据路径、盲解码）+ `smoke-capture.mjs`（连拍取舍）⇒ **实测 exit 0、9 步全 PASS、289 s** ✓ 204800 B payload、收发 sha256 均 `32ec480521da27d2…` ✓ 每步**只看 exit code**、不 grep 关键字（"什么都没打印"不能算通过 ✗），失败时打印日志尾 ✓ 日志留 `.tmp/usability/step*.log` ✓
+- **第一版脚本产生一个假失败，责任在我脚本、不在产品** ✗：板材那步拿纸面用的 200 KiB 去喂 `PL-D2@0.4` ⇒ CLI **正确拒绝**且报错可操作：`needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile`（fail-closed ✓ 设计行为）⇒ 改为板材步骤用独立 **384 B** payload（⇒ 4 页 / 4 个 `.3mf`+`.stl` ✓）⇒ **顺带量出容量事实并写进 `docs/USE.md`**：一次传输 ≤ **255 页**（页间 RS 限制）· `P-M1-300` 每页净 **7514 B**（200 KiB = 3 页 ✓ 实测）· `PL-D2@0.4` 每页净 **≈180 B**（上限 ≈46 KB，由 CLI 自己的拒绝数字推得 ✓ 不是估的）⇒ 用户能自己算"一次能传多大"✓
+- **交付 `docs/USE.md`（用户手册，本轮新写）**：电脑端**双击即用**的两个单文件页（`pskt-send-file.html` 发送 / `pskt-file.html` 接收）——**为什么必须单文件版**：瘦版 `send.html`/`index.html` 走 ES module，浏览器在 `file://` 下**拒载 module** ✗ · 手机端**一条命令起局域网服务** `python -m http.server 8000 --directory web/dist` + `index.html`（摄像头连拍 + `manifest.webmanifest`）· **如实写明 PWA 装不成**：安装需 https/localhost，局域网 http 会被拒 ⇒ 代码也照实处理（`pskt-file.html` 只在 `secure` 时注册 `sw.js`——**我在 dist 里读到那一行才敢这么写** ✓）· 自检入口 `?selftest=1` · 真打印/扫描/拍照注意（100% 缩放、别自动裁剪、彩色）· **需用户用真硬件验收的清单**（G4 500×8、G9 浏览器、D8 打印缩放量化、G10 喷嘴、G6 soak）
+- **新的环境事实（已进 `AGENTS.md` 陷阱表 ✓）**：本 harness 的 pwsh 工具**实际跑在 Windows PowerShell 5.1**（不是 pwsh 7）⇒ ① `.ps1` 写 `#Requires -Version 7` 会**整脚本拒跑**（不是降级 ✗）② 5.1 嚼碎传给原生程序参数里的内嵌双引号 ⇒ `node -e` 收到坏脚本（**又踩了"内联脚本落地成文件"那条自家规矩** ✗）③ `$ErrorActionPreference='Stop'` 会让 node/python 的 stderr **当场打死脚本** ⇒ 用 `'Continue'` + 只按 exit code 判定 ④ 调脚本用 `& .\x.ps1`（点源时脚本里的 `exit` 连宿主一起退 ✗）
+- **完成判据的进度（照新 objective 三条）**：① 一条命令端到端 usability 冒烟 ⇒ **已达成 ✓**（exit 0 实测）② 用户照 docs 在电脑与手机各走通一次 ⇒ **docs 已就位、待用户执行**；其中"局域网服务"这半我下一轮自己验（起 `http.server` 后用 node `fetch` 取页面 ✓ 不能只在文档里这么说）③ 门限表如实 ⇒ 本轮更新 ✓
+- 证据：`& .\tools\usability.ps1` ⇒ **exit 0 / 9 PASS / 289 s** ✓ 单测提交前重跑 ✓ `core/` **未动** ⇒ 不需重建 `web/dist` ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**验掉手机路径的服务端半**（后台起 `python -m http.server --directory web/dist`，用 node `fetch` 取 `/index.html`、`/manifest.webmanifest`、`/sw.js`、`/capture.js`、`/pskt-bundle.js` ⇒ 证明瘦版经 http 真可用）→ 客户端缺陷（D12 advice scanner 对注释盲、D5 残余站点链接、D8 可自动化部分）→ G2 补到 200 seeds（分批 ≤600 s）
+
+
 ### 第 41 轮（预算 40/40 的**最后一轮** ⇒ 交接块：把每条剩余工作写成可直接执行的命令）
 
 - **本轮做的事**（**无代码改动** ⇒ 提交前照例跑单测 ✓）：① 把 `AGENTS.md` 那条被我读窄的陷阱行**改宽**——沙箱禁的是 **node 进程内的管道 stdio**，**不是宿主 shell**（pwsh 跑 `python`/`git`/`node` 一直通 ✓ 附已验证命令与代价、并写明 `timeoutMs` 被封顶 600 s ⇒ 长任务分批）② 同文件修掉一处**过期状态**（D41 第 39 轮已闭，原文仍写 OPEN ✗ 台账不许自相矛盾 ✓）③ 本交接块
