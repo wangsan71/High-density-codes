@@ -30,7 +30,7 @@
 ## 环境事实（探测过，别再探）
 
 - Node v24.14.0；Python 3.10.9 + numpy 2.2.6 + opencv-python 4.13（**有 `cv2.aruco`，无 contrib**）+ pillow 11.1 + scipy 1.15.1；**没有** pytest/hypothesis/img2pdf/segno/pyzbar。
-- 20 核，D: 盘 2TB 空闲；本机无可枚举 WIA 扫描仪（只读沙箱里 COM 被拦）。
+- 20 核，D: 盘 2TB 空闲；本机无可枚举 WIA 扫描仪（只读沙箱里 COM 被拦）。`Get-CimInstance` 也被沙箱拒（`拒绝访问`，第 54 轮实测）⇒ 探内存/CPU 别再试 CIM/WMI，数进程用 `Get-Process` 就够。
 - Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。**但先查工作区再上网**：`ref/` 里已 vendored 权威规范文件（如 `ref/3mf-core-1.4.0.xsd`）⇒ 第 38 轮我按记忆写表、又拿网上取来的 schema **变体**当权威，判自己发射器"违规"（D40 已撤回 / D41 **第 39 轮已闭** ✓ 修法 = `tests/unit/threeMF-xsd-parity.test.mjs`：表 ⇄ 权威 XSD 自动对拍，并做过阳性对照）。
 
 ## 门限（G0–G10）
