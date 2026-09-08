@@ -121,6 +121,19 @@ const ADVICE = {
     cause: 'the decode result carried no per-cell rho measurements, so there was nothing to calibrate a second read on',
     do: 'wiring: hand the helper a real decodePage result (it now carries rho and colourLevels); a hand-built page object does not',
   },
+  // ---- the bootstrap search's generic per-candidate failure ------------------
+  // This one is older than its entry. core/decode/bootstrap.js has always recorded a candidate
+  // whose page read gave nothing more specific as `reason: r.reason || 'fail'`, and round 65 added
+  // a second producer when it started CATCHING a candidate that threw (D55) instead of letting the
+  // exception escape to the caller -- a crash mid-receive is not a refusal. The advice scanner only
+  // sees bare literals, so the expression form kept this reason invisible while operators were
+  // already receiving generic advice for it: the guard was right and the gap was old. It is
+  // per-candidate, not per-page -- the search continues, and when every candidate ends here the
+  // page-level reason is no-geometry-matched, which has its own entry below.
+  'fail': {
+    cause: 'one candidate geometry could not read this page and gave no more specific reason (or threw while trying), so the bootstrap search moved on to the next candidate',
+    do: 'nothing to act on for a single candidate -- that is the search reporting progress. Only if EVERY candidate ends here (reported as no-geometry-matched) is the page unreadable: then check the image is one whole uncropped page, in focus, and that the profile/dpi chosen when sending matches the printout',
+  },
   // ---- error-correction internals that reach the user ---------------------
   // These come out of core/rs.js and the frame length checks. They are reachable
   // through the same `REJECTED page N (reason)` line, so they need the same quality

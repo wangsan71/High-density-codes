@@ -1188,10 +1188,24 @@ async function gateG8(args) {
   return ok;
 }
 
+async function gateG6(args) {
+  // The implementation lives in tools/soak.mjs so it can also run standalone as a background task
+  // (node tools/soak.mjs --minutes 30 --out .tmp/g6.json). The criterion is quoted there from
+  // docs/PLAN.md L106; this wrapper only turns the result into an exit code.
+  const { runSoak } = await import('../tools/soak.mjs');
+  const corpora = args.corpus ? String(args.corpus).split(',') : [];
+  const res = await runSoak({ minutes: Number(args.minutes || 30), corpus: corpora });
+  console.log(`  ${res.ok ? 'PASS' : 'FAIL'} G6: criterion per docs/PLAN.md L106 -- encode 1MB <= 5s, decode <= 2s/page, a 30-60 min soak with RSS growth <= 10% and zero false accepts. Not covered here: the optical channel model, real ink/paper, phones, browsers (that is G2/G4/G9 evidence).`);
+  return res.ok;
+}
+
 async function cmdVerify(args) {
   const gate = String(args.gate || 'all');
+  // G6 stays out of 'all' on purpose: its criterion is a 30-60 minute soak, so folding it into the
+  // routine baseline would make every --gate all run half an hour long and hide the fast gates'
+  // regressions behind it. It is opt-in, and the summary line below says so out loud.
   const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5', 'G7', 'G8'] : [gate.toUpperCase()];
-  const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G7: gateG7, G8: gateG8 };
+  const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G6: gateG6, G7: gateG7, G8: gateG8 };
   let allOk = true;
   const skipped = [];
   for (const g of wanted) {
@@ -1226,7 +1240,7 @@ async function cmdVerify(args) {
   const notHere = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10'].filter((g) => !wanted.includes(g));
   if (notHere.length) {
     console.log(`  not evaluated by this run: ${notHere.join(' ')}`);
-    console.log('    G4 G9 need a real phone/browser, G6 is the long soak, G10 needs a printer');
+    console.log('    G4 G9 need a real phone/browser; G6 is implemented now but its criterion is a 30-60 min soak, so it stays opt-in (--gate G6); G10 needs a printer');
   }
   if (!allOk) process.exitCode = 1;
 }

@@ -100,6 +100,36 @@ export async function bootstrapDecode(bitmap, opts = {}) {
     );
   }
   if (!plans.length) return { ok: false, reason: 'no-candidate-geometry', hint: 'the hints excluded every known profile', attempts: [] };
+  // Order the search by what the bitmap itself already says, before spending a full page read on
+  // any candidate. Measured in round 65 with tools/g6-perf-probe.mjs: a 2653x3695 scan of an A4
+  // page burned three ~2.0-2.4 s full page reads on P-C4-600@600 candidates -- every one dying at
+  // stage=readout with echo-bad-magic -- before reaching P-M1-300@300, which is what the page
+  // actually was; 8.3 s per page against PLAN's G6 budget of 2 s. candidatePlans() puts paper
+  // profiles first and then sorts ALPHABETICALLY, and 'P-C4' < 'P-M1', so this file's header claim
+  // that candidates are "ordered by likelihood" was not true -- it was ordered by the alphabet.
+  // This reorders and never removes (the rule this file already states), and it cannot change a
+  // verdict: a candidate can only win by having the page's own header declare that candidate's
+  // profile and nozzle (the cross-check below), so whichever order they are tried in, the same
+  // candidate is the first one that can possibly be accepted. What changes is milliseconds.
+  if (bitmap && bitmap.width > 0 && bitmap.height > 0) {
+    const sizeScore = (c) => {
+      try {
+        const g = planPage(c.profileId, { nozzle: c.nozzle, plateMm: c.plateMm ?? undefined, monoSafe: c.monoSafe ?? undefined });
+        const l = pageLayout(g, c.dpi, { plateMm: c.plateMm ?? undefined });
+        if (!(l.width > 0) || !(l.height > 0)) return Number.POSITIVE_INFINITY;
+        // Log-ratio: a code area twice too big scores the same as one half too small, and a photo
+        // where the page fills only part of the frame is ranked later, never excluded.
+        return Math.abs(Math.log(bitmap.width / l.width)) + Math.abs(Math.log(bitmap.height / l.height));
+      } catch {
+        // planPage/pageLayout legitimately reject some combinations (a coarse nozzle with a fine
+        // pitch). Those candidates score worst and the loop below records them exactly as before.
+        return Number.POSITIVE_INFINITY;
+      }
+    };
+    const scored = plans.map((c, i) => ({ c, i, s: sizeScore(c) }));
+    scored.sort((a, b) => (a.s - b.s) || (a.i - b.i)); // stable: ties keep candidatePlans' own order
+    plans = scored.map((x) => x.c);
+  }
   const attempts = [];
   const t0 = Date.now();
   for (let i = 0; i < plans.length && i < maxAttempts; i++) {
@@ -125,7 +155,26 @@ export async function bootstrapDecode(bitmap, opts = {}) {
     const ta = Date.now();
     // Never the fast path: bootstrap is used on photographs, which are not aligned to a
     // page canvas by construction, and a fast-path hit on a scan would be its own bug.
-    const r = await decodePage(probe, { geom, layout, paletteId: c.paletteId }, { allowFastPath: false, requireFastPath: false, ...decodeOpts });
+    let r;
+    try {
+      r = await decodePage(probe, { geom, layout, paletteId: c.paletteId }, { allowFastPath: false, requireFastPath: false, ...decodeOpts });
+    } catch (e) {
+      // A wrong candidate can make the readout THROW instead of reporting a failure. Measured in
+      // round 65 on a 600 dpi channel page: "joinCellLevels: colour level 2 out of range 0..1"
+      // from core/decode/ideal.js -- under that candidate's palette the readout measured a colour
+      // level the candidate's own channel cannot hold. planPage, pageLayout and getPalette were
+      // already caught and recorded per candidate; this call was the one that was not, so the
+      // exception escaped bootstrapDecode and landed on the caller. In a browser or a phone burst
+      // that is not a refusal, it is a crash in the middle of receiving, and the contract this
+      // project holds is decode-or-refuse-cleanly (a wrong guess must cost time, never a session).
+      // `stage` and `reason` reuse existing literals on purpose: every reason literal in core is
+      // scanned by tests/unit/advice.test.mjs as something an operator must be told about, and one
+      // candidate throwing inside a search that then continues is not a new operator-facing
+      // condition -- the message keeps its own field so nothing is lost from the report.
+      attempts.push({ ...c, stage: 'decode', reason: 'fail', threw: String(e && e.message ? e.message : e).slice(0, 120), ms: Date.now() - ta });
+      if (onAttempt) onAttempt(attempts[attempts.length - 1]);
+      continue;
+    }
     const ms = Date.now() - ta;
     if (!r.ok) {
       attempts.push({ ...c, stage: r.stage || 'decode', reason: r.reason || 'fail', ms });
