@@ -8,6 +8,21 @@
 
 ---
 
+## 0. 第一步：构建客户端页面（**刚 clone 必做**）
+
+`web/dist/` 是**构建产物**，被 `.gitignore`（第 4 行 `web/dist/`）忽略 ⇒ **仓库里没有现成可打开的页面**（`git ls-files web/dist` 返回 0 个文件 ✓ 实测）。所以第一件事是构建：
+
+```powershell
+node tools/build-web.mjs        # 生成 web/dist：53 个文件、原子替换目录，含 SW 预缓存清单与 PWA 图标
+node tools/check-dist.mjs       # 校验产物（12 项断言 + 图标安装性：192/512/maskable 缺一个就红）
+```
+
+- 构建器**零依赖、离线可跑**；PWA 图标也是它用本项目自己的 `renderPageBitmap` + `encodePNG` 画的（不引图像库 ✓ 构建不可能声称一张它画不出的图）。
+- **改了 `core/` 就必须重建**：dist 里内联了 `core/`，不重建等于拿旧内核当新产物用 ✗（这也是仓库自己的规矩）。
+- 只想验证"构建出来的东西是不是自洽的"：`node tools/check-dist.mjs`；想验证"经 http 服务出去是不是自洽的"：见 §2 的 `tools/check-lan.mjs`。
+
+---
+
 ## 1. 电脑端：双击就能用（`file://`，无需服务器）
 
 | 要做什么 | 打开哪个文件 |

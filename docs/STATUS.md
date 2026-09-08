@@ -128,6 +128,7 @@
 - **差点"修"一个不存在的问题**：`check-dist` 打印的 `all 12 assertions pass` 看着像我加断言后就过期了 ⇒ 读源码发现它是**动态计数**（L315 `results.length`），而我加的是某个既有检查**内部的 `throw` 守卫**、不新增 result ⇒ **12 仍然准确、没有假话、不需要改** ✓（记下来，免得下轮又去"修"它）
 - **一处未查明、如实记为待查**：第 44 轮某次 pwsh 调用外层报 `[exit code: 1]`，而其中**每个子步骤都是 exit 0**（build/check-dist/check-lan/Stop-Process 全绿）；探针（失败的 `Get-Process` ⇒ `$?` False、`$LASTEXITCODE` 为空）**没能复现** ⇒ **不当失败也不当通过**；对策是这类调用末尾显式 `exit 0`（本轮后半已这么做 ✓）
 - 证据：`node tools/build-web.mjs` **exit 0**（`web/dist: 53 files, build e5ce1d897e9134d3`、`precache entries 51`、原子换目录 ✓）· `node tools/check-dist.mjs` **exit 0** · `node tools/check-lan.mjs --port 8125|8126` **两次 exit 0**、**51/51** 条预缓存资源逐条 fetch 且 `core/hash.js` 算出的 sha256 与清单一致、4 页无外部 URL、4 页都有 CSP meta ✓ · 单测 **277/277** ✓ · 无残留 python 进程 ✓ · `core/` 未动（`web/dist` 重建，变化来自新图标与清单 ✓）· **不打新 tag**（M4 未闭合 ✓）
+- **提交后又发现一个真阻塞（同轮补修 ✓）**：`web/dist/` 被 `.gitignore` 第 4 行忽略、`git ls-files web/dist` = **0 个文件** ⇒ **刚 clone 的用户手里没有任何可打开的客户端页面** ✗ 而 `docs/USE.md` 上来就叫人"打开 `web/dist/pskt-send-file.html`"⇒ **手册第一步就踩空** ⇒ 已补 **§0 第一步：构建客户端页面**（`node tools/build-web.mjs` → `node tools/check-dist.mjs`，并写明"改了 `core/` 必须重建"、图标由构建器用本项目自己的编码器画）✓ 教训：**用户手册要从"用户手上什么都没有"写起**，而不是从我这台机器上已经有的东西写起 ✗
 - 下一轮首位：**把 `check-lan` 接进 `usability.ps1`**（加 `-Serve`：Start-Process → check-lan → Stop-Process，配方已验证 ✓）⇒ 端到端冒烟就覆盖到手机端的服务面 → D12（advice scanner 对注释盲）/ D5 残余站点链接 / D8 打印缩放可自动化部分 → G2 补到 200 seeds（分批 ≤600 s）→ D43 剩下的 https 半（**等用户**：仓库 URL + 凭据 + `pages.yml`）
 
 
