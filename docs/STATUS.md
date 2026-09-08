@@ -119,6 +119,18 @@
 
 ## 已知风险 / 待办
 
+### 第 44 轮（**D43 的图标阻塞真修掉了**——修在构建器里、零依赖，并加了构建期强制断言）
+
+- **修复**：`tools/build-web.mjs` 的图标块里加**盒式降采样 + 亮度阈值**，产出 `icon-192.png`(1279 B)、`icon-512.png`(6093 B)、`icon-maskable-512.png`(6084 B)；`manifest.webmanifest` 的 `icons` 现在是 192/512(`any`) + 512(`maskable`) + 原 `icon-page.png`(3290×3290, 283808 B，保留给想要更大图的启动器)。**先平均再阈值**是必要的：6× 缩小时单纯平均会把码页糊成灰泥，阈值化才保住角上的基准块与格子纹理 ✓ **maskable 画在 80% 安全区内**：自适应启动器从中间裁圆/裁方角，裁掉的正好是基准块——这张图里唯一有意义的部分 ✓ **没有新建 `make-icons.mjs`**（原计划）⇒ 因为构建器里本来就有一块"用 `renderPageBitmap`+`encodePNG` 画真页图当图标"的代码（D13 的方形补丁 ⇒ `3290x3290` 正是它来的）⇒ 在那里加降采样更省、且仍然是**本项目自己的编码器画的**（零依赖 ✓ 构建不可能声称一张它画不出的图 ✓）
+- **加了构建期强制断言**（`tools/check-dist.mjs`）：manifest 的 icons 必须含 `192x192` 与 `512x512`、且必须有 `purpose: maskable`，否则**构建就红** ⇒ 这条性质不会烂回去 ✓ 断言的理由写进了注释：**"声明了图标"不等于"浏览器会弹安装"**——D43 修之前，这条检查就是在只有一个 3290×3290 页图的情况下通过的 ✗
+- **顺带修掉我自己工具里的一句假话**：`check-lan` 原先硬编码打印"两个安装阻塞 neither is fixed"⇒ 图标修好后那句就不成立 ✗ 改成**逐条如实报告**：阻塞 1（局域网 http 非 secure context ⇒ 需 https）**STILL BLOCKED、且只有用户能解**（仓库 URL + 凭据 + `pages.yml`）；阻塞 2（图标尺寸）**satisfied：192/512 已声明，另有 maskable** ✓
+- **解决了一个记在案的未知**：**`Start-Process` 在沙箱里可用** ⇒ 实测两次（`Start-Process python -ArgumentList '-m','http.server','8125','--directory','web/dist' -WindowStyle Hidden -PassThru` → `node tools/check-lan.mjs --port 8125` → `Stop-Process -Id` → **残留 python 进程数 0** ✓）⇒ 下一轮可以把 `check-lan` 接进 `usability.ps1` 成为真正的"一条命令"（配方已验证 ✓ 不再需要在文档里承诺没验过的东西）
+- **差点"修"一个不存在的问题**：`check-dist` 打印的 `all 12 assertions pass` 看着像我加断言后就过期了 ⇒ 读源码发现它是**动态计数**（L315 `results.length`），而我加的是某个既有检查**内部的 `throw` 守卫**、不新增 result ⇒ **12 仍然准确、没有假话、不需要改** ✓（记下来，免得下轮又去"修"它）
+- **一处未查明、如实记为待查**：第 44 轮某次 pwsh 调用外层报 `[exit code: 1]`，而其中**每个子步骤都是 exit 0**（build/check-dist/check-lan/Stop-Process 全绿）；探针（失败的 `Get-Process` ⇒ `$?` False、`$LASTEXITCODE` 为空）**没能复现** ⇒ **不当失败也不当通过**；对策是这类调用末尾显式 `exit 0`（本轮后半已这么做 ✓）
+- 证据：`node tools/build-web.mjs` **exit 0**（`web/dist: 53 files, build e5ce1d897e9134d3`、`precache entries 51`、原子换目录 ✓）· `node tools/check-dist.mjs` **exit 0** · `node tools/check-lan.mjs --port 8125|8126` **两次 exit 0**、**51/51** 条预缓存资源逐条 fetch 且 `core/hash.js` 算出的 sha256 与清单一致、4 页无外部 URL、4 页都有 CSP meta ✓ · 单测 **277/277** ✓ · 无残留 python 进程 ✓ · `core/` 未动（`web/dist` 重建，变化来自新图标与清单 ✓）· **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**把 `check-lan` 接进 `usability.ps1`**（加 `-Serve`：Start-Process → check-lan → Stop-Process，配方已验证 ✓）⇒ 端到端冒烟就覆盖到手机端的服务面 → D12（advice scanner 对注释盲）/ D5 残余站点链接 / D8 打印缩放可自动化部分 → G2 补到 200 seeds（分批 ≤600 s）→ D43 剩下的 https 半（**等用户**：仓库 URL + 凭据 + `pages.yml`）
+
+
 ### 第 43 轮（把"手机路径的服务端半"从**文档里这么说**变成**实测**；顺带量出 PWA 的第二个安装阻塞）
 
 - **交付 `tools/check-lan.mjs`**：真起 `python -m http.server 8123 --directory web/dist`（后台作业，用完 `job_kill`，不留游离服务 ✓），然后做**浏览器会做的事** ⇒ 实测 **exit 0**：

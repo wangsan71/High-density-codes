@@ -205,12 +205,19 @@ if (!man.ok) {
     else pass('manifest.webmanifest parses and its start_url resolves', `${parsed.name} · start_url ${parsed.start_url} · display ${parsed.display} · scope ${parsed.scope}`);
     const sizes = (parsed.icons || []).map((i) => `${i.src} ${i.sizes}`);
     const installable = (parsed.icons || []).some((i) => /(^|\s)(192x192|512x512)(\s|$)/.test(String(i.sizes)));
+    const maskable = (parsed.icons || []).some((i) => String(i.purpose || '').split(/\s+/).includes('maskable'));
     console.log('');
-    console.log(' PWA install blockers this tool can see (they do not affect the exit code, and neither is fixed):');
+    console.log(' PWA install blockers (these do not affect the exit code -- reporting a blocker is not passing it):');
     console.log('   1. a LAN http origin is not a secure context, so a browser refuses registration and install;');
     console.log('      https hosting is needed and .github/workflows/pages.yml does not exist yet');
-    console.log(`   2. icon sizes offered: ${sizes.join(', ') || 'none'} -- installability wants 192x192 and 512x512${installable ? '' : ', and neither is present'}`);
-    console.log('   Both are recorded in docs/DEFECTS.md; reporting them here is not the same as passing them.');
+    console.log(`      -> STILL BLOCKED, and only the user can unblock it (repository url + credentials)`);
+    console.log(`   2. icon sizes offered: ${sizes.join(', ') || 'none'}`);
+    console.log(
+      installable
+        ? `      -> satisfied: 192x192 and 512x512 are declared${maskable ? ', plus a maskable variant for adaptive launchers' : ', but there is no maskable variant, so an adaptive launcher will crop the corners'}`
+        : '      -> STILL BLOCKED: installability wants 192x192 and 512x512 and neither is declared',
+    );
+    console.log('   Both live in docs/DEFECTS.md D43; this tool reports what the served manifest says, nothing more.');
   }
 }
 
@@ -224,5 +231,5 @@ if (failures) {
 console.log('CHECK-LAN: everything above passed');
 console.log('           A phone on this LAN would get every asset the service worker precaches, byte for');
 console.log('           byte, from a local origin with no external URL in it. Registration, install and');
-console.log('           camera still need a real browser and https (G9 / D18 / the icon blocker above).');
+console.log('           camera still need a real browser, and install still needs https (G9 / D18 / D43).');
 process.exit(0);

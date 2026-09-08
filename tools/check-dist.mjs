@@ -197,6 +197,16 @@ check('the PWA manifest declares a square icon', () => {
   const m = JSON.parse(text(join(DIST, 'manifest.webmanifest')));
   const sizes = (m.icons || []).map((i) => String(i.sizes || ''));
   if (!sizes.length) throw new Error('manifest declares no icons');
+  // "Declares icons" is not the same as "a browser will offer to install it": installability wants
+  // 192x192 and 512x512, and before D43 was fixed this check passed on a manifest whose only icon
+  // was the 3290x3290 page render. Assert the sizes, and the maskable variant, so the property
+  // cannot quietly rot back out of the build.
+  for (const want of ['192x192', '512x512']) {
+    if (!sizes.includes(want)) throw new Error(`manifest icons lack ${want} (declared: ${sizes.join(', ') || 'none'}) -- a browser will not offer install`);
+  }
+  if (!(m.icons || []).some((i) => String(i.purpose || '').split(/\s+/).includes('maskable'))) {
+    throw new Error('manifest declares no maskable icon -- an adaptive launcher would crop the corners, which are the fiducials');
+  }
   const bad = sizes.filter((s) => {
     const mm = /^(\d+)x(\d+)$/.exec(s);
     return !mm || mm[1] !== mm[2];

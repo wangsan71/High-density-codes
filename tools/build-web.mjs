@@ -430,6 +430,64 @@ writeDist('capture.js', read('web/capture.js').replace(/(['"])\.\.\/core\//g, '$
   writeFileSync(join(OUT, 'icon-page.png'), ipng);
   distFiles.push({ url: './icon-page.png', bytes: ipng.length, sha256: sha256(ipng) });
   const iconSizes = `${pngW}x${pngH}`;
+
+  /* The sizes a browser actually installs from, downscaled from that same square page render
+   * (DEFECTS D43). "Add to home screen" is not offered unless the manifest declares 192x192 and
+   * 512x512, and the only icon shipped here used to be the 3290x3290 page render: a real image
+   * and a useless icon, so the second install blocker sat behind the https one.
+   * Box-average, then threshold on luminance. Averaging alone turns a code page to grey mush at
+   * 6x reduction; averaging first and thresholding after keeps the fiducial corners solid and the
+   * cell texture legible, and a monochrome launcher icon is what a code page should look like.
+   * The maskable variant draws the same thing inside the 80% safe zone, because an adaptive
+   * launcher crops a circle or squircle out of the middle and would otherwise cut the corners --
+   * the corners are the fiducials, i.e. the only part of this picture that means something. */
+  const downscale = (src, side, safeFraction) => {
+    const inner = safeFraction ? Math.round(side * safeFraction) : side;
+    const off = Math.floor((side - inner) / 2);
+    const scale = src.width / inner;
+    const out = { width: side, height: side, dpi: 72, pixels: new Uint8Array(side * side * ch) };
+    for (let i = 0; i < out.pixels.length; i += ch) {
+      out.pixels[i] = 255;
+      out.pixels[i + 1] = 255;
+      out.pixels[i + 2] = 255;
+      out.pixels[i + 3] = 255;
+    }
+    for (let y = 0; y < inner; y++) {
+      const y0 = Math.floor(y * scale);
+      const y1 = Math.min(src.height, Math.max(y0 + 1, Math.floor((y + 1) * scale)));
+      for (let x = 0; x < inner; x++) {
+        const x0 = Math.floor(x * scale);
+        const x1 = Math.min(src.width, Math.max(x0 + 1, Math.floor((x + 1) * scale)));
+        let lum = 0;
+        let n = 0;
+        for (let sy = y0; sy < y1; sy++) {
+          for (let sx = x0; sx < x1; sx++) {
+            const i = (sy * src.width + sx) * ch;
+            lum += 0.299 * src.pixels[i] + 0.587 * src.pixels[i + 1] + 0.114 * src.pixels[i + 2];
+            n++;
+          }
+        }
+        const v = lum / n < 128 ? 0 : 255;
+        const o = ((y + off) * side + (x + off)) * ch;
+        out.pixels[o] = v;
+        out.pixels[o + 1] = v;
+        out.pixels[o + 2] = v;
+        out.pixels[o + 3] = 255;
+      }
+    }
+    return out;
+  };
+  const iconFiles = [];
+  for (const [name, side, safe] of [['icon-192.png', 192, 0], ['icon-512.png', 512, 0], ['icon-maskable-512.png', 512, 0.8]]) {
+    const png = Buffer.from(encodePNG(downscale(icon, side, safe)));
+    const w = png.readUInt32BE(16);
+    const h = png.readUInt32BE(20);
+    if (w !== side || h !== side) throw new Error(`${name} came out ${w}x${h}, wanted ${side}x${side}`);
+    writeFileSync(join(OUT, name), png);
+    distFiles.push({ url: './' + name, bytes: png.length, sha256: sha256(png) });
+    iconFiles.push(`${name} ${side}px/${png.length}B`);
+  }
+
   const webmanifest = {
     name: 'PSKT 打印—扫描传输',
     short_name: 'PSKT',
@@ -439,12 +497,19 @@ writeDist('capture.js', read('web/capture.js').replace(/(['"])\.\.\/core\//g, '$
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#101317',
-    icons: [{ src: './icon-page.png', sizes: iconSizes, type: 'image/png', purpose: 'any' }],
+    // The page render stays listed last: it is the full-resolution picture, and a launcher that
+    // wants something larger than 512 can have it. Installability is what the first three are for.
+    icons: [
+      { src: './icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: './icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: './icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: './icon-page.png', sizes: iconSizes, type: 'image/png', purpose: 'any' },
+    ],
   };
   const mw = Buffer.from(JSON.stringify(webmanifest, null, 1) + '\n');
   writeFileSync(join(OUT, 'manifest.webmanifest'), mw);
   distFiles.push({ url: './manifest.webmanifest', bytes: mw.length, sha256: sha256(mw) });
-  console.log(`  pwa: icon ${ipng.length} B (${iconSizes}), manifest ${mw.length} B`);
+  console.log(`  pwa: icons ${iconFiles.join(', ')} · page render ${ipng.length} B (${iconSizes}) · manifest ${mw.length} B`);
 }
 
 const forSw = distFiles.filter((f) => !f.url.endsWith('sw.js'));
