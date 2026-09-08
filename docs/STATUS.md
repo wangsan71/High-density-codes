@@ -119,6 +119,20 @@
 
 ## 已知风险 / 待办
 
+### 第 50 轮（**手机路径不再需要 Python、也不需要用户自己找 IP**：`tools/serve.mjs` + `tools/check-serve.mjs`，并把一个 Windows 端口陷阱做成了产品行为）
+
+- **新 `tools/serve.mjs`**（零依赖、只用 node 内建 ⇒ `tools/` 允许 ✓）：起服务即**打印本机地址与每块网卡的局域网地址**（用户最常卡住的就是"我的 IP 是多少"、以及"要装 Python"⇒ 两件都替他做了）；默认**绑所有网卡**（手机必须能连）；`Cache-Control: no-store`（重建后下一次请求即生效，不必等缓存过期）；**目录穿越一律拒**；`web/dist` 不存在 ⇒ **可操作指引**（`node tools/build-web.mjs` + 指向 `USE.md` §0，不给光秃秃的 404）；`Ctrl+C`/SIGTERM 干净停止
+- **新 `tools/check-serve.mjs`（10 项）⇒ 实测 exit 0 / 10 PASS**：`/index.html` 与盘上文件 **sha256 相同**（`d049db98…` 两边一致）、`GET /` 与 `/index.html` 同一份文档、**四种目录穿越全部被拒**（`/../package.json`、`/..%2fpackage.json`、`/sub/../../package.json`、`/%2e%2e/package.json` ⇒ 403/404、**零字节泄漏**；这台服务默认绑所有网卡，**一个会回答 `../` 的静态服务等于整盘可读** ✗）、缺文件 **404 且不回退首页**（打错字不能看起来像成功）、`HEAD` 正常、`manifest.webmanifest` **MIME 正确**（类型错浏览器就不当 manifest 解析）、`no-store` 在位
+- **等价性证据（不是"换了个没验过的服务器"）**：`node tools/check-lan.mjs --port 8001/8137` 对**我这台服务器**同样 **exit 0、51/51 条预缓存资源逐字节一致** ⇒ 与 `python -m http.server` 交出去的字节等价 ✓
+- **端口这件事：我两个假设都被实测否证，真因是第三种**——8131 绑不上、而 `netstat` 的 LISTENING 过滤查不到任何东西 ⇒ 先猜 **Windows 排除端口段**：`netsh interface ipv4 show excludedportrange protocol=tcp` 实测只有 `5357 / 27339 / 50000-50059` ⇒ **否证** ✗ 再猜**我泄漏了服务**：三个可疑 PID 全已消失、`Get-NetTCPConnection -LocalPort 8131` 也空 ⇒ **否证** ✗ 真因是 `netstat -ano | findstr 8131` 那一行：`TCP 192.168.100.104:8131 → 142.250.157.188:443 ESTABLISHED` ⇒ **一条出站连接把 8131 当自己的本地端口**，Windows 上这会让 `bind` 报 `EADDRINUSE`，而 LISTENING 过滤与 `Get-NetTCPConnection` 都看不见它 ⇒ **这是真用户会撞的坑**（手册叫用的 8000 随时可能被某个浏览器临时占走）⇒ 所以做成**产品行为**而不是备注：未显式给 `--port` ⇒ **自己往上走并说明原因**（实测：8000 被占 ⇒ 打印两种成因 ⇒ 走到 **8001** 并正常服务、横幅给出 `http://192.168.100.104:8001/index.html` ✓）；显式给了 ⇒ **只报错、绝不偷偷改**（实测 exit 1 ✓）；错误文案点名**两种成因**并给出正确的排查命令 `netstat -ano | findstr :端口`（**看所有状态**，别只看 LISTENING）
+- **我自己两处错，都由执行当场抓到**：① `check-serve` 的参数解析**先 `++i` 再比 `argv[i]`** ⇒ 比到的是**值**不是旗标 ⇒ 这工具**一次都没跑起来**（`unknown argument 8001`）⇒ 已修并写明原因 ② `serve.mjs` 改走位逻辑时把 `listen` 挪进 `start()` 闭包，却**忘了封口与调用** ⇒ 用 `node --check` 先过一遍才继续 ⇒ 没让它活到运行时 ✗
+- **一次如实更正（不是产品缺陷）**：日志里网卡名显示成 `涔欏お缍茶矾` ⇒ 是**我 `Get-Content` 没加 `-Encoding UTF8`**（node 写 UTF-8、Windows PowerShell 5.1 默认按 ANSI 读）⇒ 用 `-Encoding UTF8` 读即正确显示 `乙太網路` ⇒ **不改代码**，只记下"读子进程输出要显式 UTF8"（与 AGENTS 陷阱表里"重定向写 UTF-16LE"同族 ✓）
+- **手册同步**：§2 改成 `node tools/serve.mjs`（Python 保留为等价备选）、加端口两种成因与排查命令、加 `check-serve`；并修掉一处**过期文字**——§2 还写着"第二个安装阻塞：manifest 里唯一图标是 `icon-page.png`、3290×3290"，那是**第 44 轮就修好的** ✗ ⇒ 改成"图标半已修（192/512 `any` + 512 `maskable` 画在 80% 安全区 + `check-dist` 构建期强制），**只剩 https、而且只有你能解**" ✓
+- **G2**：第 49 轮起的后台批（seed 30–200 生成 + 自动判决）仍在跑 ⇒ **判决未出 ⇒ 本轮不声称任何比率** ✗（收尾进度见提交时的日志）
+- 证据：`node --check tools/serve.mjs` exit 0 · `check-serve` **10/10 PASS exit 0** · `check-lan` **exit 0 / 51 entries 字节一致** · 走位路径与显式失败路径**均实测** · 缺 dist 指引实测 exit 1 · **测试进程与 8000/8001/8137 监听零残留** ✓ 全量套件（见提交前实测）· 本轮只加 `tools/` 与 `docs/` ⇒ `core/`、`web/dist` 未动、不需重建 ✓ **不打新 tag**（M4 未闭合 ✓）
+- 下一轮首位：**收 G2 判决**（scan300 × 200 seeds）⇒ 把真实比率如实写进 `ACCEPTANCE.md` / 门限表 / D42 → 起 **scan600 seed 17–200**（生成 + 判决，600 dpi 判决约 30 s/份 ⇒ 后台分批）→ 把 `serve.mjs` + `check-serve` **接进 `usability.ps1` 第 7 步**（替掉 python ⇒ 冒烟本身就覆盖"只需 Node 的手机路径"）→ D43 的 https 半（**等用户**）
+
+
 ### 第 49 轮（**台账自己坏了两行、而且三条守卫全绿**⇒ 加了单元格数守卫，它当场抓到两行旧账 + 我本轮新写的一行）
 
 - **为什么这算"可用"路上的事**：每一轮的优先级都是**读台账**定的（`DEFECTS.md` 决定修什么、`STATUS.md` 决定下一步）⇒ 表格结构坏了 = 状态列/复验列被读成碎片 = **优先级建立在误读上** ✗

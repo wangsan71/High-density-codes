@@ -43,24 +43,37 @@ node tools/check-dist.mjs       # 校验产物（12 项断言 + 图标安装性�
 手机要用**摄像头连拍接收**（`web/dist/index.html`，带 PWA `manifest.webmanifest` + `sw.js`），而摄像头权限、module、service worker 在 `file://` 下都不可用 ⇒ 必须经 http：
 
 ```powershell
-# 在电脑上（仓库根目录）
-python -m http.server 8000 --directory web/dist
-ipconfig        # 看 IPv4 地址，例如 192.168.1.23
+# 在电脑上（仓库根目录）—— 只需要 Node，不需要 Python
+node tools/serve.mjs
 ```
 
-手机连**同一个 Wi-Fi**，浏览器打开：`http://192.168.1.23:8000/index.html`（把 IP 换成你的）
-自检：`http://192.168.1.23:8000/index.html?selftest=1`
+它会**自己打印该打开哪个地址**（本机 + 每块网卡的局域网地址），实测输出：
 
-**如实说明（别期待错）**：PWA 的"添加到主屏幕/离线安装"要求 **https 或 localhost**，局域网 http 源会被浏览器拒绝 ⇒ 代码里也照实处理了（`pskt-file.html` 只在 `secure` 时才注册 `sw.js`）⇒ **手机上能用，但装不成离线 PWA**。要真装需要 https 托管：`.github/workflows/pages.yml` 还没写（见 `docs/STATUS.md`），而且 GitHub 推送本身还等你的仓库地址与凭据。**第二个安装阻塞**：manifest 里唯一的图标是 `icon-page.png`、尺寸写的是 `3290x3290`（整页渲染被当图标用 ✗），而安装性要求 **192×192 与 512×512** ⇒ 记在 `docs/DEFECTS.md` **D43**，修法要动构建（`tools/build-web.mjs`）而不是手改 dist。
+```
+serving D:\Desktop\Apps\3D_print_scan_to_send_file_or_things\web\dist
+  this machine : http://127.0.0.1:8000/index.html
+  phone on the same LAN, open one of:
+    http://192.168.100.104:8000/index.html   (乙太網路)
+```
 
-**不用手机也能先验一遍"服务端这半是真的"**（本轮实测 exit 0）：
+手机连**同一个 Wi-Fi**，打开上面那行局域网地址即可；自检在同一地址后面加 `?selftest=1`。`Ctrl+C` 停止。
+
+- **端口被占时它自己往上走**（8000 → 8001 …）并说明原因；但**你显式给了 `--port` 就绝不偷偷改**（只报错 + 告诉你怎么查）⇒ 实测两条路径都对 ✓
+- Windows 上"端口被占"有**两种**成因，只有一种能在 `netstat -ano | findstr LISTENING` 里看见：另一种是**某个出站连接临时把它当自己的本地端口**（本机实测：8131 被一条到 `142.250.157.188:443` 的 ESTABLISHED 连接占着，`LISTENING` 过滤和 `Get-NetTCPConnection -LocalPort 8131` **都查不到**，而 `bind` 就是报 `EADDRINUSE` ✗）⇒ 排查时用 `netstat -ano | findstr :端口`（**看所有状态**，别只看 LISTENING）
+- 也可以用 Python（等价，但需要装 Python）：`python -m http.server 8000 --directory web/dist`，再 `ipconfig` 自己找 IP ⇒ `tools/check-lan.mjs` 对这两种服务器都给出一样的结论（实测 51/51 字节一致 ✓）
+
+**如实说明（别期待错）**：PWA 的"添加到主屏幕/离线安装"要求 **https 或 localhost**，局域网 http 源会被浏览器拒绝 ⇒ 代码里也照实处理了（`pskt-file.html` 只在 `secure` 时才注册 `sw.js`）⇒ **手机上能用，但装不成离线 PWA**。要真装需要 https 托管：`.github/workflows/pages.yml` 还没写（见 `docs/STATUS.md`），而且 GitHub 推送本身还等你的仓库地址与凭据。**D43 当初有两个各自独立的安装阻塞，图标那一半第 44 轮已经修好**：manifest 现在声明 `icon-192.png` / `icon-512.png`（`purpose: any`）+ `icon-maskable-512.png`（`purpose: maskable`，画在 **80% 安全区**内，因为自适应启动器会从中间裁圆/裁方角，裁掉的正好是基准块——这张图里唯一有意义的部分 ✓），而且 `tools/check-dist.mjs` 把它变成**构建期强制**（缺 192/512 或 maskable 就红 ⇒ 不会烂回去 ✓）⇒ **只剩 https 那一半，而且只有你能解**（仓库 URL + 交互凭据 + `pages.yml`）⇒ 记在 `docs/DEFECTS.md` **D43**。
+
+**不用手机也能先验一遍"服务端这半是真的"**（第 50 轮两条都实测 exit 0）：
 
 ```powershell
-python -m http.server 8123 --directory web/dist     # 一个终端
-node tools/check-lan.mjs --port 8123                # 另一个终端
+node tools/serve.mjs --port 8137          # 一个终端（后台起也行：Start-Process node -ArgumentList 'tools/serve.mjs','--port','8137' -WindowStyle Hidden -PassThru）
+node tools/check-serve.mjs --port 8137    # 验这台服务器本身的行为
+node tools/check-lan.mjs   --port 8137    # 验它交出去的资源与构建清单逐字节一致
 ```
 
-它做的是浏览器会做的事：把 SW 预缓存清单里**每一条**资源 fetch 下来、用我们自己的 `core/hash.js` 比对 sha256（**51/51 一致**（这个数字等于本次构建预缓存的资源条数，会随构建变化——第 44 轮加了 PWA 图标后从 48 变 51 ⇒ 看它是否等于 `check-lan` 打印的 `precache entries` 即可，不要把它当常数背 ✗） ⇒ `cache.add()` 无从失败 ✓）；扫 4 个页面有没有**外部 URL**（`src=`/`href=`/`fetch()`/`import()`，只豁免 `xmlns` 命名空间串 ⇒ 气隙契约在 http 源上同样成立 ✓）；确认瘦页的模块图能解析、manifest 的 `start_url` 可取；并**报告** CSP meta 是否存在（实测 4 页都有 ✓）。它**不能**证明 SW 注册、安装提示、摄像头权限——那要真浏览器（G9 / D18），而且它会把上面两个安装阻塞**打印出来但不计入通过与否**（报出来 ≠ 通过 ✓）。
+`check-serve`（10 项）验的是**服务器行为**：`/index.html` 与盘上文件 **sha256 相同**、`GET /` 与 `/index.html` 是同一份文档、**四种目录穿越全部被拒**（`/../package.json`、`/..%2fpackage.json`、`/sub/../../package.json`、`/%2e%2e/package.json` ⇒ 实测 403/404、**没有一个字节泄漏**；这台服务**默认绑所有网卡**，而一个会回答 `../` 的静态服务等于整盘可读 ✗）、缺文件是 **404 而不是回退首页**（打错字不能看起来像成功 ✗）、`HEAD` 正常、`manifest.webmanifest` 的 **MIME 正确**（类型错了浏览器就不当 manifest 解析）、响应带 `no-store`（重建后下一次请求即生效，不必等缓存过期）。
+`check-lan` 验的是**交出去的内容**：把 SW 预缓存清单里**每一条**资源 fetch 下来、用我们自己的 `core/hash.js` 比对 sha256（**51/51 一致**；这个数字等于本次构建预缓存的资源条数、会随构建变化——第 44 轮加图标后从 48 变 51 ⇒ 看它是否等于构建打印的 `precache entries` 即可，**不要当常数背** ✗）；扫 4 个页面有没有**外部 URL**（`src=`/`href=`/`fetch()`/`import()`，只豁免 `xmlns` 命名空间串 ⇒ 气隙契约在 http 源上同样成立 ✓）；确认瘦页模块图能解析、manifest 的 `start_url` 可取；并**报告** CSP meta 是否存在（实测 4 页都有 ✓）。两者都**不能**证明 SW 注册、安装提示、摄像头权限——那要真浏览器（G9 / D18）；`check-lan` 会把**剩下的那一个**安装阻塞（https）打印出来但**不计入通过与否**（报出来 ≠ 通过 ✓）。
 
 发送端在手机上也能开（`.../pskt-send-file.html`），但小屏拖拽体验差 ⇒ 建议**电脑发送、手机接收**。
 
