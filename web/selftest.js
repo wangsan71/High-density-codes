@@ -32,7 +32,7 @@ export async function runSelfTests(ctx = {}) {
   const { rsEncode, rsDecode } = await import('../core/rs.js');
   const { encodeHeader, decodeHeader, HEADER_LEN } = await import('../core/frame.js');
   const { encodeTransfer, TransferAssembler } = await import('../core/protocol.js');
-  const { renderPageBitmap, echoBitsOf } = await import('../core/render/raster.js');
+  const { renderPageBitmap, renderSheetBitmap, echoBitsOf } = await import('../core/render/raster.js');
   const { encodePNG } = await import('../core/render/png.js');
   const { decodePNG } = await import('../core/decode/png-read.js');
   const { pageLayout } = await import('../core/render/layout.js');
@@ -144,12 +144,16 @@ export async function runSelfTests(ctx = {}) {
     const t = await encodeTransfer(raw, { profile, monoSafe: mono ? 'full' : undefined });
     const paletteId = mono ? 'PAPER1' : 'INK2';
     const prof = (await import('../core/profiles.js')).PROFILES[profile];
-    const layout = pageLayout(t.geom, prof.dpi || 300, {});
+    const layout = pageLayout(t.geom, prof.dpi || 300, { sheetMm: t.geom.sheetMm });
     const asm = new TransferAssembler({});
     const pngs = [];
     for (const p of t.pages) {
       const bmp = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: paletteId, mono: !!mono, echoBits: echoBitsOf(p.header) });
-      pngs.push(encodePNG(bmp));
+      // What a phone photographs is the sheet -- margins, the code area centred on them, crop and
+      // registration marks -- because that is what `pskit send` writes since D45 was fixed. A
+      // self-test that decodes the bare code area would stay green while proving nothing about the
+      // page a user actually prints (DEFECTS D47).
+      pngs.push(encodePNG(bmp.sheetMm ? renderSheetBitmap(bmp) : bmp));
     }
     const results = [];
     for (const bytes of pngs) {
@@ -179,9 +183,9 @@ export async function runSelfTests(ctx = {}) {
     const raw = encoder.encode('cross check probe');
     const t = await encodeTransfer(raw, { profile: 'P-M1-300' });
     const prof = (await import('../core/profiles.js')).PROFILES['P-M1-300'];
-    const layout = pageLayout(t.geom, prof.dpi || 300, {});
+    const layout = pageLayout(t.geom, prof.dpi || 300, { sheetMm: t.geom.sheetMm });
     const bmp = renderPageBitmap({ geom: t.geom, levels: t.pages[0].levels, layout, palette: 'INK2', echoBits: echoBitsOf(t.pages[0].header) });
-    const bytes = encodePNG(bmp);
+    const bytes = encodePNG(bmp.sheetMm ? renderSheetBitmap(bmp) : bmp);
     const dec = decodePNG(bytes);
     const ok = await bootstrapDecode(dec, { maxAttempts: 24 });
     if (!ok.ok) throw new Error(`a genuine page did not bootstrap: ${ok.reason} after ${ok.attempts.length} attempts`);
@@ -195,12 +199,12 @@ export async function runSelfTests(ctx = {}) {
     const raw = new Uint8Array(4000).map((_, i) => (i * 13 + 7) & 0xff);
     const t = await encodeTransfer(raw, { profile: 'P-M1-300' });
     const prof = (await import('../core/profiles.js')).PROFILES['P-M1-300'];
-    const layout = pageLayout(t.geom, prof.dpi || 300, {});
+    const layout = pageLayout(t.geom, prof.dpi || 300, { sheetMm: t.geom.sheetMm });
     const asm = new TransferAssembler({});
     let fed = 0;
     for (const p of t.pages) {
       const bmp = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: 'INK2', echoBits: echoBitsOf(p.header) });
-      const bytes = encodePNG(bmp);
+      const bytes = encodePNG(bmp.sheetMm ? renderSheetBitmap(bmp) : bmp);
       const dec = decodePNG(bytes);
       const boot = await bootstrapDecode(dec, { profileHint: 'P-M1-300', dpiHint: prof.dpi || 300 });
       if (!boot.ok) continue;

@@ -27,7 +27,7 @@ const n = Number(args.includes('--bytes') ? args[args.indexOf('--bytes') + 1] : 
 const { createBurstCollector } = await imp('web/capture.js');
 const { encodeTransfer, TransferAssembler } = await imp('core/protocol.js');
 const { pageLayout } = await imp('core/render/layout.js');
-const { renderPageBitmap, echoBitsOf } = await imp('core/render/raster.js');
+const { renderPageBitmap, renderSheetBitmap, echoBitsOf } = await imp('core/render/raster.js');
 const { bootstrapDecode } = await imp('core/decode/bootstrap.js');
 const { sha256Hex } = await imp('core/hash.js');
 const { decodeHeader } = await imp('core/frame.js');
@@ -42,8 +42,20 @@ const raw = new Uint8Array(n).map((_, i) => (i * 149 + 7) & 0xff);
 const want = sha256Hex(raw);
 const t = await encodeTransfer(raw, { profile: 'P-M1-300' });
 const layout = pageLayout(t.geom, 300, { sheetMm: t.geom.sheetMm });
-const bitmaps = t.pages.map((p) => renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(p.header) }));
-step('synthetic corpus ready', bitmaps.length >= 2, `${bitmaps.length} page(s), ${bitmaps[0].width}x${bitmaps[0].height}px, payload ${n} B`);
+const code = t.pages.map((p) => renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(p.header) }));
+// What a phone actually photographs is the *sheet*: margins, the code area centred on them, crop and
+// registration marks -- exactly what `pskit send` writes to page-NNN.png since D45 was fixed. Feeding
+// the bare code area here would keep this smoke green while proving nothing about the artifact a user
+// prints and photographs (DEFECTS D47). The code-area frames are kept as a second, still-legitimate
+// input below: a user who scans or crops just the code area, and every plate profile, which has no
+// sheet at all.
+const bitmaps = code.map((b) => (b.sheetMm ? renderSheetBitmap(b) : b));
+step('synthetic corpus ready', bitmaps.length >= 2, `${bitmaps.length} sheet(s), ${bitmaps[0].width}x${bitmaps[0].height}px (code area ${code[0].width}x${code[0].height}px), payload ${n} B`);
+step(
+  'the frames are the shipped shape, not the bare code area',
+  bitmaps[0].width > code[0].width && bitmaps[0].height > code[0].height && bitmaps[0].sheetMm === undefined && bitmaps[0].markSegments > 0,
+  `sheet ${bitmaps[0].width}x${bitmaps[0].height}px, ${bitmaps[0].markSegments} mark segments, margin ${bitmaps[0].marginMm.toFixed(2)}mm · code ${code[0].width}x${code[0].height}px`,
+);
 
 /* ---- 1. real pages through the real receiver path ---- */
 const asm = new TransferAssembler({});
@@ -66,6 +78,27 @@ step('recovered payload matches the input digest', !!out && sha256Hex(out) === w
 /* ---- 2. holding the phone still must not look like progress ---- */
 const again = await collector.addFrame(bitmaps[0]);
 step('a repeated page is a duplicate, not progress', !again.accepted && again.kind === 'duplicate', `kind ${again.kind} · stats ${JSON.stringify(collector.stats)}`);
+
+/* ---- 2b. the bare code area must still decode: a user may scan or crop just that ---- */
+{
+  const asmCode = new TransferAssembler({});
+  const cCode = createBurstCollector({
+    decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }),
+    feed: (page) => asmCode.feed({ levels: page.levels, header: page.headerBytes, channelMissing: page.colourAlive ? [] : ['colour'] }),
+  });
+  const kinds = [];
+  for (const b of code) {
+    const e = await cCode.addFrame(b);
+    kinds.push(e.kind);
+    if (!e.accepted) break;
+  }
+  const outCode = asmCode.result;
+  step(
+    'a code-area-only frame set still recovers the payload',
+    kinds.every((k) => k === 'page') && !!outCode && sha256Hex(outCode) === want,
+    `kinds ${kinds.join(' ')} · sha ${outCode ? sha256Hex(outCode).slice(0, 16) : '-'} vs ${want.slice(0, 16)}`,
+  );
+}
 
 /* ---- 3. the gates, driven by the same signals a camera produces ---- */
 const fakeDecode = async (page) => ({ ok: true, page });

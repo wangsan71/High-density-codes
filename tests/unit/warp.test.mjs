@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { planPage } from '../../core/profiles.js';
 import { encodeTransfer, splitCellLevel } from '../../core/protocol.js';
 import { pageLayout } from '../../core/render/layout.js';
-import { renderPageBitmap, echoBitsOf } from '../../core/render/raster.js';
+import { renderPageBitmap, renderSheetBitmap, echoBitsOf } from '../../core/render/raster.js';
 import { readPageIdeal } from '../../core/decode/ideal.js';
 import { readEcho } from '../../core/decode/echo.js';
 import { findMarkers } from '../../core/decode/fiducial.js';
@@ -239,6 +239,56 @@ test('bytes survive a photo: encode -> print -> tilt -> detect -> rectify -> dec
     assert.ok(asm.result.every((v, i) => v === payload[i]), `${pid}: payload differs`);
     console.log(`  ${pid}${opts.nozzle ? '@' + opts.nozzle : ''}: ${t.pages.length} tilted pages recovered, ${payload.length} B`);
   }
+});
+
+test('a tilted photo of a printed SHEET still decodes: crop marks must not fool marker detection', async () => {
+  // Every other case in this file is a plate (PL-*), which has no sheet at all. Since D45 the paper
+  // artifact a user prints -- and a phone photographs -- is the whole sheet: the code area centred,
+  // with crop marks and registration crosses painted in the margin. That ink is geometry the marker
+  // detector was never told about, so if it mistakes a mark for a fiducial the page stops decoding.
+  // This is the paper counterpart of the plate cases above, on the shape that actually ships (D47).
+  const payload = randBytes(900, 4711);
+  const t = await encodeTransfer(payload, { profile: 'P-M1-300' });
+  const geom = t.geom;
+  const dpi = 300;
+  assert.ok(geom.sheetMm, 'a paper profile must carry a sheet, or this test proves nothing about paper');
+  const layout = pageLayout(geom, dpi, { sheetMm: geom.sheetMm });
+  const H = photoTransform({ scale: 1.1, rot: 0.05, kx: 0.00002, ky: -0.000018 });
+  const asm = new (await import('../../core/protocol.js')).TransferAssembler();
+  let sheets = 0;
+  for (const p of t.pages) {
+    const bm = renderPageBitmap({ geom, levels: p.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(p.header) });
+    const sheet = renderSheetBitmap(bm);
+    assert.ok(sheet.width > bm.width && sheet.height > bm.height, 'the frame must be the sheet, not the code area');
+    assert.equal(sheet.markSegments, 16, 'the margin marks must be in the frame being photographed');
+    const photo = makePhoto(sheet, H, { noise: 8, blur: 1 });
+    const found = findMarkers(photo);
+    assert.ok(found.ok, `sheet marker detection failed: ${found.reason} (${JSON.stringify(found.sizes || [])})`);
+    // Positive control on the quad itself: it must be the four fiducials of the code area, mapped
+    // through the same transform, to within a couple of pixels -- otherwise "detection succeeded"
+    // could mean it locked onto a crop mark and rectified garbage that happened to decode.
+    for (const role of ['tl', 'tr', 'br', 'bl']) {
+      const f = layout.fiducials.find((x) => x.role === role);
+      // Fiducial coordinates are code-area coordinates; the sheet puts the code area at an offset.
+      const want = photoPoint(photo, H, f.x + sheet.contentOffsetPx[0], f.y + sheet.contentOffsetPx[1]);
+      const got = found.quad[role];
+      const err = Math.hypot(got.x - want.x, got.y - want.y);
+      assert.ok(err < 2.5, `${role}: off by ${err.toFixed(2)}px -- detection may have locked onto a margin mark`);
+    }
+    const rect = rectifyPage(photo, layout, found.quad);
+    assert.ok(rect.ok, `sheet rectify failed: ${rect.reason}`);
+    const echo = readEcho(rect, layout);
+    assert.ok(echo.ok, `sheet echo unreadable: ${echo.reason}`);
+    assert.deepEqual(Array.from(echo.headerBytes), Array.from(p.header), 'sheet header mismatch');
+    const read = readPageIdeal(rect, layout, geom, 'PAPER1');
+    await asm.feed({ levels: read.levels, header: echo.headerBytes, channelMissing: read.colourAlive ? [] : ['colour'] });
+    sheets++;
+  }
+  assert.equal(sheets, t.pages.length, 'every sheet page must have gone through the photo chain');
+  assert.ok(asm.result, `sheet photos did not reassemble (${asm.error || 'incomplete'})`);
+  assert.equal(asm.result.length, payload.length);
+  assert.ok(asm.result.every((v, i) => v === payload[i]), 'sheet payload differs');
+  console.log(`  P-M1-300 sheet: ${sheets} tilted A4 photos (marks in the margin) recovered, ${payload.length} B`);
 });
 
 test('a 90-degree rotated page still decodes (orientation comes from the hollow marker)', async () => {
