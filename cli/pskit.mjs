@@ -49,6 +49,18 @@ const HELP = `pskit <command> [options]
     --profile/--nozzle/--dpi/--palette/--plate
                          required only when there is no manifest.json
 
+  calibrate <dir|file>   measure a captured page set; changes no decode decision
+    --photo              same meaning as in receive (force the camera path)
+    --profile/--nozzle/--dpi/--palette/--plate
+                         required only when there is no manifest.json
+                         per page it prints: the readout outcome, how much of the
+                         intra-page RS budget was spent ((2*errors + erasures) over
+                         (blocks * nsym)), and the threshold-free ink-area ratio
+                         (a health check only). NOT a gate: the exit code is not a
+                         verdict, and no threshold is derived from the measurement.
+                         PLAN's M7 calibrate -- an MTF plate that recommends a
+                         nozzle/pitch -- is still unimplemented.
+
   status                 profile / nozzle capacity table
   verify --gate <G>      run an acceptance gate in-process (G0 G1 G2 G3 G5 G7 G8 all)
     --seeds <n>          G1/G3/G7 repetitions (default per gate)
@@ -1148,12 +1160,199 @@ async function cmdRoundtrip(args) {
   if (args.selftest && ok) console.log('selftest PASS');
 }
 
+/**
+ * `pskit calibrate <dir|file>` -- measure a captured page set. Change no decision.
+ *
+ * This is the *measurement* half of the calibrate PLAN puts in M7. It exists because
+ * the ledger kept having to leave one question open: D49 -- G2 measured 200/200 at
+ * 300 dpi and 162/200 at 600 dpi, and "the intra-page ECC margin is too thin" was a
+ * hypothesis, not a measurement. What separates the candidate explanations is how
+ * much of the error-correction budget a page actually spends:
+ *
+ *   - pages clustering just under 100% => the profile sits at the cliff, i.e. a
+ *     capacity/margin problem (the fix is more parity or a coarser pitch);
+ *   - most pages near zero with a few past 100% => bimodal, i.e. something geometric
+ *     or photometric destroys individual pages, and more parity would not save those
+ *     pages at all.
+ *
+ * Two deliberate limits:
+ *
+ *   1. It reuses the receive path verbatim -- same decodePage, same
+ *      TransferAssembler.feed -- so the numbers describe this product instead of a
+ *      parallel implementation free to drift from it. `feed` already returns the
+ *      intraDecode statistics on both the rejection path (core/protocol.js:484) and
+ *      the success path (:489), so nothing under core/ had to change for this.
+ *   2. It derives NO threshold and wires nothing into the detector. Searching for a
+ *      binarisation cut was disproved in round 15 (it asks for x1.3 on a pristine
+ *      render), and any change to decode decisions makes acceptance easier, so it
+ *      would have to be re-judged against G5 (false accepts) first. The ink-area
+ *      ratio printed here is a health indicator only, and carries the caveats written
+ *      in core/decode/calibrate.js's own header (it measures bleed as much as
+ *      coverage, and it was built on a premise that round 15 falsified).
+ *
+ * It is NOT a gate and its exit code is NOT a verdict: a page that fails to read is
+ * data here, not a tool error. G2 remains the judgement (`verify --gate G2`).
+ */
+async function cmdCalibrate(args) {
+  const mod = await load();
+  const { decodePNG } = await import('../core/decode/png-read.js');
+  const { decodePage } = await import('../core/decode/page.js');
+  const { advise } = await import('../core/decode/advice.js');
+  const { inkness } = await import('../core/decode/fiducial.js');
+  const { expectedInkArea, integratedInkArea } = await import('../core/decode/calibrate.js');
+
+  const dir = resolve(args._[0] || '.');
+  const dst = statSync(dir);
+  const names = dst.isDirectory()
+    ? readdirSync(dir).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort()
+    : [basename(dir)];
+  const base = dst.isDirectory() ? dir : dirname(dir);
+  if (!names.length) throw new Error(`calibrate: no page images found in ${dir}`);
+  const manifestPath = join(base, 'manifest.json');
+  const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
+  const profileId = args.profile || manifest?.profile;
+  const nozzle = args.nozzle || manifest?.nozzle;
+  const dpi = args.dpi ? Number(args.dpi) : manifest?.dpi || 300;
+  const paletteId = args.palette || manifest?.palette || 'INK2';
+  if (!profileId) throw new Error('calibrate: no manifest.json and no --profile, cannot know the page geometry');
+  const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
+  const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
+  const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });
+  const exp = expectedInkArea(geom, layout.glyph, { dpi });
+  const median = (a) => {
+    if (!a.length) return NaN;
+    const s = [...a].sort((x, y) => x - y);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+
+  console.log(`calibrate: ${dir}`);
+  console.log(
+    `  geometry   profile ${profileId}  dpi ${dpi}  palette ${paletteId}  layout ${layout.width}x${layout.height}px` +
+      `  intra RS k=${geom.ecc.intra.k} nsym=${geom.ecc.intra.nsym}` +
+      (exp.ok ? `  expected ink fraction ${exp.expectedFraction.toFixed(4)}` : `  expected ink unavailable (${exp.reason})`),
+  );
+  console.log(
+    '  budget     (2*errors + erasures) / (blocks * nsym): an error costs two units, an erasure one; over 100% = past what intra-page RS can absorb',
+  );
+
+  const asm = new mod.protocol.TransferAssembler({ passphrase: args.passphrase });
+  const opts = { allowFastPath: !args.photo, requireFastPath: false, log: null };
+  const rows = [];
+  for (const name of names) {
+    if (/\.tiff?$/i.test(name)) {
+      console.log(`  ${name}: skipped (TIFF read-back is not wired yet)`);
+      continue;
+    }
+    const bytes = new Uint8Array(readFileSync(join(base, name)));
+    let bitmap;
+    try {
+      bitmap = decodePNG(bytes);
+    } catch (e) {
+      console.log(`  ${name}: not a readable PNG (${e.message})`);
+      rows.push({ name, stage: 'file', reason: e.message });
+      continue;
+    }
+    bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
+    const t0 = performance.now();
+    const r = decodePage(bitmap, { geom, layout, paletteId }, opts);
+    const ms = Math.round(performance.now() - t0);
+    if (!r.ok) {
+      const a = advise(r);
+      console.log(`  ${name}: FAIL ${r.stage}/${r.reason} [${ms}ms]`);
+      console.log(`      cause: ${a.cause}`);
+      rows.push({ name, stage: r.stage, reason: r.reason, ms });
+      continue;
+    }
+    const fed = await asm.feed({
+      levels: r.levels,
+      header: r.headerBytes,
+      channelMissing: r.colourAlive ? [] : ['colour'],
+    });
+    const h = r.header || {};
+    const ink = integratedInkArea(inkness(bitmap));
+    const ratio = ink.ok && exp.ok ? ink.fraction / exp.expectedFraction : NaN;
+    const s = fed.stats;
+    if (!s) {
+      console.log(
+        `  ${name}: page ${h.pageIndex ?? '?'} ${fed.duplicate ? 'duplicate -- nothing new to measure' : `not fed (${fed.reason || 'no stats'})`} [${ms}ms]`,
+      );
+      rows.push({ name, page: h.pageIndex, stage: 'assemble', reason: fed.duplicate ? 'duplicate' : fed.reason || 'no-stats', ms, ratio });
+      continue;
+    }
+    const nsym = h.intraNsym || geom.ecc.intra.nsym;
+    const capacity = s.blocks * nsym;
+    // Blocks that fail report no error count at all (core/protocol.js:247 just pushes
+    // the index and moves on), so each is charged its whole budget. The percentage is
+    // therefore a LOWER bound whenever failedBlocks is non-empty -- saying so on the
+    // same line is what keeps this a measurement instead of a number that quietly
+    // flatters the profile.
+    const lowerBound = 2 * s.errors + s.erasures + s.failedBlocks.length * nsym;
+    const pct = capacity > 0 ? (lowerBound / capacity) * 100 : NaN;
+    rows.push({ name, page: h.pageIndex, ms, ratio, pct, s, ok: !!fed.ok, reason: fed.ok ? null : fed.reason });
+    console.log(
+      `  ${name}: page ${h.pageIndex ?? '?'} read out [${ms}ms] path=${r.path}` +
+        (r.path === 'photo' ? ` marker ${r.markerPx?.toFixed(1)}px cover ${((r.coverage || 0) * 100).toFixed(0)}%` : '') +
+        (r.colourAlive ? '' : ' [colour channel dead -> erasure]') +
+        (fed.ok ? '' : ` REJECTED (${fed.reason})`),
+    );
+    console.log(
+      `      ecc      blocks ${s.blocks}  clean ${s.cleanBlocks}  errors ${s.errors}  erasures ${s.erasures}  failedBlocks ${s.failedBlocks.length}` +
+        `  (k=${h.intraK ?? geom.ecc.intra.k} nsym=${nsym})`,
+    );
+    console.log(
+      `      budget   ${lowerBound}/${capacity} units = ${pct.toFixed(1)}%` +
+        (s.failedBlocks.length ? '  LOWER BOUND (failed blocks report no error count; each is charged its whole budget)' : ''),
+    );
+    console.log(
+      `      ink      integrated ${ink.ok ? ink.fraction.toFixed(4) : 'n/a'} / expected ${exp.ok ? exp.expectedFraction.toFixed(4) : 'n/a'}` +
+        (Number.isFinite(ratio) ? ` = ${ratio.toFixed(2)}x  (health check only -- it measures bleed as much as coverage)` : '  (ratio unavailable)'),
+    );
+  }
+
+  const measured = rows.filter((r) => r.s);
+  const dead = rows.filter((r) => !r.s);
+  console.log('  ---');
+  console.log(`  summary    ${names.length} image(s): ${measured.length} read out with ECC stats, ${dead.length} not measured`);
+  if (dead.length) {
+    const by = new Map();
+    for (const d of dead) {
+      const k = `${d.stage || '?'}/${d.reason || '?'}`;
+      by.set(k, (by.get(k) || 0) + 1);
+    }
+    for (const [k, n] of [...by.entries()].sort((a, b) => b[1] - a[1])) console.log(`      not measured: ${k} x${n}`);
+  }
+  if (measured.length) {
+    const pcts = measured.map((r) => r.pct).filter(Number.isFinite);
+    const ratios = measured.map((r) => r.ratio).filter(Number.isFinite);
+    const cleanPages = measured.filter((r) => r.s.failedBlocks.length === 0 && r.s.errors === 0 && r.s.erasures === 0).length;
+    const blocks = measured.reduce((a, r) => a + r.s.blocks, 0);
+    const cleanBlocks = measured.reduce((a, r) => a + r.s.cleanBlocks, 0);
+    const failedBlocks = measured.reduce((a, r) => a + r.s.failedBlocks.length, 0);
+    const anyLB = measured.some((r) => r.s.failedBlocks.length > 0);
+    console.log(
+      `      budget   min ${Math.min(...pcts).toFixed(1)}%  median ${median(pcts).toFixed(1)}%  max ${Math.max(...pcts).toFixed(1)}%` +
+        (anyLB ? '  (at least one page is a LOWER bound)' : ''),
+    );
+    console.log(
+      `      pages    perfectly clean ${cleanPages}/${measured.length}  blocks clean ${cleanBlocks}/${blocks}  blocks failed ${failedBlocks}`,
+    );
+    if (ratios.length) {
+      console.log(
+        `      ink      ratio min ${Math.min(...ratios).toFixed(2)}x  median ${median(ratios).toFixed(2)}x  max ${Math.max(...ratios).toFixed(2)}x`,
+      );
+    }
+  }
+  console.log('  note       this command measured; it changed no decode decision and derived no threshold. It is not a gate.');
+}
+
 const args = parseArgs(process.argv.slice(2));
 const cmd = args._[0];
 try {
   if (args.help || !cmd) console.log(HELP);
   else if (cmd === 'send') await cmdSend(args._.length > 1 ? { ...args, _: args._.slice(1) } : args);
   else if (cmd === 'receive') await cmdReceive({ ...args, _: args._.slice(1) });
+  else if (cmd === 'calibrate') await cmdCalibrate({ ...args, _: args._.slice(1) });
   else if (cmd === 'status') await cmdStatus();
   else if (cmd === 'verify') await cmdVerify(args);
   else if (cmd === 'roundtrip') await cmdRoundtrip(args);
