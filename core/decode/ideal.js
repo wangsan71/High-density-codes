@@ -314,7 +314,16 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
       // narrower scope on purpose: widening it would change `colourAlive`, which is a decision
       // rather than a report, and this change is required to leave every decision untouched.
       let colourLevel = 0;
-      if (colourChannel) colourLevel = nearestInk(a.ink, pal);
+      // Restricted to the inks this candidate's colour channel can actually address. nearestInk returns
+      // an INDEX INTO THE PALETTE, while joinCellLevels below validates against the GEOMETRY's level
+      // count, and candidatePlans crosses every profile with INK2/INK4/PAPER1 without checking that the
+      // two agree -- so P-C4-600 (a 2-level colour channel) under INK4 (4 inks) measured cells nearest
+      // to ink 2 or 3 and threw "colour level 2 out of range 0..1" on a real 600 dpi scan (DEFECTS D55,
+      // measured round 65, root-caused round 70). Restricting the search is symmetric with the encoder,
+      // which prints pal.inks[level % inks.length] -- for a 2-level channel that is inks[0] and inks[1],
+      // exactly the two searched here -- and it is a no-op whenever the palette offers no more inks than
+      // the channel has levels, which is every combination that could not already throw.
+      if (colourChannel) colourLevel = nearestInk(a.ink, pal, colourChannel.levels);
       colourArr[i] = colourLevel;
       if (shapeLevel === null) {
         shapeCounts[0]++;
@@ -414,10 +423,30 @@ export function readPageIdeal(bitmap, layout, geom, palette = 'INK2') {
   };
 }
 
-function nearestInk(rgb, pal) {
+/**
+ * Index of the palette entry closest to a measured ink, searching only the first `limit` entries.
+ *
+ * `limit` exists because the palette and the geometry are chosen independently: a candidate pairs a
+ * profile, which declares how many colour LEVELS a cell has, with a palette, which declares how many
+ * INKS exist, and nothing in candidatePlans checks that the second number is no larger than the first.
+ * The value returned here goes straight to joinCellLevels, which validates it against the geometry, so
+ * an unrestricted search turned a wrong guess into an exception instead of a refusal (DEFECTS D55:
+ * "colour level 2 out of range 0..1" under P-C4-600 + INK4). Two of the thirty profile x palette
+ * combinations candidatePlans offers are mismatched that way, both against INK4 -- P-C4-600 and PL-D2,
+ * each declaring two colour levels -- and neither is a profile with no colour channel at all, where
+ * this function is not called.
+ *
+ * Exported, though it stays internal to the decode path, because this invariant is the whole of D55's
+ * root cause and a private helper could not be pinned by a test. The default keeps the old meaning for
+ * a caller that only wants the palette's own opinion.
+ */
+export function nearestInk(rgb, pal, limit = pal.inks.length) {
+  // Never fewer than one entry: the answer must stay a valid index for any limit, including 0, which is
+  // what a caller with no colour channel would pass -- and 0 is also the level such a caller wants.
+  const n = Math.min(pal.inks.length, Math.max(1, Math.floor(Number(limit) || 0)));
   let best = 0;
   let bestD = Infinity;
-  for (let i = 0; i < pal.inks.length; i++) {
+  for (let i = 0; i < n; i++) {
     const d = dist2(rgb, pal.inks[i]);
     if (d < bestD) {
       bestD = d;
@@ -431,13 +460,15 @@ function nearestInk(rgb, pal) {
  * Not used by the colour-alive decision (which is deliberately conservative);
  * kept and exercised because the camera decoder will need a quality metric and
  * an untested helper there would be worse than a few dead lines here.
+ * `limit` is nearestInk's: pass the candidate's colour level count so this report describes the
+ * inks the decision actually searched, instead of a wider palette nobody used (DEFECTS D55).
  * @internal */
-export function inkSpread(cells, pal) {
+export function inkSpread(cells, pal, limit = pal.inks.length) {
   let acc = 0;
   let n = 0;
   for (const c of cells) {
     if (!c.ink) continue;
-    const i = nearestInk(c.ink, pal);
+    const i = nearestInk(c.ink, pal, limit);
     acc += Math.sqrt(dist2(c.ink, pal.inks[i])) / 441.7;
     n++;
     if (n > 400) break;

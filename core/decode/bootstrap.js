@@ -162,7 +162,12 @@ export async function bootstrapDecode(bitmap, opts = {}) {
       // A wrong candidate can make the readout THROW instead of reporting a failure. Measured in
       // round 65 on a 600 dpi channel page: "joinCellLevels: colour level 2 out of range 0..1"
       // from core/decode/ideal.js -- under that candidate's palette the readout measured a colour
-      // level the candidate's own channel cannot hold. planPage, pageLayout and getPalette were
+      // level the candidate's own channel cannot hold. That one is fixed at its source now: nearestInk
+      // searches only the inks the candidate's colour channel can address, so the readout cannot produce
+      // a level joinCellLevels would reject (DEFECTS D55, root-caused round 70). This catch stays and is
+      // deliberately no longer load-bearing for that case -- a wrong guess has to cost time and never a
+      // session, whatever the reason it fails, and "the readout cannot throw" is a claim about today's
+      // code rather than a property of guessing. planPage, pageLayout and getPalette were
       // already caught and recorded per candidate; this call was the one that was not, so the
       // exception escaped bootstrapDecode and landed on the caller. In a browser or a phone burst
       // that is not a refusal, it is a crash in the middle of receiving, and the contract this
