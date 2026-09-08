@@ -172,7 +172,10 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
     }
   }
 
-  return { width, height, pixels, dpi: layout.dpi, layout, substrate, palette: pal.id };
+  // sheetMm rides along so the PDF writer can make the page the paper rather than the code area
+  // (DEFECTS D44). pageMm is deliberately NOT attached: the writer derives the content box from
+  // width/dpi exactly as it always has, so adding only the sheet leaves every existing byte alone.
+  return { width, height, pixels, dpi: layout.dpi, layout, substrate, palette: pal.id, sheetMm: layout.sheetMm ? [layout.sheetMm.w, layout.sheetMm.h] : undefined };
 }
 
 /**

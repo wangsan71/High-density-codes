@@ -134,6 +134,26 @@ function checkPageMm(v) {
   return { w: v[0], h: v[1] };
 }
 
+/**
+ * Optional sheet (paper) size in mm: [wMm, hMm]. When present the page is the paper and the
+ * raster is centred on it, with crop marks and registration crosses drawn in the margin.
+ * Distinct from pageMm on purpose: pageMm says how big the *content* is, sheetMm says what the
+ * user actually loaded into the printer (DEFECTS D44).
+ */
+function checkSheetMm(v) {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) && !(v instanceof Float64Array)) {
+    throw new TypeError('encodePDFDocument: sheetMm must be [wMm, hMm] or absent');
+  }
+  if (v.length !== 2) throw new RangeError('encodePDFDocument: sheetMm must have 2 entries');
+  for (const n of v) {
+    if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+      throw new RangeError(`encodePDFDocument: bad sheetMm entry ${n}`);
+    }
+  }
+  return { w: v[0], h: v[1] };
+}
+
 /* ------------------------------------------------------------------ */
 /* byte helpers                                                        */
 /* ------------------------------------------------------------------ */
@@ -229,7 +249,7 @@ export function encodePDFDocument(images) {
   if (!list.length) throw new RangeError('encodePDFDocument: no pages to write');
   const pages = list.map((img) => {
     const { width, height, pixels, dpi } = checkRaster(img, 'encodePDFDocument');
-    return { width, height, pixels, dpi, substrate: checkSubstrate(img.substrate), pageMm: checkPageMm(img.pageMm) };
+    return { width, height, pixels, dpi, substrate: checkSubstrate(img.substrate), pageMm: checkPageMm(img.pageMm), sheetMm: checkSheetMm(img.sheetMm) };
   });
 
   const header = cat([ascii(`%PDF-1.4\n`), new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a])]);
@@ -239,16 +259,49 @@ export function encodePDFDocument(images) {
   ];
 
   pages.forEach((p, i) => {
-    const { width, height, pixels, dpi, substrate, pageMm } = p;
+    const { width, height, pixels, dpi, substrate, pageMm, sheetMm } = p;
     const pageNo = 3 + i * 3;
     const imageNo = pageNo + 1;
     const contentNo = pageNo + 2;
-    const wPt = pageMm ? numPt(pageMm.w * PT_PER_MM) : numPt((width / dpi) * 72);
-    const hPt = pageMm ? numPt(pageMm.h * PT_PER_MM) : numPt((height / dpi) * 72);
+    // Content box: what this writer has always produced -- pageMm when the caller states a physical
+    // size, otherwise the bitmap's own extent at its own dpi. The sheet work below does not touch it.
+    const wNum = pageMm ? pageMm.w * PT_PER_MM : (width / dpi) * 72;
+    const hNum = pageMm ? pageMm.h * PT_PER_MM : (height / dpi) * 72;
+    const wPt = numPt(wNum);
+    const hPt = numPt(hNum);
+
+    // Sheet box: the paper. With it the page IS the paper and the content is centred on it, so the
+    // margins are real and crop marks have somewhere to live (D44). Without it the page is the
+    // content and the bytes are identical to what this module produced before the sheet existed.
+    // pageLayout already refuses a page that does not fit its sheet; this refuses as well, because a
+    // writer that trusts its callers eventually clips ink and says nothing about it.
+    let boxWPt = wPt;
+    let boxHPt = hPt;
+    let txNum = 0;
+    let tyNum = 0;
+    let txPt = '0';
+    let tyPt = '0';
+    let sheetWNum = 0;
+    let sheetHNum = 0;
+    if (sheetMm) {
+      sheetWNum = sheetMm.w * PT_PER_MM;
+      sheetHNum = sheetMm.h * PT_PER_MM;
+      if (sheetWNum < wNum - 1e-9 || sheetHNum < hNum - 1e-9) {
+        throw new RangeError(
+          `encodePDFDocument: sheet ${sheetMm.w}x${sheetMm.h}mm cannot carry a ${(wNum / PT_PER_MM).toFixed(1)}x${(hNum / PT_PER_MM).toFixed(1)}mm page`,
+        );
+      }
+      boxWPt = numPt(sheetWNum);
+      boxHPt = numPt(sheetHNum);
+      txNum = (sheetWNum - wNum) / 2;
+      tyNum = (sheetHNum - hNum) / 2;
+      txPt = numPt(txNum);
+      tyPt = numPt(tyNum);
+    }
 
     const imageData = zlibWrap(filteredScanlines(width, height, pixels));
     const pageObj = ascii(
-      `${pageNo} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${wPt} ${hPt}]\n` +
+      `${pageNo} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${boxWPt} ${boxHPt}]\n` +
         `   /Resources << /XObject << /Im0 ${imageNo} 0 R >> /ProcSet [/PDF /ImageC] >>\n` +
         `   /Contents ${contentNo} 0 R >>\nendobj\n`,
     );
@@ -266,12 +319,59 @@ export function encodePDFDocument(images) {
       imageData,
       ascii(`\nendstream\nendobj\n`),
     ]);
+    // Crop marks at the four corners of the code area and a registration cross centred in each
+    // margin, as vector strokes rather than pixels: they stay crisp at any printer resolution, and
+    // they are geometry the decoder never has to interpret. Every length is derived from the margin
+    // itself, so the marks always fit -- a fixed 5 mm arm on a 3 mm margin would be clipped by the
+    // printer, or worse, land on the code area, and ink the decoder was never told about is exactly
+    // how a page stops decoding. gap+arm is 0.8 of the margin and the crosses stay within 0.8 of
+    // their half-margin, so nothing here can reach the content box; tests/unit/pdf-truesize.test.mjs
+    // asserts that from the written bytes rather than trusting this comment.
+    let marks = '';
+    if (sheetMm) {
+      const margin = Math.min(txNum, tyNum);
+      if (margin > 0.5) {
+        // Degenerate case: sheet == content leaves no margin, so there is nowhere to put a mark.
+        // Nothing is drawn and nothing is claimed; the page then equals the code area, which is the
+        // pre-D44 shape, and the caller's own size check still sees a MediaBox it can judge.
+        const gap = margin * 0.25;
+        const arm = margin * 0.55;
+        const cross = margin * 0.3;
+        const x0 = txNum;
+        const y0 = tyNum;
+        const x1 = txNum + wNum;
+        const y1 = tyNum + hNum;
+        const seg = [];
+        for (const [cx, sx] of [[x0, -1], [x1, 1]]) {
+          for (const [cy, sy] of [[y0, -1], [y1, 1]]) {
+            const vx = cx + sx * gap;
+            const hy = cy + sy * gap;
+            seg.push(`${numPt(vx)} ${numPt(hy)} m ${numPt(vx + sx * arm)} ${numPt(hy)} l`);
+            seg.push(`${numPt(vx)} ${numPt(hy)} m ${numPt(vx)} ${numPt(hy + sy * arm)} l`);
+          }
+        }
+        for (const [cx, cy] of [
+          [sheetWNum / 2, tyNum / 2],
+          [sheetWNum / 2, sheetHNum - tyNum / 2],
+          [txNum / 2, sheetHNum / 2],
+          [sheetWNum - txNum / 2, sheetHNum / 2],
+        ]) {
+          seg.push(`${numPt(cx - cross)} ${numPt(cy)} m ${numPt(cx + cross)} ${numPt(cy)} l`);
+          seg.push(`${numPt(cx)} ${numPt(cy - cross)} m ${numPt(cx)} ${numPt(cy + cross)} l`);
+        }
+        marks = `0 0 0 RG\n1 w\n${seg.join('\n')}\nS\n`;
+      }
+    }
+
     // The substrate fill is invisible while /Im0 covers the box; it is there so a
-    // viewer that clips the image still shows material colour, not white.
+    // viewer that clips the image still shows material colour, not white. With a sheet it covers the
+    // whole page, because the paper is the page now and a coloured substrate that stopped at the
+    // code area would print as a rectangle the user did not ask for.
     const content = ascii(
       `q\n` +
-        (substrate ? `${numUnit(substrate[0])} ${numUnit(substrate[1])} ${numUnit(substrate[2])} rg\n0 0 ${wPt} ${hPt} re f\n` : '') +
-        `${wPt} 0 0 ${hPt} 0 0 cm\n/Im0 Do\nQ\n`,
+        (substrate ? `${numUnit(substrate[0])} ${numUnit(substrate[1])} ${numUnit(substrate[2])} rg\n0 0 ${boxWPt} ${boxHPt} re f\n` : '') +
+        marks +
+        `${wPt} 0 0 ${hPt} ${txPt} ${tyPt} cm\n/Im0 Do\nQ\n`,
     );
     const contentObj = cat([ascii(`${contentNo} 0 obj\n<< /Length ${content.length} >>\nstream\n`), content, ascii(`\nendstream\nendobj\n`)]);
     objects.push(pageObj, imageObj, contentObj);

@@ -152,6 +152,14 @@ export function pageLayout(geom, dpi, opts = {}) {
     fiducials,
     echo,
     physicalMm: phys,
+    /**
+     * The paper this layout was fitted to, or null when it was fitted to a plate (or to nothing).
+     * Recorded because the PDF writer needs the sheet, not the code area: a page whose MediaBox is
+     * the code area prints at the right size but is not the paper the user loaded, leaves no margin
+     * for crop marks, and invites the "fit to page" click that scales the geometry (DEFECTS D44/D8).
+     * Plates deliberately get null -- their artifact is 3MF/STL, and marks on a plate PDF are noise.
+     */
+    sheetMm: opts.sheetMm ? { w: opts.sheetMm.w, h: opts.sheetMm.h } : null,
     /** centre of lattice cell (c, r) in pixels */
     cellCentre(c, r) {
       return { x: originX + (c + 0.5) * cellPx, y: originY + (r + 0.5) * cellPx };
