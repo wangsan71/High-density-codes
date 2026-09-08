@@ -56,8 +56,11 @@
   <section id="out" hidden>
     <h2>结果</h2>
     <p id="result-line"></p>
+    <p class="row"><label>存成什么名字（可选）<input id="outname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf"></label>
+      <span id="outname-note" class="note"></span></p>
     <a id="download" download="received.bin"><button type="button">保存还原出的文件</button></a>
     <p class="hint">只有 SHA-256 与页头声明的摘要一致时才会出现这个按钮。部分还原从不落盘。</p>
+    <p class="hint">页头里<b>没有文件名字段</b>（只有摘要），所以默认名是从字节导出的 <code>pskt-…B-….bin</code>，留空就用它。<b>手机上想直接打开就在上面填回原来的名字带扩展名</b>（例如 <code>report.pdf</code>）：iOS/Android 靠扩展名决定用什么打开；只填 <code>.pdf</code> 也行，会把默认名的扩展名换掉。名字只在你本机用于命名下载，不会被发送、不会进页码。</p>
   </section>
 
   <section id="log-wrap">
@@ -85,6 +88,8 @@
     <button id="burststop" type="button" hidden>停止</button>
     <span id="burstprog" class="hint"></span>
   </div>
+  <p class="row"><label>存成什么名字（可选）<input id="burstname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf"></label>
+    <span class="hint">收齐后按这个名字下载；留空则用摘要名 <code>pskt-…B-….bin</code>。<b>手机上想直接打开就带上扩展名</b>（只填 <code>.pdf</code> 也可以）。名字只用于本机命名下载，不发送、不进页码。</span></p>
   <pre id="burst-log" class="log" aria-live="polite"></pre>
 </section>
 

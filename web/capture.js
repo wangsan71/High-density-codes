@@ -25,6 +25,13 @@
  * Node costs nothing.
  */
 import { decodeHeader } from '../core/frame.js';
+// Download-name policy, shared with app.js (DEFECTS D62). Static and spelled '../core/' like the import
+// above: tools/smoke-capture.mjs loads this file from Node, so its static imports have to resolve in the
+// source tree, and tools/build-web.mjs rewrites '../core/' to './core/' when it copies this file to
+// dist. The dynamic './core/...' imports further down are the opposite case -- they only ever run in a
+// browser, from dist, so they are spelled the way dist needs them. Do not "tidy" one set to match the
+// other; both spellings are load-bearing.
+import { downloadName } from '../core/naming.js';
 
 const GATE_DEFAULTS = { minMarkerPx: 14, minCoverage: 0.72, maxConsecutiveRejections: 40 };
 
@@ -244,12 +251,20 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
               for (let i = 0; i < out.length; i += 0x8000) s += String.fromCharCode.apply(null, out.subarray(i, i + 0x8000));
               const a = document.createElement('a');
               const dg = sha256Hex(out);
+              // The default name still comes from the bytes: the printed header has no name field, so
+              // anything else would be a claim the pages cannot support. Typing a name is optional and
+              // changes nothing about what was decoded -- but on a phone it is the difference between a
+              // file that opens and one the OS cannot place, because the handler comes from the
+              // extension (DEFECTS D62). Policy is core/naming.js, shared with app.js, unit-tested;
+              // nothing here improvises a filename.
+              const nameEl = $('burstname');
+              const name = downloadName({ byteLength: out.length, sha256Hex: dg, userText: nameEl ? nameEl.value : '' });
               a.href = `data:application/octet-stream;base64,${btoa(s)}`;
-              a.download = `pskt-${out.length}B-${dg.slice(0, 12)}.bin`;
+              a.download = name;
               document.body.appendChild(a);
               a.click();
               a.remove();
-              say(`完成：${out.length.toLocaleString()} B · SHA-256 ${dg}（文件名由摘要导出，因为没有文件名字段）`, 'ok');
+              say(`完成：${out.length.toLocaleString()} B · SHA-256 ${dg} · 已按「${name}」下载（页头没有文件名字段：留空时名字由摘要导出，填了就按你填的存；手机要靠扩展名才知道用什么打开）`, 'ok');
             }
             return;
           }

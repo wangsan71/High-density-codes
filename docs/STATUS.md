@@ -121,6 +121,15 @@
 
 ## 已知风险 / 待办
 
+### 第 69 轮（**手机用户拿回的文件叫 `.bin`、打不开（D62）：默认名一个字不动，给用户一个可选的名字输入，策略做成纯 core 模块 + 单测**）
+
+- **缺口在哪**：两条网页接收路径都硬编码 `pskt-${len}B-${digest12}.bin`（`web/app.js` L116、`web/capture.js` L248）。**默认名本身是对的**——页头没有文件名字段（`core/frame.js` 只有 magic..length..pages..digest..crc16），`app.js` L113-115 的注释也写明"唯一诚实的默认名是从字节导出的，**用户之后自己改名**"⇒ 缺陷是**那半句在手机上不成立**：iOS/Android **靠扩展名决定用什么打开**，`.bin` 没有对应处理器 ⇒ 摘要核对通过、字节一致，**然后打不开**，还得进系统文件管理器改名（多数人不知道扩展名才是关键）。**CLI 没这问题**（`receive --out <file>`，`cli/pskit.mjs` L47）⇒ 缺口只在网页两条路径，而手机端正是目标里的路径 ②。
+- **动手前先确认了三件决定成败的事实**（否则一定踩坑）：① `app.js` 在源码树里就写 `./core/…`（L11-19，bundler 的特例解析）② `capture.js` 写 `../core/…`，`tools/build-web.mjs` L378 有专门改写 `'../core/` → `'./core/`、L277 把它**排除在 bundle 之外**（原样拷贝）③ **`tools/smoke-capture.mjs` L27 会从 Node 加载 `web/capture.js`** ⇒ 它的**静态** import 必须在源码树里可解析 ⇒ 只能写 `'../core/naming.js'`；它内部那些动态 `'./core/…'` 是**相反的拼法、只在 dist 里跑得通** ⇒ 两种拼法都承重，注释里已写明别"顺手统一"。
+- **修法**：新增**纯 core 模块** `core/naming.js`（Node 与浏览器同一份、零依赖）= `digestName` / `sanitizeFileName` / `downloadName` / `MAX_NAME_LEN`；两条网页路径都改成调它，**默认名逐字节不变**；`web/index.html` 两处各加一个**可选**输入（`#outname` + 显示"将保存为：X"的 `#outname-note`、连拍节 `#burstname`），并写明"名字只用于本机命名下载，不发送、不进页码"。规则：路径分隔符 / Windows 保留字符 / 控制字符剥掉；**任何以点开头的输入一律回退**（`../../etc/passwd` 去掉分隔符后仍以点开头 ⇒ 回退到摘要名，而不是"清洗成一个看着像的名字"）；保留设备名（`NUL`/`COM1`/`lpt9`）回退；超长**截词干、保扩展名**；**只填 `.pdf`**（手机用户最可能干的事）读作"把默认名的 `.bin` 换掉" ⇒ 词干仍由摘要导出、不发明任何东西。**策略放 core 而不是每页各写一份**，是因为两份清洗规则一定会漂移到其中一份放出穿越路径，而 `download` 属性是要落盘的、不是能临场发挥的地方。
+- **验证**：新单测 `tests/unit/naming.test.mjs` **4/4 全过**（`NAMING_EXIT=0`）——第一条是**阳性对照**：留空时必须与两个页面原先硬编码的字符串**逐字节相同**（页面在进程内加载不了 ⇒ 默认名悄悄变了别处不会报警）；另一条拿 **18 个恶意输入**断言**非空 / 无分隔符 / 无 `..` / 不以点开头 / ≤120 字符 / 无非法字符**，外加截断保扩展名与 `.pdf` 语义。全套 **`tests 311 · pass 311 · fail 0 · duration_ms 134726`**（307 + 4 ⇒ 数目对得上，没有测试被挤掉）、`SUITE_EXIT=0` ✓ `BUILD_EXIT=0`：precache **53 → 54**、单文件页 **306.4 → 315.2 KiB**（naming 已内联）、`web/dist/core/naming.js` 6554 B、`dist/capture.js` 的 import 已改写成 `'./core/naming.js'` ✓ `CHECKDIST_EXIT=0`、**13 pass / 0 fail**、`every id unique within its own page, across 4 built page(s)`、**`G9 CHECK: all 13 assertions pass`**（新增三个 id 都在构建页里且各页唯一）✓ `smoke-capture` 全过（4 帧 / 3 收 / 1 重复 / 0 拒）✓ **端到端 usability 冒烟 11 PASS / 0 FAIL / 126 s**（改完才跑）⇒ **协议、页图、摘要、判据一律未动：不改信道一个比特**。
+- **插曲（如实）**：第一次跑单测用 `node --test tests/unit/naming.test.mjs`（漏了 `--test-isolation=none`）⇒ `spawn EPERM`（runner 为每个文件 spawn 子进程、沙箱禁管道 stdio），`AGENTS.md` 早写着这条 ⇒ **是调用方式错、不是测试错**；按文档加 flag 后 4/4 过。
+- **60 min soak 仍在跑**（第 68 轮起的，目的是把"收敛到工作集"与"慢泄漏"分开）：到 **18.6 min / 86 cycles / 858 页解码 / 0 误接受 / 0 错误** ⇒ 判决**下一轮收**（没跑完就不写）。**M4 仍只差 G4（要你的手机），不打 tag** ✓
+
 ### 第 68 轮（**发送页给每页都建一张 base64 预览 ⇒ 第 66 轮从 pack.pdf 移走的开销搬回了 DOM（D61）；顺带查出我上一轮那条打印提醒排在花钱之后；并收了 G6 的 soak 判决：`PASS G6`，三项第一次同源**）
 
 - **上一轮挂账的这条这轮修了，而且量级比记账时大**：第 67 轮记的是"168 页 ≈ 79 MB base64 串 + 59 MB PNG"——**只算了字符串**。这轮读 `web/sender.js` L296-343 时把**浏览器解码**那一半也算进来：A4/300dpi 一页 = 2480×3508 px ⇒ 一张 RGBA 位图 **≈34.8 MB**（与第 66 轮 `tools/sender-memory-probe.mjs` 在 Node 侧对同一批位图实测的 **30.6 MB/页 RSS** 同量级）⇒ 168 页预览是 **GB 级解码位图**，不是 79 MB；而 `docs/USE.md` 明说发送页在手机上"也能开" ⇒ **手机发送端首当其冲**（`loading="lazy"` 只是提示、不是承诺）。

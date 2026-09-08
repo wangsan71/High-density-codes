@@ -17,6 +17,10 @@ import { feedPageWithRecalibration } from './core/decode/recalibrate.js';
 import { sha256Hex } from './core/hash.js';
 import { PROFILE_IDS, PROFILES } from './core/profiles.js';
 import { advise } from './core/decode/advice.js';
+// The download-name policy (DEFECTS D62): shared with capture.js and the CLI's users, pure, and pinned
+// by tests/unit/naming.test.mjs. Not improvised here, because a `download` attribute built from typed
+// text has to come out a single safe path component on every platform.
+import { downloadName } from './core/naming.js';
 
 const $ = (id) => document.getElementById(id);
 const logEl = $('log');
@@ -112,8 +116,21 @@ async function run() {
   $('download').href = url;
   // Named by its own digest, not by a filename: the printed header carries no name field
   // (frame.js:14-28 lists magic..digest..crc16 and nothing else), so the only honest
-  // default is a name derived from the bytes themselves. The user renames it after.
-  $('download').download = `pskt-${asm.result.length}B-${digest.slice(0, 12)}.bin`;
+  // default is a name derived from the bytes themselves. That default is unchanged and
+  // tests/unit/naming.test.mjs pins it byte for byte. What changed is the second half of
+  // the old comment, "the user renames it after": on a phone that rename has to happen
+  // inside the OS file manager, and until it does nothing will open the file, because iOS
+  // and Android pick the handler from the extension (DEFECTS D62). So the user can type a
+  // name here instead. The policy that turns typed text into one safe path component is
+  // core/naming.js, shared with capture.js. The note says which name will be used, since a
+  // download whose name the user cannot see is a download the user cannot find afterwards.
+  const applyName = () => {
+    const name = downloadName({ byteLength: asm.result.length, sha256Hex: digest, userText: $('outname').value });
+    $('download').download = name;
+    $('outname-note').textContent = `将保存为：${name}`;
+  };
+  $('outname').addEventListener('input', applyName);
+  applyName();
   $('result-line').textContent = `已逐字节还原：${asm.result.length} 字节 · SHA-256 ${digest.slice(0, 16)}…（与页头声明摘要一致才走到这里）· ${accepted} 页被接受`;
   $('out').hidden = false;
   log(`完成：${asm.result.length} 字节，摘要核对通过`);
