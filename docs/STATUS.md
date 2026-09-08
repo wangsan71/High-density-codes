@@ -121,6 +121,14 @@
 
 ## 已知风险 / 待办
 
+### 第 70 轮（**发送页的大产物下载会静默失败（D63）：不动下载机制，把风险与"不经浏览器"的出路如实说出来**）
+
+- **缺口**：`give()` 是发送页上**唯一**的下载出口（L410 zip、L415 pack.pdf、L420 3mf/stl 三处调用都走它），它先把整个产物变成 JS 字符串、再 `btoa`、再拼进 `data:` URL ⇒ 168 页的 zip（约 63 MB）意味着 **~295 MB 的瞬时字符串**（UTF-16 中间串 2n + base64 两份 2×4n/3 ≈ 产物的 **4.7 倍**），而**页面无法知道下载有没有成功**（浏览器不给"文件已落地"这个事件）⇒ 失败模式是"什么都没发生"= **静默失败**，与 D58 同一形状。第 68 轮把这条记在"仍未修"里，但只记了体量、**没记它会静默** ⇒ 本轮补上并修掉。
+- **为什么不直接换 `blob:`**：`URL.createObjectURL` 更稳，但 `send.html` 的 CSP 与真机行为**本机没有浏览器可验** ⇒ 盲改可能把现在能用的弄坏（第 68 轮已按这个判断记账）⇒ 本轮**不动下载机制**，只把风险与出路如实说出来；换 `blob:` 仍归入需要真浏览器的 **G9** 那批。
+- **修法（与 D61 同一套做法）**：新增纯函数 `downloadPlan(name, byteLength)` + 导出阈值 `DATA_URL_RISK_BYTES = 32 MB`（DOM 段进程内不可达 ⇒ 策略抽成纯函数才验得到）。**阈值是判断、不是实测**（注释写明它设在"瞬时字符串几百 MB、手机标签页可能死掉"处），并且**低于阈值一律保持安静** —— 每次三页传输都警告 = 教会用户无视日志。`give()` 在**尝试之前**提示：文件名 + MB 数 + "页面无法知道下载有没有成功（浏览器不给这个事件）" + **不经浏览器的出路**（`node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 目录`）+ "把文件切小、分几次传"。提示不含 markdown（`say()` 写 `textContent`，L277）。
+- **验证**：`smoke-sender` 新断言**带阈值两侧的阳性对照**（802 KB 与 `DATA_URL_RISK_BYTES - 1` 必须**不留提示**、63 MB 必须留且**点到文件名 / MB 数 / CLI 命令**、阈值**含等号**）⇒ **`PASS sender says when a data: URL download is too big to trust, and stays quiet when it is not`**、`SENDER SMOKE: all assertions pass`、`SMOKE_EXIT=0`；`BUILD_EXIT=0`（precache 54）；`CHECKDIST_EXIT=0`、**13 pass / 0 skipped / 0 fail**、`every id unique within its own page, across 4 built page(s)`、**`G9 CHECK: all 13 assertions pass`**；全套单测 **`tests 311 · pass 311 · fail 0 · duration_ms 132890`**、`SUITE_EXIT=0`；**端到端 usability 冒烟 11 PASS / 0 FAIL / 122 s**、字节相同（`32ec480521da27d2` vs `32ec480521da27d2`）⇒ **本轮重跑冒烟的理由不只是它内部会跑 smoke-sender：dist 被重建了，而 `check-serve` / `check-lan` 检查的正是 dist（手机视角）**。`docs/USE.md` 故障排查加了对应一条（"点了下载、文件却没出现"⇒ 不是解码失败 + CLI 出路）。
+- **60 min soak 仍在跑**（第 68 轮起的，目的是把"收敛到工作集"与"慢泄漏"分开）：本轮开始时 **21.8 min / 101 cycles / 1006 页解码 / 0 误接受 / 0 错误** ⇒ 判决仍**不写**（没跑完就不写）。**M4 仍只差 G4（要你的手机），不打 tag** ✓
+
 ### 第 69 轮（**手机用户拿回的文件叫 `.bin`、打不开（D62）：默认名一个字不动，给用户一个可选的名字输入，策略做成纯 core 模块 + 单测**）
 
 - **缺口在哪**：两条网页接收路径都硬编码 `pskt-${len}B-${digest12}.bin`（`web/app.js` L116、`web/capture.js` L248）。**默认名本身是对的**——页头没有文件名字段（`core/frame.js` 只有 magic..length..pages..digest..crc16），`app.js` L113-115 的注释也写明"唯一诚实的默认名是从字节导出的，**用户之后自己改名**"⇒ 缺陷是**那半句在手机上不成立**：iOS/Android **靠扩展名决定用什么打开**，`.bin` 没有对应处理器 ⇒ 摘要核对通过、字节一致，**然后打不开**，还得进系统文件管理器改名（多数人不知道扩展名才是关键）。**CLI 没这问题**（`receive --out <file>`，`cli/pskit.mjs` L47）⇒ 缺口只在网页两条路径，而手机端正是目标里的路径 ②。

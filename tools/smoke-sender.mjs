@@ -30,7 +30,7 @@ const n = Number(args.includes('--bytes') ? args[args.indexOf('--bytes') + 1] : 
 // behind a `document` guard, so these pure functions are the only in-process view of them: an uncapped
 // preview costs ~35 MB of decoded raster per page, and round 67's print warning printed only after the
 // window had already been written (DEFECTS D61).
-const { buildArtifacts, previewPlan, printPlan, PREVIEW_CAP, PRINT_WINDOW_PAGE_CAP } = await import(pathToFileURL(join(ROOT, 'web', 'sender.js')).href);
+const { buildArtifacts, previewPlan, printPlan, PREVIEW_CAP, PRINT_WINDOW_PAGE_CAP, downloadPlan, DATA_URL_RISK_BYTES } = await import(pathToFileURL(join(ROOT, 'web', 'sender.js')).href);
 const { bootstrapDecode } = await import(pathToFileURL(join(ROOT, 'core', 'decode', 'bootstrap.js')).href);
 const { TransferAssembler } = await import(pathToFileURL(join(ROOT, 'core', 'protocol.js')).href);
 const { sha256Hex } = await import(pathToFileURL(join(ROOT, 'core', 'hash.js')).href);
@@ -74,6 +74,23 @@ const step = (label, ok, detail) => {
     fits.write === true && fits.note === '' && printPlan(0).write === true &&
       tooMany.write === false && /pack\.pdf/.test(tooMany.note) && /GB/.test(tooMany.note),
     `${PRINT_WINDOW_PAGE_CAP} pages -> write, 0 pages -> write (positive controls); 168 pages -> refuse, naming ${((168 * 35) / 1024).toFixed(1)} GB and offering pack.pdf`
+  );
+}
+
+// Round 70: the download-size warning (DEFECTS D63). Positive controls on BOTH sides of the threshold,
+// because the failure mode this guards against is a silent download -- and the opposite failure mode is
+// a page that cries wolf on every three-page transfer until the user stops reading the log.
+{
+  const quiet = downloadPlan('pskt-pack.pdf', 802 * 1024);
+  const loud = downloadPlan('pskt-pages-168.zip', 63 * 1024 * 1024);
+  step(
+    'sender says when a data: URL download is too big to trust, and stays quiet when it is not',
+    quiet.risk === false && quiet.note === '' &&
+      downloadPlan('x.bin', DATA_URL_RISK_BYTES - 1).risk === false &&
+      loud.risk === true && loud.note.includes('pskt-pages-168.zip') && /MB/.test(loud.note) &&
+      /cli\/pskit\.mjs send/.test(loud.note) &&
+      downloadPlan('x.bin', DATA_URL_RISK_BYTES).risk === true,
+    `802 KB -> no note and ${(DATA_URL_RISK_BYTES - 1)} B -> no note (positive controls); 63 MB -> note names the file, its size and the CLI route; the threshold ${DATA_URL_RISK_BYTES} B is inclusive`
   );
 }
 

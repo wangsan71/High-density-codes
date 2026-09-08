@@ -74,6 +74,39 @@ export function previewPlan(pageCount, cap = PREVIEW_CAP) {
   };
 }
 
+/**
+ * Whether a download is big enough that the browser might not deliver it, and what to say if so.
+ *
+ * This page downloads through data: URLs (no blob handling, so the CSP needs no blob: allowance), and
+ * that has a cost the page cannot hide: b64() builds the whole artifact as a JS string, btoa() makes a
+ * second one 4/3 the size, and the href template makes a third -- so a 63 MB zip means roughly 295 MB
+ * of transient string data before the browser even starts. Whether the download then succeeds is not
+ * something this page can observe; there is no event for "the file landed", so a failure here is
+ * silent, and silence is the one outcome this project refuses. DEFECTS D58 was the same shape: the log
+ * claimed N downloads had happened and the browser had quietly dropped most of them.
+ *
+ * So above a threshold this says the size, says that the page cannot know whether it worked, and names
+ * the route that has no browser in it. Below the threshold it stays quiet, because a warning on every
+ * three-page transfer teaches the user to ignore the log. The threshold is a judgement and not a
+ * measurement: there is no browser on this machine to measure with. It sits where the transient
+ * strings reach a few hundred MB, i.e. where a phone tab plausibly dies. Exported so the arithmetic is
+ * testable in process and the judgement is visible instead of buried in a comparison.
+ */
+export const DATA_URL_RISK_BYTES = 32 * 1024 * 1024;
+
+/** {risk, note}: note is '' unless the artifact is big enough that a data: URL download is doubtful. */
+export function downloadPlan(name, byteLength) {
+  const n = Math.max(0, Math.floor(Number(byteLength) || 0));
+  if (n < DATA_URL_RISK_BYTES) return { risk: false, note: '' };
+  const mb = (v) => (v / 1048576).toFixed(1);
+  const b64Bytes = Math.ceil(n / 3) * 4;
+  // No markdown: say() writes textContent, so asterisks would show up literally.
+  return {
+    risk: true,
+    note: `「${name}」有 ${mb(n)} MB。这一页是把它变成约 ${mb(b64Bytes)} MB 的 data: URL 文本再交给浏览器下载的，这个体量可能很慢、也可能直接失败，而页面无法知道下载有没有成功（浏览器不给这个事件）。如果没落地：电脑上有 Node 就用 CLI 直接写盘、不经浏览器 —— node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 目录；或者把文件切小、分几次传。`,
+  };
+}
+
 /** Whether the browser-print path may write its window at all, and if not, what to say instead. */
 export function printPlan(pageCount, cap = PRINT_WINDOW_PAGE_CAP) {
   const n = Math.max(0, pageCount | 0);
@@ -284,6 +317,11 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     return btoa(s);
   };
   const give = (bytes, name, mime) => {
+    // Said before the attempt, because the page cannot observe whether a download lands (downloadPlan
+    // above, DEFECTS D63). One place for it: every artifact on this page -- zip, pdf, 3mf, stl -- goes
+    // through give(), so a per-button warning would miss one eventually.
+    const plan = downloadPlan(name, bytes.length);
+    if (plan.note) say(plan.note, 'hint');
     const a = document.createElement('a');
     a.href = `data:${mime};base64,${b64(bytes)}`;
     a.download = name;
