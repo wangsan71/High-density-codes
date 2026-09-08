@@ -13,11 +13,11 @@
 | M1 | 编码核心 gf256/rs/hash/chacha20/crc/pack/deflate/frame/profiles/nozzles/protocol | G0 | **完成** | 105/105 单元绿 | `M1` |
 | M2 | 版面渲染 + PNG/TIFF（读写）+ 回显带 + CLI send/receive | G1 | **完成** | 136/136；G1 7档×6次 0 误读；磁盘文件→PNG→文件 sha256 相同 | `M2` |
 | M3 | 解码全链路（标记检测→单应→透视矫正→读格） | G1,G2 | **完成（合成图像层）**；真实相机照片待 M4 信道 | 156/156；`warp.test.mjs` 6/6：倾斜+模糊+噪声照片角标误差 <2.5px、90° 旋转页靠空心角纠正、空白/乱码图干净拒绝、PL-G@0.8 79 页照片往返复原 | — |
-| M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | **进行中**：解码入口/advice/G3/G5/交叉校验向量已完成；`sim/channel.py`+`selfcheck.py` 与 `ref/decode.py` 由子代理在写 | `--gate G3` `--gate G5` 绿；`conformance.test.mjs` 11 例活断言 | — |
-| M5 | STL + 3MF 双色产物 | G8 | 未开始 | — | — |
+| M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | **进行中（只剩 G4，且只有用户能跑）**：`sim/channel.py` 与 `ref/decode.py` **早已落地并在用**（G2 的 600 份语料就是它生成的、G0 靠 `ref/decode.py` 判绿）⇒ 原记的"由子代理在写"是**过期记账，第 64 轮更正** ✗ | G2 **300 dpi ✅ `PASS 200/200`**（第 63 轮修法后重跑 1245.4 s、exit 0）· 600 dpi **无判决**（用户第 63 轮判定非必要 ⇒ 重跑中止在 52/200）· G3 ✅ · G5 ✅（第 63 轮起含**接缝试验 2000 次、0 误接受**）· **G4 ⬜ 零证据**（手机 500×8 需真机 ⇒ 见 `USE.md` §5） | — |
+| M5 | STL + 3MF 双色产物 | G8 | **完成（进程内等价）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ 产物每轮由 usability 冒烟实际写出并用 G8 校验 | `PL-D2@0.4`：3 objects / 377964 triangles / 4.1 MB · `verify --gate G8` ✅ · `tests/unit/threeMF-xsd-parity.test.mjs` 把规则表与 vendored 权威 XSD **自动对拍**（D41 第 39 轮已闭）· 差的只是**切片软件真人打开一次**（本机无 XSD 引擎 ⇒ "过 schema"仍未证） | — |
 | M6 | 双色优先·单色兜底 | G7 | **完成（图像层）** | `--gate G7`：PL-D2@0.2/0.4 单色渲染判死色道 → 完整复原；PL-D3(off) 干净拒绝 | — |
-| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | 未开始 | ρ 自标定已在理想层跑通；喷嘴地板已改为 EW 量化（见决策 6） | — |
-| M8 | Web 扫描端 PWA + Pages | G9 | 未开始 | — | — |
+| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | **部分**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `pskit calibrate`（逐页 readout + 页内纠错预算 + 墨量健康度，只量不改）**第 61 轮已落地**、第 63 轮起还报救回；ρ 自标定在理想层跑通 | **G10 喷嘴矩阵需真打印机 ⇒ 未跑**（只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点）· MTF 板 → 推荐喷嘴/间距那一半**仍未实现** | — |
+| M8 | Web 扫描端 PWA + Pages | G9 | **部分（产物级全绿，浏览器内未验证）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `web/dist` PWA（manifest + `sw.js` + 三张图标）与两个单文件页每轮构建 | `build-web` exit 0（55 文件、29 模块、precache 53）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 12 assertions pass`（第 64 轮起夹具自带 ⇒ **全新检出也绿**，D53）· 差**真浏览器点一次（G9）**与 **https 托管（D43，只有用户能解）** | — |
 | M9 | soak/性能/文档 | G6 + 复跑全部 | 未开始 | — | — |
 | M10 | 可选 `REL` 光影档 / `P-C4` 纸面4色 | — | 未开始 | — | — |
 
@@ -35,7 +35,7 @@
 | G5 误接受 0 | ✅ | — | `verify --gate G5 --trials 10000`（9200 纠正 / 800 拒 / **0 误接受** ✓ 变异两项 ✓） |
 | G6 性能 + soak | 🟡 | 性能有实测数 ✓ **30–60 min soak 未跑** ✓ | 见 `ACCEPTANCE` G6 行 |
 | G7 单色兜底 100% | ✅ | — | `verify --gate G7`（`colourAlive=false` → 整道擦除复原 ✓） |
-| G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF XSD 子集校验器：第 38 轮已写、进程内可跑、对我们所有产物 PASS ✅**（`tools/check-3mf.mjs` + `verify --gate G8` ✓ 规则逐条抄自 vendored `ref/3mf-core-1.4.0.xsd` 并注行号 ✓ 25 条测试 = 21 篡改 + 4 正例含"D40 回归守卫"✓ **绿了 ⇒ 已并入 `--gate all`** ✓）· 仍**不等于过 schema**（本机无 XSD 引擎 ✗ Python 侧 `verify_model.py` 无 `--xsd` 开关 ✗）· **D41 OPEN**：表与权威 XSD 之间**还没有自动对拍** ✗（本轮就是靠抄错权威翻了车 ✓） | `node cli/pskit.mjs verify --gate G8`（或 `--file a.3mf,b.3mf`）· `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
+| G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF XSD 子集校验器：第 38 轮已写、进程内可跑、对我们所有产物 PASS ✅**（`tools/check-3mf.mjs` + `verify --gate G8` ✓ 规则逐条抄自 vendored `ref/3mf-core-1.4.0.xsd` 并注行号 ✓ 25 条测试 = 21 篡改 + 4 正例含"D40 回归守卫"✓ **绿了 ⇒ 已并入 `--gate all`** ✓）· 仍**不等于过 schema**（本机无 XSD 引擎 ✗ Python 侧 `verify_model.py` 无 `--xsd` 开关 ✗）· ~~**D41 OPEN**：表与权威 XSD 之间**还没有自动对拍** ✗（本轮就是靠抄错权威翻了车 ✓）~~（**过期记账，第 64 轮更正**：D41 **第 39 轮已闭** ✓ 修法 = `tests/unit/threeMF-xsd-parity.test.mjs`，用本校验器自己的 `scanXml` 读 vendored 权威 XSD、逐项比对 `CT_*` 属性集与 16 个元素名 ⇒ 表再抄错就红 ✓ 原句划掉保留为历史、不改写） | `node cli/pskit.mjs verify --gate G8`（或 `--file a.3mf,b.3mf`）· `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
 | G9 Web 扫描端（Pages） | 🟡（产物级全绿 ✓ 浏览器内未验证） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **第 56 轮复量：`13 pass / 0 skipped / 0 fail` + `G9 CHECK: all 12 assertions pass`、exit 0**（原先这里记的"8/8 全绿""SW 78 条清单"是第 22–23 轮的数 ⇒ 这类数字随构建内容变、**别背**，看工具自己打印的汇总即可 ✓ 第 53 轮构建实测：`web/dist` **54 个文件**、SW 预缓存 **52 条**）：零第三方加载点、两页 CSP `default-src 'self'`、SW 清单哈希逐字节对上磁盘、页面每个引用都有对应产物、`pskt-file.html` 只含 data: ✓ **`web/dist/selftest.js` 在产物内跑出 13 pass / 0 fail** ✓ **bundle 无人告知几何解磁盘页 → 摘要等于 `manifest.sourceSha256`** ✓ 差多少：**本机无浏览器** ⇒ "`?selftest=1` 在页面里绿"与"`file://` 双击→选照片→解出文件"这两条只被 Node 侧等价物证明 ✓ 摄像头授权、SW 注册、iOS 主屏图标全属推定；要人在这台机器之外点一次才算闭合 | 第 22–23 轮 ✓ |
 | G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝 ✓）⇒ 完整矩阵未跑 ✓ 未标定 MTF 前不判决 ✓ | `pskit send --profile … --nozzle …` 逐档 |
 
@@ -120,6 +120,19 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 64 轮（**照用户手册从全新检出走一遍 ⇒ 撞到 D53：`check-dist` 的夹具只有开发树才有；顺带更正四处过期记账**）
+
+- **做法**：把 **123 个被跟踪文件**复制成 `.tmp/fresh64`（等价全新 clone：无 `web/dist`、无 `.tmp`；`git clone` 本地路径在本沙箱会因 git spawn `sh.exe` 报 `couldn't create signal pipe, Win32 error 5` ⇒ 改用不 spawn sh 的等价做法，**不绕沙箱**），然后**照 `docs/USE.md` 字面**在该树里跑 §0 与 §4
+- **撞到什么（D53）**：§0 的 `node tools/build-web.mjs` **exit 0**（55 文件、29 模块、precache 53），紧接着 `node tools/check-dist.mjs` **exit 1**：`FAIL bundle decodes on-disk pages unhinted, digest matches manifest` / `.tmp/g2src has no manifest.json` / `G9 CHECK: 1 of 12 FAILED` ⇒ 而手册同一段正写着"判'构建好没好'**只看 exit code**" ⇒ **真用户会以为自己的构建坏了** ✗ 根因：那条断言把 `.tmp/g2src`（历年轮次产物、被 `.gitignore` 忽略）当成了环境的一部分
+- **对照（证明坏的不是产物、也不是手册其余步骤）**：同一棵 fresh 树按 §4 跑 `& .\tools\usability.ps1` ⇒ **11 项全过、297 s、exit 0、字节相同**（`sha256 32ec480521da27d2` 两侧一致；含 `send → sim/channel.py → receive --photo → 逐字节比对`、板材 `3mf/stl → G8`、`smoke-sender`、`smoke-capture`、`check-serve`、`check-lan`）⇒ **用户路径在全新检出上本身是通的** ✓
+- **修法**：**不跳过**（那会掏空唯一一条"出厂 bundle 真能读盘上 PNG"的断言，而该文件头部注释明写"全跳过的自检不算通过"）⇒ **让断言自带夹具**：manifest 缺失时用本仓库自己的编码器进程内生成（`encodeTransfer` 20480 B **确定性**填充 → `pageLayout(geom,300)` → `renderPageBitmap` + `renderSheetBitmap`（整张纸、与打印产物同形）→ `encodePNG` → 写 `manifest.json`），并在记录行**明说来源**；夹具用 **core** 造、解码仍用 **bundle**（`R(...)`）⇒ 不让被测产物自造输入，而 core 与 bundle 若不一致正好在这条断言上暴露
+- **顺带补上第 63 轮漏掉的第七个调用点**：该断言原先直接调 `asm.feed` ⇒ 改成**从 bundle 取的** `feedPageWithRecalibration`（遵守它自己的自律条款"只用产物暴露的东西"，且产物若不含该模块就会红）⇒ 上轮的调用点清单里 `tools/check-dist.mjs` **就在名单上、我漏改了** ✗
+- **三次验证**：① fresh 树夹具缺失 ⇒ `G9 CHECK: all 12 assertions pass`、**exit 0**、`3 page(s), 12 candidate tries, geometry self-identified as P-M1-300@300/INK2, 20480 B, digest matches` + `[fixture generated in-process this run: a fresh clone has no .tmp]` ② fresh 树夹具已在 ⇒ 同样全过、**不带**该标注（两条分支都验过）③ 本树（`.tmp/g2src` 原有 204800 B 语料）⇒ 仍 `all 12 assertions pass`、exit 0、`204800 B` ⇒ **老路径无回归** ✓
+- **更正四处过期记账**（每一处都会让下一轮去做已经做过的事 ✗）：里程碑表 **M4**（"由子代理在写"⇒ `sim/channel.py`/`ref/decode.py` 早已落地并在用）、**M5**（"未开始"⇒ 3MF/STL 每轮由冒烟实际产出并过 G8）、**M7**（"未开始"⇒ `pskit calibrate` 第 61 轮已落地）、**M8**（"未开始"⇒ web PWA + `check-dist` 13 pass 每轮在跑）；门限表 **G8 行**仍写"D41 OPEN"⇒ D41 **第 39 轮已闭**（`threeMF-xsd-parity.test.mjs`）⇒ 原句划掉并注记、**不改写历史**
+- **套件**：全量重跑 **`tests 307 · pass 307 · fail 0 · duration_ms 134453`**、`SUITE_EXIT=0`（条数与第 63 轮相同 ⇒ 本轮没加测试；`tools/check-dist.mjs` 不被单测覆盖 ⇒ 它的证据是上面那**三次实跑**，不是"应该没问题"）
+- **门限**：本轮 `core/` 一行未动（改的是 `tools/check-dist.mjs` 与四份文档）⇒ G2/G5 判决沿用第 63 轮（G2 300 dpi ✅ `200/200`、600 dpi **无判决**（用户判定非必要）、G5 ✅ **0 误接受**含接缝 2000 次）；**G9 的产物级半本轮重跑三次全绿**（含 fresh 树 ⇒ 首次证明"全新检出也绿"）；浏览器内的 G9 仍需真人点一次 ✗
+- **M4 现在只差 G4**（手机 500 页 × 8 轮，需真机 ⇒ 只有用户能跑；步骤与验收清单在 `docs/USE.md` §5）⇒ **M4 未闭合 ⇒ 仍不打 tag** ✓
 
 ### 第 63 轮（**D51 修法落地：RS 仲裁的重读 —— 300 dpi 侧重跑仍 200/200、G5 含新接缝 0 误接受、塌陷页在真语料上被救回；D52 同轮修完**）
 

@@ -25,7 +25,7 @@
  *
  *   node tools/build-web.mjs && node tools/check-dist.mjs [--pages .tmp/g2src]
  */
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -271,7 +271,45 @@ await (async () => {
   const name = 'bundle decodes on-disk pages unhinted, digest matches manifest';
   try {
     const dir = join(ROOT, pagesDir);
-    if (!existsSync(join(dir, 'manifest.json'))) throw new Error(`${pagesDir} has no manifest.json (make one with pskit send)`);
+    // The fixture is this check's own input, so a fresh clone must not fail just because nobody
+    // happens to have .tmp/g2src on disk. Round 64 walked docs/USE.md §0 from a checkout of the
+    // tracked files only: build-web exited 0, this assertion exited 1 with "has no manifest.json",
+    // and the manual tells the user to judge the build by its exit code -- so every new user was
+    // being told their build was broken. Generating the pages in-process keeps the assertion
+    // load-bearing; skipping it would gut the only check that the shipped bundle reads real PNGs off
+    // disk, and this file's own header says an all-skipped run is not a pass.
+    let generated = false;
+    if (!existsSync(join(dir, 'manifest.json'))) {
+      // Made with core, not with the bundle: the fixture is the INPUT to the claim, and letting the
+      // artifact under test manufacture its own input would make the check self-referential. If core
+      // and the bundle ever disagree, this assertion is exactly where that shows up.
+      const { encodeTransfer } = await import('../core/protocol.js');
+      const { pageLayout } = await import('../core/render/layout.js');
+      const { renderPageBitmap, renderSheetBitmap, echoBitsOf } = await import('../core/render/raster.js');
+      const { encodePNG } = await import('../core/render/png.js');
+      const { sha256Hex: hexOf } = await import('../core/hash.js');
+      const payload = new Uint8Array(20480);
+      // Deterministic filler: a check must not depend on Math.random, or its verdict is not repeatable.
+      for (let i = 0; i < payload.length; i++) payload[i] = (Math.imul(i + 1, 2654435761) >>> 13) & 255;
+      const t = await encodeTransfer(payload, { profile: 'P-M1-300' });
+      const layout = pageLayout(t.geom, 300);
+      mkdirSync(dir, { recursive: true });
+      t.pages.forEach((p, i) => {
+        const code = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(p.header) });
+        const bmp = code.sheetMm ? renderSheetBitmap(code) : code; // the whole sheet, like a printed page
+        writeFileSync(join(dir, `page-${String(i).padStart(3, '0')}.png`), Buffer.from(encodePNG(bmp)));
+      });
+      const manifest = {
+        sourceSha256: hexOf(payload),
+        profile: 'P-M1-300',
+        dpi: 300,
+        palette: 'PAPER1',
+        pages: t.pages.length,
+        generatedBy: 'tools/check-dist.mjs (the fixture was missing, so this run made it)',
+      };
+      writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+      generated = true;
+    }
     const pngs = readdirSync(dir).filter((f) => /\.png$/i.test(f)).sort();
     if (!pngs.length) throw new Error(`no PNGs in ${pagesDir}`);
     const mf = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
@@ -283,6 +321,11 @@ await (async () => {
     const { bootstrapDecode } = R('core/decode/bootstrap.js');
     const { TransferAssembler } = R('core/protocol.js');
     const { sha256Hex } = R('core/hash.js');
+    // Taken from the bundle for the same reason: this is the feed the desktop page, the phone burst
+    // path and the G2 harness have all used since round 63 (DEFECTS D51). Calling asm.feed directly
+    // here would leave this check measuring a cousin of the product -- it was the seventh call site,
+    // and the one round 63 missed. Asking the bundle for it also proves the artifact contains it.
+    const { feedPageWithRecalibration } = R('core/decode/recalibrate.js');
     const asm = new TransferAssembler({});
     const geoms = new Set();
     let attempts = 0;
@@ -292,14 +335,15 @@ await (async () => {
       if (!boot.ok) throw new Error(`${f}: ${boot.reason} after ${boot.attempts.length} candidate(s)`);
       geoms.add(`${boot.profileId}@${boot.dpi}/${boot.paletteId}`);
       attempts += boot.attemptCount;
-      const fed = await asm.feed({ levels: boot.page.levels, header: boot.page.headerBytes, channelMissing: boot.page.colourAlive ? [] : ['colour'] });
+      const resc = await feedPageWithRecalibration(asm, boot.page, { geom: boot.geom });
+      const fed = resc.fed;
       if (!fed.ok && !fed.duplicate) throw new Error(`${f}: assembler rejected (${fed.reason})`);
     }
     const res = asm.result;
     if (!res) throw new Error(`assembler produced nothing: ${asm.error || JSON.stringify(asm.progress)}`);
     const hex = sha256Hex(res);
     if (hex !== mf.sourceSha256) throw new Error(`digest ${hex.slice(0, 16)} != manifest ${String(mf.sourceSha256).slice(0, 16)}`);
-    record(name, true, `${pngs.length} page(s), ${attempts} candidate tries, geometry self-identified as ${[...geoms].join(' ')}, ${res.length} B, digest matches ${pagesDir}/manifest.json`);
+    record(name, true, `${pngs.length} page(s), ${attempts} candidate tries, geometry self-identified as ${[...geoms].join(' ')}, ${res.length} B, digest matches ${pagesDir}/manifest.json${generated ? ' [fixture generated in-process this run: a fresh clone has no .tmp]' : ''}`);
   } catch (e) {
     record(name, false, e.message);
   }

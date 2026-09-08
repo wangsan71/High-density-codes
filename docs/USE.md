@@ -20,6 +20,7 @@ node tools/check-dist.mjs       # 校验产物（含图标安装性：192/512/ma
 - 构建器**零依赖、离线可跑**；PWA 图标也是它用本项目自己的 `renderPageBitmap` + `encodePNG` 画的（不引图像库 ✓ 构建不可能声称一张它画不出的图）。
 - **别背文件数与断言数**：它们随构建内容变。第 53 轮把浏览器自检改成跑"整张纸"的形状后实测 **`web/dist` 54 个文件**、`check-dist` **`13 pass / 0 skipped / 0 fail`** 且 **`G9 CHECK: all 12 assertions pass`**（第 56 轮复量仍是这两个数 ✓ exit 0）。判"构建好没好"**只看 exit code 和它自己打印的汇总**，别拿本文档里的数字对不上就当失败 ✗（§2 的 SW 预缓存条数同理，那个数字每加一个资源就变）。
 - **改了 `core/` 就必须重建**：dist 里内联了 `core/`，不重建等于拿旧内核当新产物用 ✗（这也是仓库自己的规矩）。
+- **`check-dist` 的最后一项断言自带夹具**（第 64 轮起，`docs/DEFECTS.md` D53）：它要"用出厂 bundle 去读盘上的页图、再核对摘要"，所以需要一批页图 + `manifest.json`；**缺失时它自己进程内生成**（确定性填充、整张纸形状、不用 `Math.random`）并在输出里明说 `[fixture generated in-process this run: a fresh clone has no .tmp]` ⇒ **全新 clone 也应当是 `G9 CHECK: all 12 assertions pass`、exit 0** ✓ 此前它默认读 `.tmp/g2src`（只有开发树里才有）⇒ 新用户照本节走会拿到 **exit 1**、误以为构建坏了 ✗ 想用自己的语料：`node tools/check-dist.mjs --pages <目录>`。
 - 只想验证"构建出来的东西是不是自洽的"：`node tools/check-dist.mjs`；想验证"经 http 服务出去是不是自洽的"：见 §2 的 `tools/check-lan.mjs`。
 
 ---
