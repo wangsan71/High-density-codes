@@ -216,14 +216,19 @@ async function cmdSend(args) {
       const cov = mod.raster.coverageStats({ geom: t.geom, levels: p.levels, layout, palette: paletteId, mono: !!args.mono });
       inkSum = cov.printedAreaFraction;
     }
+    // Raster artefacts are the paper, not the code area: with a sheet chosen, paint the margins and
+    // the crop/registration marks, so a user who prints the PNG gets the same sheet that pack.pdf
+    // carries (DEFECTS D45). Without a sheet this is the identical bitmap and the identical bytes.
+    // The PDF path keeps `bitmap` on purpose -- it centres the content and strokes its own marks.
+    const rasterOut = bitmap.sheetMm ? mod.raster.renderSheetBitmap(bitmap) : bitmap;
     if (wantTiff) {
       const name = `page-${String(i).padStart(3, '0')}.tif`;
-      writeFileSync(join(outDir, name), mod.tiff.encodeTIFF(bitmap));
+      writeFileSync(join(outDir, name), mod.tiff.encodeTIFF(rasterOut));
       files.push(name);
     }
     if (wantPng) {
       const name = `page-${String(i).padStart(3, '0')}.png`;
-      writeFileSync(join(outDir, name), mod.png.encodePNG(bitmap));
+      writeFileSync(join(outDir, name), mod.png.encodePNG(rasterOut));
       files.push(name);
     }
     if (wantModel) {

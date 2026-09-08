@@ -49,6 +49,7 @@ import { deflateRaw } from '../deflate.js';
 import { sha256 } from '../hash.js';
 import { toHex } from '../crc.js';
 import { PT_PER_MM, round2 } from './units.js';
+import { sheetPlacement, sheetMarks } from './sheet.js';
 
 /** zlib CMF/FLG for "deflate, 32 KiB window, no preset dictionary". */
 const ZLIB_CMF = 0x78;
@@ -283,18 +284,24 @@ export function encodePDFDocument(images) {
     let tyPt = '0';
     let sheetWNum = 0;
     let sheetHNum = 0;
+    let place = null;
     if (sheetMm) {
-      sheetWNum = sheetMm.w * PT_PER_MM;
-      sheetHNum = sheetMm.h * PT_PER_MM;
-      if (sheetWNum < wNum - 1e-9 || sheetHNum < hNum - 1e-9) {
+      // The placement arithmetic lives in core/render/sheet.js, which the raster writer uses as
+      // well: one definition of "the code area on the paper", so the PNG and the PDF cannot drift
+      // apart (DEFECTS D45 -- `--sheet` used to reach this writer only). The refusal stays here with
+      // its own wording, because callers and tests match on "cannot carry".
+      if (sheetMm.w * PT_PER_MM < wNum - 1e-9 || sheetMm.h * PT_PER_MM < hNum - 1e-9) {
         throw new RangeError(
           `encodePDFDocument: sheet ${sheetMm.w}x${sheetMm.h}mm cannot carry a ${(wNum / PT_PER_MM).toFixed(1)}x${(hNum / PT_PER_MM).toFixed(1)}mm page`,
         );
       }
+      place = sheetPlacement({ w: wNum / PT_PER_MM, h: hNum / PT_PER_MM }, sheetMm, 'encodePDFDocument');
+      sheetWNum = place.sheetMm.w * PT_PER_MM;
+      sheetHNum = place.sheetMm.h * PT_PER_MM;
       boxWPt = numPt(sheetWNum);
       boxHPt = numPt(sheetHNum);
-      txNum = (sheetWNum - wNum) / 2;
-      tyNum = (sheetHNum - hNum) / 2;
+      txNum = place.txMm * PT_PER_MM;
+      tyNum = place.tyMm * PT_PER_MM;
       txPt = numPt(txNum);
       tyPt = numPt(tyNum);
     }
@@ -328,37 +335,15 @@ export function encodePDFDocument(images) {
     // their half-margin, so nothing here can reach the content box; tests/unit/pdf-truesize.test.mjs
     // asserts that from the written bytes rather than trusting this comment.
     let marks = '';
-    if (sheetMm) {
-      const margin = Math.min(txNum, tyNum);
-      if (margin > 0.5) {
-        // Degenerate case: sheet == content leaves no margin, so there is nowhere to put a mark.
-        // Nothing is drawn and nothing is claimed; the page then equals the code area, which is the
-        // pre-D44 shape, and the caller's own size check still sees a MediaBox it can judge.
-        const gap = margin * 0.25;
-        const arm = margin * 0.55;
-        const cross = margin * 0.3;
-        const x0 = txNum;
-        const y0 = tyNum;
-        const x1 = txNum + wNum;
-        const y1 = tyNum + hNum;
-        const seg = [];
-        for (const [cx, sx] of [[x0, -1], [x1, 1]]) {
-          for (const [cy, sy] of [[y0, -1], [y1, 1]]) {
-            const vx = cx + sx * gap;
-            const hy = cy + sy * gap;
-            seg.push(`${numPt(vx)} ${numPt(hy)} m ${numPt(vx + sx * arm)} ${numPt(hy)} l`);
-            seg.push(`${numPt(vx)} ${numPt(hy)} m ${numPt(vx)} ${numPt(hy + sy * arm)} l`);
-          }
-        }
-        for (const [cx, cy] of [
-          [sheetWNum / 2, tyNum / 2],
-          [sheetWNum / 2, sheetHNum - tyNum / 2],
-          [txNum / 2, sheetHNum / 2],
-          [sheetWNum - txNum / 2, sheetHNum / 2],
-        ]) {
-          seg.push(`${numPt(cx - cross)} ${numPt(cy)} m ${numPt(cx + cross)} ${numPt(cy)} l`);
-          seg.push(`${numPt(cx)} ${numPt(cy - cross)} m ${numPt(cx)} ${numPt(cy + cross)} l`);
-        }
+    if (place) {
+      // The same segment list the raster writer paints, in mm and converted once: four corner L's
+      // plus four registration crosses = 16 segments. A degenerate sheet draws nothing and claims
+      // nothing, exactly as before this geometry was shared.
+      const m = sheetMarks({ w: wNum / PT_PER_MM, h: hNum / PT_PER_MM }, place.sheetMm, 'encodePDFDocument');
+      if (!m.degenerate) {
+        const seg = m.segments.map(
+          ([x1, y1, x2, y2]) => `${numPt(x1 * PT_PER_MM)} ${numPt(y1 * PT_PER_MM)} m ${numPt(x2 * PT_PER_MM)} ${numPt(y2 * PT_PER_MM)} l`,
+        );
         marks = `0 0 0 RG\n1 w\n${seg.join('\n')}\nS\n`;
       }
     }

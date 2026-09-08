@@ -25,7 +25,7 @@
 import { PROFILES } from '../core/profiles.js';
 import { encodeTransfer } from '../core/protocol.js';
 import { pageLayout } from '../core/render/layout.js';
-import { renderPageBitmap, echoBitsOf } from '../core/render/raster.js';
+import { renderPageBitmap, renderSheetBitmap, echoBitsOf } from '../core/render/raster.js';
 import { encodePNG } from '../core/render/png.js';
 import { encodePDFDocument } from '../core/render/pdf.js';
 import { buildPlateModel, projectionReport } from '../core/mesh/plate.js';
@@ -99,7 +99,11 @@ export async function buildArtifacts(bytes, opts = {}) {
     for (let i = 0; i < t.pages.length; i++) {
       const p = t.pages[i];
       const bitmap = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: paletteId, mono, echoBits: echoBitsOf(p.header) });
-      const png = encodePNG(bitmap);
+      // The PNG a browser offers for printing is the paper: margins, the code area centred, crop and
+      // registration marks (DEFECTS D45). `bitmap` itself stays the code area, because
+      // encodePDFDocument below centres it and strokes its own vector marks -- handing it an
+      // already-sheeted bitmap would centre the sheet on the sheet.
+      const png = encodePNG(bitmap.sheetMm ? renderSheetBitmap(bitmap) : bitmap);
       pages.push({ tag: `page-${String(i).padStart(3, '0')}`, bitmap, png, header: p.header, headerBytes: p.headerBytes, levels: p.levels });
     }
   } catch (e) {

@@ -2,6 +2,7 @@ import { getPalette, BACKGROUND } from '../palette.js';
 import { glyphMaskForLevel, idealGeometry, MEASURE } from './glyphs.js';
 import { splitCellLevel } from '../protocol.js';
 import { HEADER_LEN } from '../frame.js';
+import { sheetMarks, MARK_STROKE_MM } from './sheet.js';
 
 /**
  * Raster renderer: cell levels -> a printed-looking RGBA bitmap.
@@ -176,6 +177,107 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
   // (DEFECTS D44). pageMm is deliberately NOT attached: the writer derives the content box from
   // width/dpi exactly as it always has, so adding only the sheet leaves every existing byte alone.
   return { width, height, pixels, dpi: layout.dpi, layout, substrate, palette: pal.id, sheetMm: layout.sheetMm ? [layout.sheetMm.w, layout.sheetMm.h] : undefined };
+}
+
+/**
+ * Put an already-rendered page bitmap onto its sheet of paper: substrate-coloured margins, the code
+ * area centred, and the crop marks plus registration crosses painted in machine ink.
+ *
+ * This is the raster half of DEFECTS D45. `--sheet` reached the PDF writer only, so a user who
+ * printed the PNG got a bare code area -- no margin, no crop marks, and the printer decided where on
+ * the paper it landed. Both writers now take their geometry from core/render/sheet.js, so the sheet
+ * inside `pack.pdf` and the sheet in `page-000.png` are the same sheet, to the fraction of a margin.
+ *
+ * The returned bitmap *is* the sheet: its content box is the whole page, so it reports
+ * `pageMm = sheet dims` and carries no `sheetMm` of its own. Handing it to encodePDFDocument
+ * therefore paints it full page with no vector marks (the marks are already pixels) instead of
+ * centring an already-centred image a second time.
+ *
+ * @param {object} img a renderPageBitmap() result that carries sheetMm
+ * @returns {object} sheet-sized RGBA bitmap, same dpi, plus where the content landed
+ */
+export function renderSheetBitmap(img) {
+  if (!img || typeof img !== 'object') throw new TypeError('renderSheetBitmap: expected a rendered bitmap');
+  const { width, height, pixels, dpi } = img;
+  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+    throw new RangeError(`renderSheetBitmap: bad size ${width}x${height}`);
+  }
+  if (!(pixels instanceof Uint8Array) || pixels.length !== width * height * 4) {
+    throw new RangeError('renderSheetBitmap: pixels must be a Uint8Array of width*height*4');
+  }
+  if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`renderSheetBitmap: bad dpi ${dpi}`);
+  if (!Array.isArray(img.sheetMm) || img.sheetMm.length !== 2) {
+    throw new TypeError('renderSheetBitmap: bitmap has no sheetMm -- nothing to put it on (render with a sheet, or use the code-area bitmap as it is)');
+  }
+  const substrate = Array.isArray(img.substrate) && img.substrate.length === 3 ? img.substrate : [255, 255, 255];
+  const pxPerMm = dpi / 25.4;
+  const contentMm = { w: width / pxPerMm, h: height / pxPerMm };
+  const m = sheetMarks(contentMm, { w: img.sheetMm[0], h: img.sheetMm[1] }, 'renderSheetBitmap');
+
+  const sw = Math.round(m.sheetMm.w * pxPerMm);
+  const sh = Math.round(m.sheetMm.h * pxPerMm);
+  const out = new Uint8Array(sw * sh * 4);
+  for (let i = 0; i < sw * sh; i++) {
+    const o = i * 4;
+    out[o] = substrate[0];
+    out[o + 1] = substrate[1];
+    out[o + 2] = substrate[2];
+    out[o + 3] = 255;
+  }
+
+  // Centre the code area, then check the rounding instead of trusting it: a sheet that came out one
+  // pixel short would blit past the edge and silently drop a column of ink.
+  const ox = Math.round(m.txMm * pxPerMm);
+  const oy = Math.round(m.tyMm * pxPerMm);
+  if (ox < 0 || oy < 0 || ox + width > sw || oy + height > sh) {
+    throw new RangeError(`renderSheetBitmap: content ${width}x${height}px does not fit sheet ${sw}x${sh}px at offset ${ox},${oy}`);
+  }
+  for (let y = 0; y < height; y++) {
+    const src = y * width * 4;
+    out.set(pixels.subarray(src, src + width * 4), ((oy + y) * sw + ox) * 4);
+  }
+
+  let strokePx = 0;
+  if (!m.degenerate) {
+    // One point wide, the same stroke the PDF uses, but never thinner than 2 px: a 1 px line at
+    // 300 dpi is 0.08 mm and a scanner's MTF would erase it. Capped below the gap so a stroke can
+    // never reach the content box -- gap is 0.25 of the margin and the stroke stays within 0.8 of
+    // that, which is arithmetic rather than a hope (tests/unit/raster-sheet.test.mjs measures it).
+    const strokeMm = Math.min(MARK_STROKE_MM, m.gapMm * 0.8);
+    strokePx = Math.max(2, Math.round(strokeMm * pxPerMm));
+    const half = strokePx / 2;
+    for (const [x1, y1, x2, y2] of m.segments) {
+      // Segments are axis-aligned by construction. The PDF's origin is the sheet's lower-left
+      // corner and a bitmap's is its top-left, so y flips here and only here.
+      const ax = x1 * pxPerMm;
+      const bx = x2 * pxPerMm;
+      const ay = (m.sheetMm.h - y1) * pxPerMm;
+      const by = (m.sheetMm.h - y2) * pxPerMm;
+      const xa = Math.min(ax, bx);
+      const xb = Math.max(ax, bx);
+      const ya = Math.min(ay, by);
+      const yb = Math.max(ay, by);
+      if (Math.abs(y1 - y2) < 1e-12) fillRect(out, sw, sh, xa, ya - half, xb, ya + half, MACHINE_INK);
+      else fillRect(out, sw, sh, xa - half, ya, xa + half, yb, MACHINE_INK);
+    }
+  }
+
+  return {
+    width: sw,
+    height: sh,
+    pixels: out,
+    dpi,
+    layout: img.layout,
+    substrate,
+    palette: img.palette,
+    // The bitmap is the sheet now: this is what keeps encodePDFDocument from centring it twice.
+    pageMm: { w: m.sheetMm.w, h: m.sheetMm.h },
+    contentOffsetPx: [ox, oy],
+    contentSizePx: [width, height],
+    markSegments: m.segments.length,
+    markStrokePx: strokePx,
+    marginMm: m.marginMm,
+  };
 }
 
 /**
