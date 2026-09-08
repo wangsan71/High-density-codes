@@ -246,21 +246,33 @@ function zlibWrap(filtered) {
  * @returns {Uint8Array} the complete file, ending in `%%EOF`
  */
 export function encodePDFDocument(images) {
-  const list = Array.isArray(images) ? images : [images];
-  if (!list.length) throw new RangeError('encodePDFDocument: no pages to write');
-  const pages = list.map((img) => {
-    const { width, height, pixels, dpi } = checkRaster(img, 'encodePDFDocument');
-    return { width, height, pixels, dpi, substrate: checkSubstrate(img.substrate), pageMm: checkPageMm(img.pageMm), sheetMm: checkSheetMm(img.sheetMm) };
-  });
-
+  // One pass over a possibly LAZY sequence, and no page's raster is referenced after that page's own
+  // objects have been emitted. The old shape mapped the whole list into `pages` first -- which kept
+  // every raster alive -- and only then encoded them, so a caller had to hold every page at once.
+  // Measured in round 66 with tools/sender-memory-probe.mjs: ~31 MB per A4/300dpi page, i.e. 1.30 GB
+  // of arrayBuffers for a 256 KiB file (42 pages) and ~5 GB for the 1 MB case that PLAN's own G6
+  // criterion treats as ordinary, against the 255-page ceiling docs/USE.md advertises. A browser tab
+  // dies long before that, and heapUsed sits at ~5 MB the whole time, so nothing watching the JS heap
+  // would ever see it coming.
+  // What does NOT change is the file this writer produces: objects are still emitted in page order
+  // and the /Kids list is still built from the same numbers, so the bytes are identical -- the
+  // round-66 ledger records the sha256 of a pack built before and after. Validation moves inside the
+  // pass, so a bad page 3 now throws after pages 0-2 have been encoded instead of before; the caller
+  // sees the same error and still gets no file, because the throw leaves this function either way.
+  const isSeq = images && typeof images !== 'string' && typeof images[Symbol.iterator] === 'function';
+  const list = Array.isArray(images) || isSeq ? images : [images];
   const header = cat([ascii(`%PDF-1.4\n`), new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a])]);
   const objects = [
     ascii(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`),
     null, // /Pages, filled in once the kid numbers are known
   ];
-
-  pages.forEach((p, i) => {
-    const { width, height, pixels, dpi, substrate, pageMm, sheetMm } = p;
+  const kids = [];
+  for (const img of list) {
+    const i = kids.length;
+    const { width, height, pixels, dpi } = checkRaster(img, 'encodePDFDocument');
+    const substrate = checkSubstrate(img.substrate);
+    const pageMm = checkPageMm(img.pageMm);
+    const sheetMm = checkSheetMm(img.sheetMm);
     const pageNo = 3 + i * 3;
     const imageNo = pageNo + 1;
     const contentNo = pageNo + 2;
@@ -360,10 +372,14 @@ export function encodePDFDocument(images) {
     );
     const contentObj = cat([ascii(`${contentNo} 0 obj\n<< /Length ${content.length} >>\nstream\n`), content, ascii(`\nendstream\nendobj\n`)]);
     objects.push(pageObj, imageObj, contentObj);
-    pages[i].kids = pageNo;
-  });
+    kids.push(pageNo);
+  }
+  // The old code refused an empty list before encoding anything; a lazy sequence has no length up
+  // front, so the same refusal now happens once the sequence turns out to be empty. Same error, same
+  // message, and still no file.
+  if (!kids.length) throw new RangeError('encodePDFDocument: no pages to write');
 
-  objects[1] = ascii(`2 0 obj\n<< /Type /Pages /Kids [${pages.map((p) => `${p.kids} 0 R`).join(' ')}] /Count ${pages.length} >>\nendobj\n`);
+  objects[1] = ascii(`2 0 obj\n<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(' ')}] /Count ${kids.length} >>\nendobj\n`);
 
   const offsets = [];
   let at = header.length;

@@ -30,6 +30,14 @@ const { buildArtifacts } = await import(pathToFileURL(join(ROOT, 'web', 'sender.
 const { bootstrapDecode } = await import(pathToFileURL(join(ROOT, 'core', 'decode', 'bootstrap.js')).href);
 const { TransferAssembler } = await import(pathToFileURL(join(ROOT, 'core', 'protocol.js')).href);
 const { sha256Hex } = await import(pathToFileURL(join(ROOT, 'core', 'hash.js')).href);
+// Round 66: the sender no longer keeps a page's raster after pack.pdf has consumed it (holding all of
+// them cost ~31 MB per page, 1.30 GB for a 256 KiB file), so this smoke decodes the PNG instead --
+// which is the artifact a user actually prints, so the blind decode now covers the PNG encoder and
+// the whole sheet (margins, crop and registration marks) as well. Stronger, not weaker.
+const { decodePNG } = await import(pathToFileURL(join(ROOT, 'core', 'decode', 'png-read.js')).href);
+// Round 66: this was also a feed site still calling asm.feed directly, i.e. one of the call sites the
+// round-63 RS-arbitrated re-read (DEFECTS D51) did not reach. Every path that feeds a page uses it.
+const { feedPageWithRecalibration } = await import(pathToFileURL(join(ROOT, 'core', 'decode', 'recalibrate.js')).href);
 
 const raw = new Uint8Array(n).map((_, i) => (i * 167 + (i >> 3)) & 0xff);
 const want = sha256Hex(raw);
@@ -53,12 +61,13 @@ for (const profile of ['P-M1-300', 'PL-D2']) {
   const asm = new TransferAssembler({});
   let pageFail = null;
   for (const p of r.pages) {
-    const boot = await bootstrapDecode(p.bitmap, { maxAttempts: 24 });
+    const boot = await bootstrapDecode(decodePNG(p.png), { maxAttempts: 24 });
     if (!boot.ok) {
       pageFail = `${p.tag}: ${boot.reason} after ${boot.attempts.length} candidates`;
       break;
     }
-    const fed = await asm.feed({ levels: boot.page.levels, header: boot.page.headerBytes, channelMissing: boot.page.colourAlive ? [] : ['colour'] });
+    const resc = await feedPageWithRecalibration(asm, boot.page, { geom: boot.geom });
+    const fed = resc.fed;
     if (!fed.ok && !fed.duplicate) {
       pageFail = `${p.tag}: assembler rejected (${fed.reason})`;
       break;

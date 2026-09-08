@@ -132,7 +132,24 @@ export async function buildArtifacts(bytes, opts = {}) {
     return { ok: false, stage: 'render', error: e.message, hint: `渲染 ${paletteId} 色板时失败：单色出图请把色板留在 PAPER1。` };
   }
 
-  const pdf = encodePDFDocument(pages.map((p) => p.bitmap));
+  // Hand the writer one raster at a time and drop each one the moment it has been consumed, so the
+  // peak is one page's raster plus the encoded streams instead of every page's raster. Measured
+  // before this change (tools/sender-memory-probe.mjs, same command): 42 pages held 1.30 GB of
+  // arrayBuffers with all 42 rasters still referenced by the returned result, while heapUsed stayed
+  // at 5 MB -- a 256 KiB file, an entirely ordinary document, needing more memory than a phone has.
+  // `pages[i].bitmap` is null afterwards BY DESIGN: the artifacts a user downloads are the page PNGs
+  // and pack.pdf, and the raster was only ever an intermediate. Anything that needs to look at a page
+  // again decodes its PNG, which is the artifact that actually gets printed -- that is what
+  // tools/smoke-sender.mjs now does, and it is the stronger test, not a weaker one.
+  const pdf = encodePDFDocument(
+    (function* rasters() {
+      for (const p of pages) {
+        const bmp = p.bitmap;
+        p.bitmap = null;
+        yield bmp;
+      }
+    })(),
+  );
 
   // The relief path is per page and must survive the same three guards the CLI insists on.
   const models = [];
