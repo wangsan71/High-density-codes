@@ -143,10 +143,11 @@ const step = (label, ok, detail) => {
   step(
     'the pre-read plan warns about a file that will not fit and stays quiet about one that will',
     earlyBig.warn === true && earlyBig.note.includes('255') && earlyBig.note.includes('core/frame.js:19') &&
-      earlyBig.note.includes('每页净') && !earlyBig.note.includes('不渲染') && !earlyBig.note.includes('改用 CLI') &&
+      earlyBig.note.includes('每页净') && earlyBig.note.includes('pskit.mjs split') &&
+      !earlyBig.note.includes('不渲染') && !earlyBig.note.includes('改用 CLI') &&
       earlySmall.warn === false && earlySmall.note === '' &&
       earlySizePlan(4 * 1024 * 1024, null, undefined).warn === false,
-    `4 MiB -> warns with the ceiling, the per-page capacity and the levers, and never the word 不渲染, because this path is not allowed to refuse; 4096 B -> silent (positive control: a warning on every three-page transfer teaches the user to ignore the log); unknown geometry -> silent`
+    `4 MiB -> warns with the ceiling, the per-page capacity, the levers and the split/join commands that make "cut it into parts" something a user can actually do; never the word 不渲染, because this path is not allowed to refuse; 4096 B -> silent (positive control: a warning on every three-page transfer teaches the user to ignore the log); unknown geometry -> silent`
   );
   const tBig = Date.now();
   const refused = await buildArtifacts(filler(4 * 1024 * 1024, 0x51ed), { profile: 'P-M1-300' });
@@ -157,6 +158,7 @@ const step = (label, ok, detail) => {
     refused.ok === false && refused.stage === 'encode' && /too many pages/.test(refused.error) &&
       refused.hint.includes('255') && refused.hint.includes('core/frame.js:19') && refused.hint.includes('每页净') &&
       refused.hint.includes('CLI 受同一个 255 页限制') && refused.hint.includes('解决不了') &&
+      refused.hint.includes('pskit.mjs split') && refused.hint.includes('pskit.mjs join') &&
       !refused.hint.includes('页数不限') && bigMs < 60000 &&
       compressible.ok === true && compressible.pages.length > 0 && compressible.pages.length < PROTOCOL_PAGE_LIMIT &&
       pageLimitHint(4 * 1024 * 1024, null, undefined) === '',

@@ -15,15 +15,43 @@
  * It prints every attempt with its stage and its own milliseconds, which bootstrapDecode already
  * records -- no new instrumentation inside core, so this cannot drift from what the product does.
  *
- * usage: node tools/g6-perf-probe.mjs <page.png> [...]
+ * The optional hints answer one question: what could a PERFECT cheap pre-ranking signal ever buy?
+ * Most of the cost above is full page reads spent on the wrong geometry, so a hinted run is the floor
+ * for the same page -- the search being told the answer instead of finding it. `--only-hints` makes the
+ * hints restrict the candidate list (bootstrapDecode's own `onlyHints`), and `--palette` restricts too
+ * (candidatePlans:54), so all three together leave exactly ONE candidate: the winner is the first and
+ * only attempt, and its milliseconds are the whole bootstrap cost. That number decides whether building
+ * a second signal can bring 600 dpi inside PLAN's 2 s budget or whether the budget itself is what needs
+ * a decision -- a winning attempt is not recorded in `attempts`, so the floor cannot be read out of an
+ * unhinted run, it has to be measured this way.
+ *
+ * usage: node tools/g6-perf-probe.mjs [--profile P-M1-600] [--dpi 600] [--palette PAPER1]
+ *                                      [--only-hints] <page.png> [...]
+ *        no flags at all reproduces the historical numbers exactly (maxAttempts 24, no hints).
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { decodePNG } from '../core/decode/png-read.js';
 import { bootstrapDecode } from '../core/decode/bootstrap.js';
 
-const files = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const files = [];
+let profileHint;
+let dpiHint;
+let paletteHint;
+let onlyHints = false;
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--profile') profileHint = argv[++i];
+  else if (a === '--dpi') dpiHint = Number(argv[++i]);
+  else if (a === '--palette') paletteHint = argv[++i];
+  else if (a === '--only-hints') onlyHints = true;
+  else if (a.startsWith('--')) {
+    console.error(`unknown flag ${a} (usage: --profile --dpi --palette --only-hints <page.png> ...)`);
+    process.exit(2);
+  } else files.push(a);
+}
 if (!files.length) {
-  console.error('usage: node tools/g6-perf-probe.mjs <page.png> [...]');
+  console.error('usage: node tools/g6-perf-probe.mjs [--profile P-M1-600] [--dpi 600] [--palette PAPER1] [--only-hints] <page.png> [...]');
   process.exit(2);
 }
 const msSince = (t0) => Number(process.hrtime.bigint() - t0) / 1e6;
@@ -40,11 +68,12 @@ for (const f of files) {
   const bmp = decodePNG(new Uint8Array(bytes));
   const tPng = msSince(t1);
   const t2 = process.hrtime.bigint();
-  const boot = await bootstrapDecode(bmp, { maxAttempts: 24 });
+  const boot = await bootstrapDecode(bmp, { maxAttempts: 24, profileHint, dpiHint, paletteHint, onlyHints });
   const tBoot = msSince(t2);
   const attempts = boot.attempts ?? [];
   const tried = boot.attemptCount ?? attempts.length;
   console.log(`${f}`);
+  console.log(`  hints: profile=${profileHint ?? '-'} dpi=${dpiHint ?? '-'} palette=${paletteHint ?? '-'} onlyHints=${onlyHints} maxAttempts=24`);
   console.log(`  image ${bmp.width}x${bmp.height} = ${((bmp.width * bmp.height) / 1e6).toFixed(1)} MP, file ${(bytes.length / 1048576).toFixed(1)} MB`);
   console.log(`  readFileSync ${tRead.toFixed(0)} ms + decodePNG ${tPng.toFixed(0)} ms + bootstrapDecode ${tBoot.toFixed(0)} ms = ${(tRead + tPng + tBoot).toFixed(0)} ms end to end`);
   console.log(`  bootstrap ok=${boot.ok} attempts=${tried} ${boot.ok ? `winner=${boot.profileId}@${boot.dpi}/${boot.paletteId}` : `reason=${boot.reason}`}`);

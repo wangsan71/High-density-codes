@@ -168,7 +168,7 @@ export function pageLimitHint(byteLength, geom, parityPct) {
   const mb = (v) => (v / 1048576).toFixed(2);
   const at0 = transferBudget(byteLength, geom, 0);
   // No markdown: say() writes textContent, so asterisks would show up literally.
-  return `装不下，而且是协议装不下、不是浏览器的问题：页头的 totalPages 只有一个字节（core/frame.js:19）⇒ 一次传输最多 ${b.limit} 页，校验页挤到没位置时 core/protocol.js:320 就拒绝。这个文件按当前档（每页净 ${b.perDataPageBytes} B）与 ${b.parityPct}% 校验页需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而当前配置一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：① 把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB，代价是丢页时的恢复能力下降）；② 换每页装得更多的档（如 600 dpi 或四色档，代价是对打印与扫描的要求更高）；③ 把文件切成不超过 ${mb(b.maxPayloadBytes)} MB 的几份，分别发、分别收 —— 每份都是独立传输、各有自己的摘要校验，收到一份就落一份。注意：CLI 受同一个 255 页限制（它走同一个 encodeTransfer），所以"改用 CLI"解决不了这一条。`;
+  return `装不下，而且是协议装不下、不是浏览器的问题：页头的 totalPages 只有一个字节（core/frame.js:19）⇒ 一次传输最多 ${b.limit} 页，校验页挤到没位置时 core/protocol.js:320 就拒绝。这个文件按当前档（每页净 ${b.perDataPageBytes} B）与 ${b.parityPct}% 校验页需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而当前配置一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：① 把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB，代价是丢页时的恢复能力下降）；② 换每页装得更多的档（如 600 dpi 或四色档，代价是对打印与扫描的要求更高）；③ 把它切成几份分别传，这一条有现成命令：node cli/pskit.mjs split 你的文件（默认每份 ≤1.4 MB，写出 part-NNN.bin 与 parts.json）⇒ 每份各自发送、打印、扫描，接收时写回同一目录、用同一个 part 名字 ⇒ node cli/pskit.mjs join 那个目录 --out 文件名（逐份校验摘要、再校验整文件摘要，缺一份或错一位就拒绝并退出 1，绝不交出一个"短一点的文件"）。注意：CLI 受同一个 255 页限制（它走同一个 encodeTransfer），所以"改用 CLI"解决不了这一条 —— 解决它的是切分。`;
 }
 
 /**
@@ -187,7 +187,7 @@ export function earlySizePlan(byteLength, geom, parityPct) {
   const parts = [];
   if (b && b.over) {
     const at0 = transferBudget(n, geom, 0);
-    parts.push(`这个文件有 ${mb(n)} MB：如果 deflate 压不动它，一次传输装不下 —— 需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而一次最多 ${b.limit} 页（页头 totalPages 只有一个字节：core/frame.js:19）。当前档每页净 ${b.perDataPageBytes} B、校验页 ${b.parityPct}%，一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB）、换每页装得更多的档、或把文件切成不超过 ${mb(b.maxPayloadBytes)} MB 的几份分别传。压得动就没事：我们会先压缩再按真实页数判定（本项目自己的 deflate 把 4 MiB 全零压成 6 页）。`);
+    parts.push(`这个文件有 ${mb(n)} MB：如果 deflate 压不动它，一次传输装不下 —— 需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而一次最多 ${b.limit} 页（页头 totalPages 只有一个字节：core/frame.js:19）。当前档每页净 ${b.perDataPageBytes} B、校验页 ${b.parityPct}%，一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB）、换每页装得更多的档、或把它切成几份分别传（现成命令：node cli/pskit.mjs split 你的文件，然后每份各自发送与接收，最后 node cli/pskit.mjs join 那个目录 --out 文件名；join 逐份校验摘要再校验整文件摘要，缺一份就拒绝）。压得动就没事：我们会先压缩再按真实页数判定（本项目自己的 deflate 把 4 MiB 全零压成 6 页）。`);
   } else if (b && b.pages * PAGE_RENDER_MS >= 10000) {
     parts.push(`如果这个文件压不动，它约 ${b.pages} 页，渲染期间页面会有约 ${Math.round((b.pages * PAGE_RENDER_MS) / 1000)} 秒不响应（渲染是同步的，实测约 ${PAGE_RENDER_MS} ms/页）。`);
   }

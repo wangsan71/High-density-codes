@@ -49,6 +49,23 @@ const HELP = `pskit <command> [options]
     --profile/--nozzle/--dpi/--palette/--plate
                          required only when there is no manifest.json
 
+  split <file>           cut a file into parts that each fit ONE transfer
+    --max-bytes <n>      part ceiling (default 1400000; one transfer is at most 255
+                         pages because a page header stores totalPages in one byte, and
+                         P-M1-300 at its default 20% parity carries 1592968 B)
+    --out <dir>          where to write part-NNN.bin and parts.json
+                         (default <name>-parts next to the file). Each part is then its
+                         own transfer: send it, print it, scan it, and receive it back
+                         into that same directory under its part name.
+
+  join <dir|parts.json>  put parts back: verify every part's digest, then the whole
+                         file's digest, and only then write
+    --out <file>         where to write. Default is the name the manifest recorded, and
+                         that default is REFUSED if the file already exists -- pass
+                         --out to choose somewhere. A missing, short or corrupt part is
+                         a refusal and never a shorter file: nothing is written and the
+                         exit code is 1.
+
   calibrate <dir|file>   measure a captured page set; changes no decode decision
     --photo              same meaning as in receive (force the camera path)
     --profile/--nozzle/--dpi/--palette/--plate
@@ -578,6 +595,91 @@ async function cmdReceive(args) {
     console.log('  refused: the digest does not match the manifest, output deleted');
     process.exitCode = 1;
   }
+}
+
+/**
+ * split / join. One transfer is at most 255 pages -- a page header stores totalPages in one byte
+ * (core/frame.js:19) -- and the inter-page parity pages take slots out of that, so P-M1-300 at its
+ * default 20% parity carries 1,592,968 B (measured in round 71 against the encoder itself). A bigger
+ * file cannot be sent whole, and since round 71 the sender says so with numbers and tells the user to
+ * split it -- which was a dead end until something split the file and something else put it back
+ * (DEFECTS D65's "仍未做" item). The arithmetic lives in core/splitjoin.js, pure and unit-tested; this
+ * is only IO, and it keeps the receiver's discipline: write to a temporary name and rename, and on any
+ * digest mismatch write nothing at all.
+ */
+async function cmdSplit(args) {
+  const sj = await import('../core/splitjoin.js');
+  const src = args._[0];
+  if (!src) throw new Error('usage: pskit split <file> [--max-bytes N] [--out DIR]');
+  const from = resolve(src);
+  if (!existsSync(from)) throw new Error(`no such file: ${from}`);
+  if (statSync(from).isDirectory()) throw new Error(`${from} is a directory; split takes one file`);
+  const maxBytes = args['max-bytes'] === undefined || args['max-bytes'] === true ? sj.DEFAULT_PART_BYTES : Number(args['max-bytes']);
+  const bytes = new Uint8Array(readFileSync(from));
+  const r = sj.splitParts(bytes, maxBytes);
+  if (!r.ok) throw new Error(r.error);
+  // Only a default for `join --out`. Like every name in this project it is never transmitted: the pages
+  // carry bytes and a digest, nothing else (see docs/DEFECTS.md D62).
+  r.manifest.source.name = basename(from);
+  const outDir = resolve(args.out && args.out !== true ? args.out : join(dirname(from), `${basename(from, extname(from))}-parts`));
+  mkdirSync(outDir, { recursive: true });
+  for (const p of r.parts) writeFileSync(join(outDir, p.name), Buffer.from(p.bytes));
+  const manifestPath = join(outDir, 'parts.json');
+  const manifestTmp = `${manifestPath}.part`;
+  writeFileSync(manifestTmp, JSON.stringify(r.manifest, null, 2));
+  renameSync(manifestTmp, manifestPath);
+  const widest = Math.max(...r.parts.map((p) => p.byteLength));
+  console.log(`split ${bytes.length} B -> ${r.parts.length} part(s) in ${outDir}`);
+  console.log(`  source sha256 ${r.manifest.source.sha256}`);
+  console.log(`  largest part ${widest} B (ceiling ${maxBytes} B); one transfer carries 1592968 B at P-M1-300 with default parity`);
+  console.log('  each part is its own transfer -- send it, print it, scan it, then receive it back into this same directory under the same name:');
+  console.log(`    pskit send ${join(outDir, r.parts[0].name)} --profile P-M1-300 --sheet A4 --format png,pdf`);
+  console.log(`    pskit receive <that part's page images> --out ${join(outDir, r.parts[0].name)}`);
+  if (r.parts.length > 1) {
+    console.log(`  ... and the same for ${sj.partName(1)} .. ${r.parts[r.parts.length - 1].name}: ${r.parts.length} transfers, ${r.parts.length} print/scan rounds`);
+  }
+  console.log(`  then put it back: pskit join ${outDir} --out <file>`);
+  console.log('  join verifies every part digest and then the whole-file digest, so a part that came back wrong is a refusal, not a shorter file');
+}
+
+async function cmdJoin(args) {
+  const sj = await import('../core/splitjoin.js');
+  const src = args._[0];
+  if (!src) throw new Error('usage: pskit join <dir|parts.json> --out <file>');
+  const base = resolve(src);
+  if (!existsSync(base)) throw new Error(`no such file or directory: ${base}`);
+  const manifestPath = statSync(base).isDirectory() ? join(base, 'parts.json') : base;
+  if (!existsSync(manifestPath)) throw new Error(`no manifest at ${manifestPath} (split writes parts.json next to the parts)`);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const dir = dirname(manifestPath);
+  const parts = [];
+  for (const f of readdirSync(dir).sort()) {
+    if (!/^part-\d+\.bin$/.test(f)) continue;
+    parts.push({ name: f, bytes: new Uint8Array(readFileSync(join(dir, f))) });
+  }
+  const listed = Array.isArray(manifest?.parts) ? manifest.parts.length : 0;
+  const r = sj.joinParts(manifest, parts);
+  if (!r.ok) {
+    console.log(`join: REFUSED -- ${r.error}`);
+    console.log(`  ${r.checked} of ${listed} part(s) verified before the refusal; nothing was written`);
+    console.log('  a missing, short or corrupt part makes a DIFFERENT file, and handing that over is the one outcome this tool refuses');
+    process.exitCode = 1;
+    return;
+  }
+  const named = args.out && args.out !== true ? resolve(args.out) : null;
+  const out = named ?? join(dirname(dir), manifest.source?.name || 'pskt-joined.out');
+  if (!named && existsSync(out)) {
+    console.log(`join: REFUSED -- ${out} already exists and --out was not given`);
+    console.log(`  the parts did verify (${r.checked} of ${listed}, sha256 ${r.sha256}); pass --out <file> to write them somewhere`);
+    process.exitCode = 1;
+    return;
+  }
+  mkdirSync(dirname(out), { recursive: true });
+  const tmp = `${out}.part`;
+  writeFileSync(tmp, Buffer.from(r.bytes));
+  renameSync(tmp, out);
+  console.log(`joined ${r.checked} part(s) -> ${r.bytes.length} B at ${out}`);
+  console.log(`  sha256 ${r.sha256} MATCHES the manifest (${manifest.source.sha256})`);
 }
 
 async function cmdStatus() {
@@ -1472,6 +1574,8 @@ try {
   if (args.help || !cmd) console.log(HELP);
   else if (cmd === 'send') await cmdSend(args._.length > 1 ? { ...args, _: args._.slice(1) } : args);
   else if (cmd === 'receive') await cmdReceive({ ...args, _: args._.slice(1) });
+  else if (cmd === 'split') await cmdSplit({ ...args, _: args._.slice(1) });
+  else if (cmd === 'join') await cmdJoin({ ...args, _: args._.slice(1) });
   else if (cmd === 'calibrate') await cmdCalibrate({ ...args, _: args._.slice(1) });
   else if (cmd === 'status') await cmdStatus();
   else if (cmd === 'verify') await cmdVerify(args);

@@ -91,6 +91,20 @@ node tools/check-lan.mjs   --port 8137    # 验它交出去的资源与构建清
 - 一次传输最多 **255 页**（页间 RS 的限制）⇒ 最大 payload ≈ 每页净字节 × **能留给数据页的页数**（不是 255：校验页要占位置。`P-M1-300` 默认 20% 校验页 ⇒ **212 个数据页 × 7514 B = 1,592,968 B ≈ 1.52 MB**；把校验页调到 0% ⇒ 253 × 7514 = 1,901,042 B ≈ 1.81 MB。实测：1 MiB → 168 页 ✓ 装得下（约 180 ms 编完），2 MiB → **48 ms 被拒**）。
 - 纸面 `P-M1-300`：每页净 **7514 B** ⇒ 上限约 **1.9 MB**；200 KiB 的文件 = **3 页**（实测 ✓）。
 - 板材 `PL-D2@0.4`：每页净**约 180 B** ⇒ 上限约 **46 KB**。拿 200 KiB 去喂它，CLI 会**直接拒绝**并给可操作建议：`needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile` ✓ 这是设计行为（宁可拒绝，也不产出"看起来成功但是错"的东西）。
+- **文件比上限大怎么办（第 72 轮起有工具，不再只是一句建议）**：装不下是**协议**给的（页头 `totalPages` 只有一个字节），CLI 走同一个 `encodeTransfer` ⇒ 也绕不过。唯一的出路是**切成几份、每份各传一次**，再把收到的几份**拼回去并校验**：
+
+  ```powershell
+  # 1) 切：默认每份 ≤1,400,000 B（在 1,592,968 B 上限下留 ~12% 余量），写出 part-NNN.bin 与 parts.json
+  node cli/pskit.mjs split BIGFILE --out PARTS        # 想自己定每份大小就加 --max-bytes N
+  # 2) 每一份都是一次独立传输：send → 打印 → 扫描/拍照 → receive 回**同一个目录、用同一个 part 名字**
+  node cli/pskit.mjs send PARTS\part-000.bin --profile P-M1-300 --format png,pdf --out P0
+  node cli/pskit.mjs receive P0-scan --photo --out PARTS\part-000.bin
+  #    …… part-001.bin、part-002.bin 各来一遍（N 份 = N 轮打印/扫描，每份各有自己的摘要闸）
+  # 3) 拼回去：逐份校验摘要，再校验整文件摘要，全过才写盘
+  node cli/pskit.mjs join PARTS --out RECOVERED
+  ```
+
+  完整性口径与接收端一致（**误接受是唯一不可原谅的失败**）：缺一片、短一截、错一位 ⇒ `join` **拒绝、exit 1、一个字节都不写**，并说清"验到第几片/共几片"；不给 `--out` 时默认用 `parts.json` 里记的原文件名，但**那个文件已存在就拒绝**（不猜着覆盖）。文件名只是默认输出名，**不进纸面**（传输里只有字节与摘要，见 D62）⇒ **用网页或手机接收时要多一步**：那边落盘的名字是按摘要生成的（不是 `part-000.bin`），收完把每份**改名回 manifest 里的 part 名**再 `join`（或直接走 CLI 的 `receive --out PARTS\part-NNN.bin`，省掉改名）。这条链路由 `tools/usability.ps1` 的 **4b 腿**每轮实跑（split → 3 次独立传输过真实信道 → join → 逐字节比对，外加"收到的某一片改一个字节必须被拒"的阴性对照），纯函数侧由 `tests/unit/splitjoin.test.mjs`（6 个用例，每个拒绝都配阳性对照）盯着。
 - 完整容量表（各 profile × 喷嘴）：`node cli/pskit.mjs status`
 
 **命令行等价**（可脚本化，与页面走同一份 `core/`）：
@@ -99,6 +113,8 @@ node tools/check-lan.mjs   --port 8137    # 验它交出去的资源与构建清
 node cli/pskit.mjs send FILE --profile P-M1-300 --format png,pdf --out DIR
 node cli/pskit.mjs send FILE --profile PL-D2 --nozzle 0.4 --format 3mf,stl --out DIR
 node cli/pskit.mjs receive DIR --photo --out OUT.bin
+node cli/pskit.mjs split FILE --out PARTS     # 超过一次传输上限时：切成几份（默认每份 ≤1.4 MB）
+node cli/pskit.mjs join PARTS --out OUT.bin   # 收齐几份后拼回并校验；不符就拒绝、不写盘
 node cli/pskit.mjs status                       # 各 profile / 喷嘴的容量表
 node cli/pskit.mjs verify --gate all            # 进程内门限（会打印本次没评估哪些）
 ```
@@ -132,6 +148,6 @@ node cli/pskit.mjs verify --gate all            # 进程内门限（会打印本
 - **一页都读不出**：先确认扫描没被"自动裁剪"、没被转成灰度（只有 `monoSafe` 的 profile 才保证单色可恢复 ✓）。
 - **缺页**：接收页会点名缺哪几页；补拍那几页即可。冗余比例由发送时的 `--parity` 决定。
 - **发送页点了下载、文件却没出现**：产物大时（阈值 32 MB）页面会**先提示**"这一页是把它变成约 X MB 的 data: URL 文本再交给浏览器下载的……页面无法知道下载有没有成功"⇒ 这不是解码失败，是浏览器下载大 data: URL 的固有风险。出路：**电脑上有 Node 就用 CLI 直接写盘、不经浏览器** —— `node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 目录`（页图与 `pack.pdf` 都落在目录里，没有浏览器参与）；或者**把文件切小、分几次传**。第 70 轮起这条提示由 `downloadPlan()` 决定（D63）。
-- **发送页说「too many pages: N data pages leave no room for parity」/「装不下，而且是协议装不下」**：这不是浏览器的问题、也不是 bug，是**协议的硬上限**：页头的 `totalPages` 只有**一个字节**（`core/frame.js:19`）⇒ **一次传输最多 255 页**，而其中一部分要留给页间校验页，挤到没位置时 `core/protocol.js:320` 就拒绝。实测容量：`P-M1-300` 每页净 **7514 B**（`geom.ecc.dataBytes`），默认 20% 校验页 ⇒ 一次最多约 **1.52 MB**（1 MiB → 168 页装得下；2 MiB → 48 ms 被拒）。三条路：① **把校验页 % 调低**（0% 时约 1.81 MB，代价是丢页时恢复能力下降）；② **换每页装得更多的档**（600 dpi 或四色档，代价是对打印/扫描精度要求更高）；③ **把文件切成几份分别传**（每份都是独立传输、各有自己的摘要校验，收到一份就落一份）。**CLI 不能绕过这条限制** —— 它走的是同一个 `encodeTransfer`，同样撞 255 页（CLI 自己的拒绝语是 `needs N pages > 255 (inter-page RS limit): shrink payload or use a denser profile`）。另外：**发送页在读入文件之前只会警告、不会拒绝**，因为页数取决于 deflate 能压掉多少，而压缩比没有上界（本项目自己的 deflate 把 4 MiB 全零压成 **6 页**）⇒ 任何"按文件字节数提前拒绝"的阈值都会**误拒**本来装得下的文件（例如一个 20 MB 但压得动的日志）。第 71 轮起：`transferBudget()` 算账（与编码器逐项对齐，由 `tools/smoke-sender.mjs` 用编码器自己的输出钉住）、`pageLimitHint()` 出拒绝语、`earlySizePlan()` 只负责提前告知（D65）。
+- **发送页说「too many pages: N data pages leave no room for parity」/「装不下，而且是协议装不下」**：这不是浏览器的问题、也不是 bug，是**协议的硬上限**：页头的 `totalPages` 只有**一个字节**（`core/frame.js:19`）⇒ **一次传输最多 255 页**，而其中一部分要留给页间校验页，挤到没位置时 `core/protocol.js:320` 就拒绝。实测容量：`P-M1-300` 每页净 **7514 B**（`geom.ecc.dataBytes`），默认 20% 校验页 ⇒ 一次最多约 **1.52 MB**（1 MiB → 168 页装得下；2 MiB → 48 ms 被拒）。三条路：① **把校验页 % 调低**（0% 时约 1.81 MB，代价是丢页时恢复能力下降）；② **换每页装得更多的档**（600 dpi 或四色档，代价是对打印/扫描精度要求更高）；③ **把文件切成几份分别传**（第 72 轮起有现成命令，不必自己拿剪刀：`node cli/pskit.mjs split 文件 --out 目录` ⇒ 每份各自 send/打印/扫描/receive 回同一目录同名 ⇒ `node cli/pskit.mjs join 目录 --out 输出`，逐份校验摘要再校验整文件摘要，缺一片就 exit 1 且不写盘；步骤见上文「一次能传多大」）。**CLI 不能绕过这条限制** —— 它走的是同一个 `encodeTransfer`，同样撞 255 页（CLI 自己的拒绝语是 `needs N pages > 255 (inter-page RS limit): shrink payload or use a denser profile`）。另外：**发送页在读入文件之前只会警告、不会拒绝**，因为页数取决于 deflate 能压掉多少，而压缩比没有上界（本项目自己的 deflate 把 4 MiB 全零压成 **6 页**）⇒ 任何"按文件字节数提前拒绝"的阈值都会**误拒**本来装得下的文件（例如一个 20 MB 但压得动的日志）。第 71 轮起：`transferBudget()` 算账（与编码器逐项对齐，由 `tools/smoke-sender.mjs` 用编码器自己的输出钉住）、`pageLimitHint()` 出拒绝语、`earlySizePlan()` 只负责提前告知（D65）。
 - **报 `digest mismatch`**：这是**设计行为**——宁可失败也绝不交出"看起来成功但是错"的数据（误接受为 0 是本项目的硬约束）。
 - **想自己验内核**：`node cli/pskit.mjs verify --gate all`（G0 单测 + G1/G3/G5/G7/G8 进程内），或接收页 `?selftest=1`。单测条数每轮都在长 ⇒ **别背数字**：**第 59 轮实测 `tests 297 · pass 297 · fail 0 · duration_ms 136148`（≈136 s）、`exit 0`**（第 52 轮是 296/296，第 53 轮加了"纸面斜拍"1 例 ⇒ 297；第 53 轮当轮没抄下汇总数字、那时就没写 ✗ 现在补上了 ✓）⇒ 以 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` 自己打印的汇总为准，**只看 exit code 判定** ✓
