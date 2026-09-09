@@ -211,13 +211,39 @@ const ADVICE = {
 };
 
 /**
+ * 手机连拍界面用的中文一句话（英文的 cause/do 仍给 CLI 与报告用）。
+ *
+ * 为什么放在同一张表里：界面文案与 CLI 文案说的是同一件物理事实，分成两处就会各自漂移 ——
+ * 本仓已经吃过一次亏（D66：core 早就算出「缺的是口令」，三个 UI 各说各话）。这里只覆盖
+ * **手机连拍那条路真的会遇到的 reason**，其余仍走英文。
+ */
+const ZH = {
+  'no-contrast': '照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— 重新取景没用。',
+  'echo-no-contrast': '页顶那条回显条（页上最细的特征）糊了：靠近一点、让页顶边进画面并对上焦；还是不行就改用更粗的档（板材 PL-G）或换成扫描仪 300 dpi。',
+  'no-square-candidates': '一个方形角标都认不出来：多半是失焦/太糊，或者打印的特征比相机能分辨的更小。靠近、2× 变焦、擦镜头；板材档请换更粗的喷嘴档。',
+  'no-marker-size-cluster': '找到了方块但不是四个同样大的：页面有一部分在画面外，或者透视太强。把整页（含四角）框进画面，相机尽量与纸面平行。',
+  'no-hollow-corner': '四个角标都找到了，但没有一个是空心的（朝向标）：朝向标被磨花、过曝，或拍的是板材的反面。用正面重拍，别让空心角反光。',
+  'no-rectangular-quad': '角标候选凑不出一个像样的矩形：可能有手指/页边遮挡。清掉遮挡、把纸放平再拍。',
+  'fourth-corner-out-of-frame': '只找到三个角标，第四个按矩形推算落在画面外：退一点、把整页框进去再拍 —— 这是取景问题，不是对焦或清洁问题。',
+  'blank-image': '这张图基本是均匀的：可能是拍到了空白、镜头被挡，或者文件不是页图。确认拍的是页，并把整页框进画面。',
+  'too-few-candidates': '留下的角标候选不足四个：大概率有一个角标被反光或手指挡住了。把页放平、去掉反光再拍。',
+  'mirrored-image': '唯一自洽的读法是镜像：页放反了，或扫的是背面。翻到正面重拍 —— 这不是对焦问题。',
+  'echo-bad-magic': '回显条读出来的字节魔数不对：条带受损，或者这一页不是本工具的码。先确认印的是 PSKT 页，再重拍一次页顶那条。',
+  'echo-header-crc': '回显条 CRC 没过：通常是页顶留边上有污渍或反光。把页顶那条完整拍进画面、对焦好再拍。',
+  'echo-short-header': '回显条可读的格子太少，凑不齐一个头：这是页上最细的特征，需要最多分辨率 —— 靠近一点。',
+  'no-geometry-matched': '所有候选几何都读不出这一页：确认拍的是完整未裁切的一页、对上焦，并核对打印时用的剖面/dpi。',
+  'intra-fail': '这一页自己的纠错预算用完了（页内太多格子读不出：污渍、折痕或局部失焦）。只重拍这一页就行 —— 其它页可用，校验页也能把它补回来，不用重印。',
+  'digest-mismatch': '还原出的字节与声明的摘要不符 ⇒ 按硬约束**一个字节都不写**。请补拍缺的页或重拍读不出的页；如果你填了口令，确认它是对的。',
+};
+
+/**
  * @param {{stage?:string, reason?:string}} failure
- * @returns {{cause:string, do:string, known:boolean, hint?:string}}
+ * @returns {{cause:string, do:string, known:boolean, hint?:string, zh?:string}}
  */
 export function advise(failure) {
   const key = failure.reason || 'unknown';
   const hit = ADVICE[key];
-  if (hit) return { ...hit, known: true };
+  if (hit) return { ...hit, known: true, ...(ZH[key] ? { zh: ZH[key] } : {}) };
   // A reason we do not know must still produce guidance, and must announce that
   // it is unmapped so the gap shows up in test output instead of silently
   // borrowing somebody else's advice.
@@ -231,4 +257,9 @@ export function advise(failure) {
 /** All mapped reasons -- used by the acceptance suite to assert coverage. */
 export function knownReasons() {
   return Object.keys(ADVICE).sort();
+}
+
+/** The reasons with a Chinese one-liner for the phone UI (see ZH). */
+export function localizedReasons() {
+  return Object.keys(ZH).sort();
 }

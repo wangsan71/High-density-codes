@@ -123,6 +123,23 @@
 
 ## 已知风险 / 待办
 
+### 第 81 轮（**诊断要能到得了手机：D69/D71 那两条话术，之前一个字都到不了 —— D72 已修**）
+
+**这轮补的是前两轮的「最后一公里」**。第 79/80 轮修的两条诊断（`no-contrast`、`echo-no-contrast`）是**写给手机用户**的，但它们在手机那条路上**到不了用户**：
+
+- `web/capture.js` 的 DOM 半面对 `kind === 'no-page'` 只打一句「画面里没有本工具的页（或太糊/太暗）」——**把 reason 整个丢掉**；
+- `core/decode/bootstrap.js` 在所有候选都失败后统一报 `no-geometry-matched`——**具体成因被包装名吃掉**。
+实测：一张平/糊的帧让 24 个候选**全部**以 `no-contrast` 失败，用户看到的却是「所有候选几何都读不出这一页」。
+
+**修法（D72，已闭）**：
+
+1. `core/decode/bootstrap.js`：所有候选失败且**原因一致**时，把这个原因提升为页面级 `reason`（`wrappedReason` 保留包装名）；原因不一致仍报 `no-geometry-matched`（此时没有单一成因被确立）。
+2. `web/capture.js`：收集器给失败帧带上 `advise()` 结果；DOM 半面优先显示中文一句话（没有中文时退回英文 cause→do）。
+3. `core/decode/advice.js`：新增 `ZH` 表（16 条手机路径会遇到的 reason）与 `localizedReasons()`；**中英同表** ⇒ 不会再出现「core 知道、三个 UI 各说各话」那种漂移（D66 的教训）。
+
+**实测**：`node tools/smoke-capture.mjs` ⇒ 修前那张平帧报 `kind no-page · reason no-geometry-matched`，修后 **`reason no-contrast`**，且 `advice.zh` 是「照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— **重新取景没用**。」；**阳性对照**：好帧必须被接受且**不带** advice（否则这条断言只是在测「每帧都有 advice」）。另一条腿：裁切的页从 `no-geometry-matched` 变成 **`no-rectangular-quad`**（更具体、且指向正确的补救）。
+
+**门限**：单测 **338/338 exit 0**、`verify --gate all` ⇒ **ALL GATES PASS**（6/7）、`usability` exit 0（含 smoke-capture 的新断言）、`check-docs-tables` clean。**判据未动**：没有任何帧因此被接受。
 ### 第 80 轮（**同一张照片的第二层误诊：条带没对比度，被说成「头字段损坏/另一套码」⇒ D71 已修**）
 
 **接第 79 轮的线**：那一轮修的是「照片整体没有墨/纸分离」被说成「四角没拍全」（D69）。这一轮查的是**下一层**：`phone40`（较温和的手机档）下角标**找得到**（6.3px）、校正 100%，但页面在 `readEcho` 处失败，报 `echo-bad-magic`，而 `advice.js` 对它的解释是「条带损坏，或这是另一套码」——**字节层面是真的，成因层面是错的**：真实原因是**拍得太远**，条带的 1-bit 微格（数据格的一半宽，是页上最细的特征）糊成一条灰带。用户照这条建议会去**重印**，而正确动作是**拍近/换粗档**。

@@ -228,5 +228,20 @@ export async function bootstrapDecode(bitmap, opts = {}) {
       ms: Date.now() - t0,
     };
   }
-  return { ok: false, reason: 'no-geometry-matched', attempts, tried: Math.min(plans.length, maxAttempts), ms: Date.now() - t0 };
+  // When every candidate failed for the SAME reason, that reason is the page's diagnosis and
+  // 'no-geometry-matched' is only the wrapper. Measured (round 81): a flat, blown-out frame made
+  // all 24 candidates fail with 'no-contrast', and the phone burst UI therefore told the user
+  // 「所有候选几何都读不出这一页」 instead of the exposure/glare sentence that fits -- the same
+  // wrong-diagnosis failure D69/D71 fixed one layer down. Only a unanimous reason is promoted:
+  // a mix of reasons stays the generic wrapper, because then no single cause is established.
+  const reasons = new Set(attempts.map((a) => a.reason).filter(Boolean));
+  const unanimous = reasons.size === 1 && attempts.length > 1 ? [...reasons][0] : null;
+  return {
+    ok: false,
+    reason: unanimous && unanimous !== 'fail' ? unanimous : 'no-geometry-matched',
+    wrappedReason: unanimous && unanimous !== 'fail' ? 'no-geometry-matched' : null,
+    attempts,
+    tried: Math.min(plans.length, maxAttempts),
+    ms: Date.now() - t0,
+  };
 }

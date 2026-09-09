@@ -88,6 +88,50 @@ step('recovered payload matches the input digest', !!out && sha256Hex(out) === w
 const again = await collector.addFrame(bitmaps[0]);
 step('a repeated page is a duplicate, not progress', !again.accepted && again.kind === 'duplicate', `kind ${again.kind} · stats ${JSON.stringify(collector.stats)}`);
 
+
+/* ---- 2c. a frame the camera ruined must say WHY, in the phone UI language (round 81) ---- */
+{
+  // The burst UI used to print one generic line for every decode failure, so the two diagnoses
+  // added in rounds 79-80 (no-contrast / echo-no-contrast) never reached the phone -- the only
+  // user they were written for. The collector now carries the same advice table the CLI uses.
+  const flat = { width: 400, height: 300, pixels: new Uint8Array(400 * 300 * 4) };
+  let seed = 987654321;
+  const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < 400 * 300; i++) {
+    const v = Math.round(120 + rnd() * 20);
+    flat.pixels[i * 4] = v;
+    flat.pixels[i * 4 + 1] = v;
+    flat.pixels[i * 4 + 2] = v;
+    flat.pixels[i * 4 + 3] = 255;
+  }
+  for (const [cx, cy] of [[40, 40], [120, 80], [200, 150], [300, 200], [360, 260]]) {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const o = ((cy + dy) * 400 + cx + dx) * 4;
+      flat.pixels[o] = 40;
+      flat.pixels[o + 1] = 40;
+      flat.pixels[o + 2] = 40;
+    }
+  }
+  const cFlat = createBurstCollector({ decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }), feed: async () => ({ ok: true }) });
+  const eFlat = await cFlat.addFrame(flat);
+  step(
+    
+    'a flat frame is diagnosed, not just rejected',
+    !eFlat.accepted && eFlat.kind === 'no-page' && eFlat.reason === 'no-contrast' && !!eFlat.advice && eFlat.advice.known === true,
+    `kind ${eFlat.kind} · reason ${eFlat.reason} · advice.known ${eFlat.advice && eFlat.advice.known}`,
+  );
+  step(
+    'that diagnosis reaches the phone in Chinese, naming the real cause',
+    // It must name the physical cause AND explicitly rule out reframing (the wrong remedy).
+    typeof (eFlat.advice && eFlat.advice.zh) === 'string' && /曝光|反光/.test(eFlat.advice.zh) && /没用/.test(eFlat.advice.zh),
+    `${eFlat.advice && eFlat.advice.zh}`,
+  );
+  // Positive control: an accepted page carries no failure advice, so the line above is not
+  // passing because every frame has advice attached.
+  const cGood = createBurstCollector({ decode: (bmp) => bootstrapDecode(bmp, { maxAttempts: 24 }), feed: async () => ({ ok: true }) });
+  const eGood = await cGood.addFrame(bitmaps[0]);
+  step('a good frame is accepted and carries no advice', eGood.accepted === true && !eGood.advice, `kind ${eGood.kind} · advice ${eGood.advice ? 'present' : 'absent'}`);
+}
 /* ---- 2b. the bare code area must still decode: a user may scan or crop just that ---- */
 {
   const asmCode = new TransferAssembler({});

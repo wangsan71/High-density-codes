@@ -32,6 +32,10 @@ import { decodeHeader } from '../core/frame.js';
 // browser, from dist, so they are spelled the way dist needs them. Do not "tidy" one set to match the
 // other; both spellings are load-bearing.
 import { downloadName } from '../core/naming.js';
+// The same advice table the CLI and the desktop page use. Attaching it to a rejected frame is what
+// turns "画面里没有本工具的页" into a sentence that names the physical cause and the fix (round 81:
+// the phone path was the one place that threw the reason away).
+import { advise } from '../core/decode/advice.js';
 
 const GATE_DEFAULTS = { minMarkerPx: 14, minCoverage: 0.72, maxConsecutiveRejections: 40 };
 
@@ -82,7 +86,8 @@ export function createBurstCollector(opts = {}) {
     const boot = await decode(bmp);
     if (!boot || !boot.ok) {
       counters(boot && boot.reason ? boot.reason : 'decode-fail');
-      return { accepted: false, kind: 'no-page', reason: (boot && boot.reason) || 'decode-fail', progress: progress() };
+      const adv = advise({ stage: boot && boot.stage, reason: (boot && boot.reason) || 'decode-fail' });
+      return { accepted: false, kind: 'no-page', reason: (boot && boot.reason) || 'decode-fail', advice: adv, progress: progress() };
     }
     const page = boot.page || boot;
     const loc = locate(page);
@@ -134,7 +139,8 @@ export function createBurstCollector(opts = {}) {
     }
     if (!res || (!res.ok && !res.duplicate)) {
       counters((res && res.reason) || 'feed-rejected');
-      return { accepted: false, kind: 'rejected', reason: (res && res.reason) || 'feed-rejected', pageIndex: loc.pageIndex, progress: progress() };
+      const adv = advise({ stage: 'assemble', reason: (res && res.reason) || 'feed-rejected' });
+      return { accepted: false, kind: 'rejected', reason: (res && res.reason) || 'feed-rejected', advice: adv, pageIndex: loc.pageIndex, progress: progress() };
     }
     s.have.add(loc.pageIndex);
     stats.accepted++;
@@ -243,7 +249,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
           if (r.kind === 'page') say(`第 ${r.pageIndex + 1} 页收到（${r.path}${r.markerPx ? ` · 角标 ${r.markerPx.toFixed(0)}px` : ''}）· 已有 ${r.progress.have}/${r.progress.total} · 缺 ${r.progress.missing.map((i) => i + 1).join(',') || '无'}`);
           else if (r.hint) say(r.hint, 'hint');
           else if (r.kind === 'duplicate') { /* silent: this fires many times per second */ }
-          else if (r.kind === 'no-page') say('画面里没有本工具的页（或太糊/太暗）', 'hint');
+          else if (r.kind === 'no-page' || r.kind === 'rejected') say(r.advice && (r.advice.zh || r.advice.cause) ? (r.advice.zh || `${r.advice.cause} → ${r.advice.do}`) : '画面里没有本工具的页（或太糊/太暗）', 'hint');
           $('burstprog').textContent = `已收 ${r.progress.have}/${r.progress.total || '?'} 页 · 缺 ${r.progress.missing.map((i) => i + 1).join(',') || '无'}`;
           if (r.complete) {
             say('页收齐了：正在组装……', 'hint');
