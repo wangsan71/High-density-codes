@@ -1,0 +1,54 @@
+{
+  "tool": "pskit",
+  "version": 1,
+  "source": "精灵-0001-Sheet.png",
+  "sourceBytes": 350,
+  "sourceSha256": "54f54079b4476a02025f584f4a50b2f289d63f6c25e4e4f9d850420fcadb5253",
+  "sessionId": "54f54079b4476a02",
+  "profile": "P-M1-300",
+  "nozzle": null,
+  "monoSafe": "n/a",
+  "palette": "PAPER1",
+  "monoRender": false,
+  "encrypted": false,
+  "compressed": false,
+  "pageGeometry": {
+    "cols": 216,
+    "rows": 319,
+    "pitchMm": 0.8467,
+    "bitsPerCell": 1,
+    "netBytesPerPage": 7514
+  },
+  "pageLayout": "216x319 cells @ 0.8467mm (10px @ 300dpi), page 191.3x278.6mm, echo 56x8 @ 5px",
+  "glyph": {
+    "cellEw": null,
+    "shapeLevels": 2,
+    "quantised": false,
+    "outer": 0.47,
+    "inner": 0.38,
+    "dot": null,
+    "measure": {
+      "dotR": 0.3,
+      "bandIn": 0.4,
+      "bandOut": 0.455,
+      "bandGuardArea": 0.14773339453505996,
+      "bandScale": 1.6267942583732062
+    }
+  },
+  "dpi": 300,
+  "pages": 3,
+  "dataPages": 1,
+  "parityPages": 2,
+  "printedAreaFraction": 0.242,
+  "files": [
+    "page-000.png",
+    "page-001.png",
+    "page-002.png",
+    "pack.pdf"
+  ],
+  "timingsMs": {
+    "encode": 11,
+    "render": 726
+  },
+  "note": "Print at 100% scale (no \"fit to page\"). Sheet 210.0x297.0mm carries the 191.3x278.6mm code area centred, with crop marks and registration crosses in the margin; scan colour at 300 dpi with auto-crop OFF."
+}

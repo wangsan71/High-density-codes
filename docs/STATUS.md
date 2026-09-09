@@ -123,6 +123,18 @@
 
 ## 已知风险 / 待办
 
+### 第 90 轮（**部署：仓库推到 GitHub + GitHub Pages 工作流（D43 的 https 半边）**）
+
+**用户指示**：「链接 `https://github.com/wangsan71/High-density-codes.git`，尝试部署」。
+
+**做了什么**：
+
+1. `git remote add origin …` + `git push -u origin master` ⇒ **推送成功**（`* [new branch] master -> master`）。
+   **沙箱注意**：`git push` 的 HTTP 传输助手（`git-remote-https`，MSYS 程序）要创建 signal pipe，被受限沙箱拒（`Win32 error 5`）⇒ 必须用一次 `danger-full-access` 才跑得通（与 `spawn EPERM` 同源，已记进 `AGENTS.md` 的陷阱表习惯里）。
+2. 新增 **`.github/workflows/pages.yml`**：`push` 到 `master` 时用**用户本地同一条命令**构建（`node tools/build-web.mjs`）→ `node tools/check-dist.mjs` 把关（零第三方 origin / CSP / SW 清单哈希）→ 单元套件 → `upload-pages-artifact` + `deploy-pages`。**零运行时依赖**（`dependencies` 仍是 `{}`，不需要 `npm install`）。
+3. 用 GitHub API 确认状态：仓库 **public**、`default_branch=master`；首次 run **失败**（当时 `has_pages=false`）；用 `POST /repos/.../pages {build_type:workflow}` **启用 Pages** ⇒ `201`，站点 **https://wangsan71.github.io/High-density-codes/**、`https_enforced: true`。
+
+**如实说明**：启用 Pages 之后的重跑/触发被 GitHub 拒（`rerun → 403`、`dispatch → 422`：凭据是 GCM 里存的那一个，作用域不足以写 Actions）⇒ 改为**再推一次提交**触发 `on: push`（本文件所在的那次提交即触发）。**最终是否绿、以及站点是否真的能打开，以那次 run 的结论为准**（下面附上结论）。
 ### 第 89 轮（**页数上限的 hint 说了「用 split」，却没说「每片多大」⇒ 第二句仍然撞墙**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只把第 84 轮那句 hint 补成**能直接照抄**的。
