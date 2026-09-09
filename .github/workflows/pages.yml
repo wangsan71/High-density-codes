@@ -33,9 +33,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Build the client pages (no npm install: dependencies are {} by contract)
+      # Step names are quoted on purpose: an unquoted plain scalar may not contain ": " -- the
+      # first version wrote "no npm install: dependencies are {}" and GitHub rejected the whole file
+      # with "Invalid workflow file: .github/workflows/pages.yml#L36", running zero jobs (measured).
+      - name: "Build the client pages (no npm install, dependencies are {} by contract)"
         run: node tools/build-web.mjs
-      - name: Assert the artifacts (zero third-party origins, CSP, SW manifest hashes)
+      - name: "Assert the artifacts (zero third-party origins, CSP, SW manifest hashes)"
         run: node tools/check-dist.mjs
       - name: Unit suite
         run: node --test --test-isolation=none "tests/unit/**/*.test.mjs"
