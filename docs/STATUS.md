@@ -18,7 +18,7 @@
 | M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | **进行中（只剩 G4，且只有用户能跑）**：`sim/channel.py` 与 `ref/decode.py` **早已落地并在用**（G2 的 600 份语料就是它生成的、G0 靠 `ref/decode.py` 判绿）⇒ 原记的"由子代理在写"是**过期记账，第 64 轮更正** ✗ | G2 **300 dpi ✅ `PASS 200/200`**（第 63 轮修法后重跑 1245.4 s、exit 0）· 600 dpi **无判决**（用户第 63 轮判定非必要 ⇒ 重跑中止在 52/200）· G3 ✅ · G5 ✅（第 63 轮起含**接缝试验 2000 次、0 误接受**）· **G4 ⬜ 零证据**（手机 500×8 需真机 ⇒ 见 `USE.md` §5） | — |
 | M5 | STL + 3MF 双色产物 | G8 | **完成（进程内等价）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ 产物每轮由 usability 冒烟实际写出并用 G8 校验 | `PL-D2@0.4`：3 objects / 377964 triangles / 4.1 MB · `verify --gate G8` ✅ · `tests/unit/threeMF-xsd-parity.test.mjs` 把规则表与 vendored 权威 XSD **自动对拍**（D41 第 39 轮已闭）· 差的只是**切片软件真人打开一次**（本机无 XSD 引擎 ⇒ "过 schema"仍未证） | — |
 | M6 | 双色优先·单色兜底 | G7 | **完成（图像层）** | `--gate G7`：PL-D2@0.2/0.4 单色渲染判死色道 → 完整复原；PL-D3(off) 干净拒绝 | — |
-| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | **部分**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `pskit calibrate`（逐页 readout + 页内纠错预算 + 墨量健康度，只量不改）**第 61 轮已落地**、第 63 轮起还报救回；ρ 自标定在理想层跑通 | **G10 喷嘴矩阵需真打印机 ⇒ 未跑**（只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点）· **MTF 板 → 推荐喷嘴/间距那一半第 75 轮已落地**（`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1`；真信道实测四喷嘴三条点名正确、0.2 那一档有实测原因 ⇒ 见第 75 轮块）· **第 76 轮：可打印半边也落地**（`core/mesh/rectilinear.js` + `core/mesh/mtfplate.js` + CLI `--format 3mf,stl`，每 object 水密 + 投影对拍 `maxPct 0`，3MF 过 G8 子集 ⇒ D67 CLOSED）⇒ 只差**真打印机印一次**（G10）与**数据板网格的角标**（D68，OPEN） | — |
+| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | **部分**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `pskit calibrate`（逐页 readout + 页内纠错预算 + 墨量健康度，只量不改）**第 61 轮已落地**、第 63 轮起还报救回；ρ 自标定在理想层跑通 | **G10 喷嘴矩阵需真打印机 ⇒ 未跑**（~~只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点~~ —— **第 78 轮更正 ✗**：`planPage('PL-G', {nozzle:0.2/0.4/0.6/0.8})` 实测**四档全部可规划**（pitch 3.12/3.6/5.6/7.6mm，50×50/42×42/23×23/14×14 格），G7 也打印 `PL-G@0.8 … recovered`；被 `glyphGeometry` 拒绝的是 **`PL-D3S`**（形状字母表 4 档 ⇒ 0.6/0.8 放不下，见容量表那行）。原句把两个档位写混了，**判决未变**：完整矩阵仍未跑）· **MTF 板 → 推荐喷嘴/间距那一半第 75 轮已落地**（`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1`；真信道实测四喷嘴三条点名正确、0.2 那一档有实测原因 ⇒ 见第 75 轮块）· **第 76 轮：可打印半边也落地**（`core/mesh/rectilinear.js` + `core/mesh/mtfplate.js` + CLI `--format 3mf,stl`，每 object 水密 + 投影对拍 `maxPct 0`，3MF 过 G8 子集 ⇒ D67 CLOSED）⇒ 只差**真打印机印一次**（G10）与**数据板网格的角标**（D68，OPEN） | — |
 | M8 | Web 扫描端 PWA + Pages | G9 | **部分（产物级全绿，浏览器内未验证）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `web/dist` PWA（manifest + `sw.js` + 三张图标）与两个单文件页每轮构建 | `build-web` exit 0（55 文件、29 模块、precache 53）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 12 assertions pass`（第 64 轮起夹具自带 ⇒ **全新检出也绿**，D53）· 差**真浏览器点一次（G9）**与 **https 托管（D43，只有用户能解）** | — |
 | M9 | soak/性能/文档 | G6 + 复跑全部 | **进行中**（原记"未开始"是**过期记账，第 72 轮更正** ✗：G6 三部分第 65–70 轮已按判据实测并落判决，`docs/USE.md`/`ACCEPTANCE.md`/`DEFECTS.md` 每轮维护） | G6 ① 编码 **199.4 ms ≤5 s ✅** · ③ soak **30 min 与 60 min 双过 ✅**（60.02 min、281 cycles、2782 页解码、误接受 0、RSS `+3.16% ≤10%`；但"无泄漏"**不主张**，Q1..Q4 未收敛，见 ACCEPTANCE ③bis）· ② 解码 **300 dpi ✅ 1373 ms / 600 dpi ✗ 地板 6192 ms**（第 72 轮实测：完美排序也超预算 3.1 倍 ⇒ 只能由产品负责人改判据）⇒ **G6 整条 🟡** · "复跑全部"这条腿每轮在跑：build-web / check-dist / smoke-sender / smoke-capture / 单测 / usability 全绿 | — |
 | M10 | 可选 `REL` 光影档 / `P-C4` 纸面4色 | — | 未开始 | — | — |
@@ -39,7 +39,7 @@
 | G7 单色兜底 100% | ✅ | — | `verify --gate G7`（`colourAlive=false` → 整道擦除复原 ✓） |
 | G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF XSD 子集校验器：第 38 轮已写、进程内可跑、对我们所有产物 PASS ✅**（`tools/check-3mf.mjs` + `verify --gate G8` ✓ 规则逐条抄自 vendored `ref/3mf-core-1.4.0.xsd` 并注行号 ✓ 25 条测试 = 21 篡改 + 4 正例含"D40 回归守卫"✓ **绿了 ⇒ 已并入 `--gate all`** ✓）· 仍**不等于过 schema**（本机无 XSD 引擎 ✗ Python 侧 `verify_model.py` 无 `--xsd` 开关 ✗）· ~~**D41 OPEN**：表与权威 XSD 之间**还没有自动对拍** ✗（本轮就是靠抄错权威翻了车 ✓）~~（**过期记账，第 64 轮更正**：D41 **第 39 轮已闭** ✓ 修法 = `tests/unit/threeMF-xsd-parity.test.mjs`，用本校验器自己的 `scanXml` 读 vendored 权威 XSD、逐项比对 `CT_*` 属性集与 16 个元素名 ⇒ 表再抄错就红 ✓ 原句划掉保留为历史、不改写） | `node cli/pskit.mjs verify --gate G8`（或 `--file a.3mf,b.3mf`）· `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
 | G9 Web 扫描端（Pages） | 🟡（产物级全绿 ✓ 浏览器内未验证） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **第 56 轮复量：`13 pass / 0 skipped / 0 fail` + `G9 CHECK: all 12 assertions pass`、exit 0**（原先这里记的"8/8 全绿""SW 78 条清单"是第 22–23 轮的数 ⇒ 这类数字随构建内容变、**别背**，看工具自己打印的汇总即可 ✓ 第 53 轮构建实测：`web/dist` **54 个文件**、SW 预缓存 **52 条**）：零第三方加载点、两页 CSP `default-src 'self'`、SW 清单哈希逐字节对上磁盘、页面每个引用都有对应产物、`pskt-file.html` 只含 data: ✓ **`web/dist/selftest.js` 在产物内跑出 13 pass / 0 fail** ✓ **bundle 无人告知几何解磁盘页 → 摘要等于 `manifest.sourceSha256`** ✓ 差多少：**本机无浏览器** ⇒ "`?selftest=1` 在页面里绿"与"`file://` 双击→选照片→解出文件"这两条只被 Node 侧等价物证明 ✓ 摄像头授权、SW 注册、iOS 主屏图标全属推定；要人在这台机器之外点一次才算闭合 | 第 22–23 轮 ✓ |
-| G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝 ✓）⇒ 完整矩阵未跑 ✓ **第 75 轮起有 MTF 板可量**（`& .\tools\mtf-probe.ps1` ⇒ 0 FAIL / 26s：EW 0.45/0.70/0.95 各点名自己的喷嘴、EW 1.40 正确拒绝、EW 0.26 因渗墨被判 filled 并如实记 NOTE）⇒ **判决仍不成立**：那四条是**仿真打印机 + Python 信道**，不是真打印机 ⇒ 仍差真机 | `& .\tools\mtf-probe.ps1`（仿真）· `pskit calibrate --make-mtf` + 真打印 + `pskit calibrate <照片> --mtf`（真机） |
+| G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（~~`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝~~ —— **第 78 轮更正 ✗**：`PL-G` 四档全可规划（实测见 M7 行），被拒绝的是 `PL-D3S`；原句档位写混，判决未变）⇒ 完整矩阵未跑 ✓ **第 75 轮起有 MTF 板可量**（`& .\tools\mtf-probe.ps1` ⇒ 0 FAIL / 26s：EW 0.45/0.70/0.95 各点名自己的喷嘴、EW 1.40 正确拒绝、EW 0.26 因渗墨被判 filled 并如实记 NOTE）⇒ **判决仍不成立**：那四条是**仿真打印机 + Python 信道**，不是真打印机 ⇒ 仍差真机 | `& .\tools\mtf-probe.ps1`（仿真）· `pskit calibrate --make-mtf` + 真打印 + `pskit calibrate <照片> --mtf`（真机） |
 
 **总账（不主张完成 ✓）**：`✅ 5（G0 G1 G3 G5 G7）· 🟡 5（G2 G6 G8 G9 G10）· ⬜ 1（G4）`（**第 74 轮更正计数 ✗→✓**：G9 那一行的判决早就是 🟡「产物级全绿、浏览器内未验证」，而这里还把它算在 ⬜ 里 ⇒ 过期记账；**判决本身一字未改**） ⇒ **"通过 G0–G10" 不成立** ✓ 全程未降低任何判据来制造"通过" ✓ 基线：单测条数**以 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` 自己打印的汇总为准、别背数字**（**第 59 轮实测：`tests 297 · pass 297 · fail 0 · duration_ms 136148`、`SUITE_EXIT=0`**；此前最后一次抄下的是第 52 轮 **296/296 · 0 fail**；第 53 轮加了纸面斜拍 1 例后实测 `exit 0`，但当轮没抄下汇总 ⇒ **不写没量过的数** ✗ 原先这里写死的 `231/231` 早已过期，第 56 轮改掉 ⇒ 与 `docs/USE.md` §0 同一口径 ✓）✓ `verify --gate all` `ALL GATES PASS`（**该命令每次都会打印本次未评估哪些门限** ⇒ 不得引用成覆盖 G4/G6/G9/G10 ✓）
 
@@ -122,6 +122,28 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 78 轮（**把用户那半边变成「一条命令 + 照抄」：验收包生成器；顺带更正两处把档位写混的记账**）
+
+**这一轮做的不是新功能，是把「只有用户能做的验收」的成本压到最低** —— 目标的完成判据里有半条是「用户照 docs 在电脑与手机上各走通一次」，而 §5 的清单散在好几条命令里（每条参数不同），用户敲错一个 flag 就会以为「产品坏了」。
+
+**新增 `tools/acceptance-kit.ps1`（+ `tools/acceptance-readme.txt` 模板）**：一条命令生成
+① 纸面页（`P-M1-300`，204800 B 载荷，PNG + 真尺寸 pack.pdf）；
+② **每个喷嘴一块码牌**（`PL-G` @ 0.2/0.4/0.6/0.8 —— G10 的「保底档在全部喷嘴下」那一半；外加 `PL-D2` @ 0.4）；
+③ MTF 校准板（3mf + stl + png + spec）；
+④ **README.txt**：逐步命令、每一步在验什么、失败时该发回什么。
+载荷刻意取 **6 B**：`PL-G@0.8` 每数据页净容量只有 **12 B**（`geom.ecc.dataBytes`），6 B 压缩后 11 B 仍只占**一页** ⇒ 用户每块板**只打 `page-000`**（实测：五组 profile×喷嘴 全部「数据页单页即可装配」，见下）。
+
+**实测**：`& .\tools\acceptance-kit.ps1` ⇒ **exit 0**、8 条 PASS：纸面 3 页 + pack.pdf、PL-G 四档各 3mf+stl、PL-D2@0.4、MTF 板、**16 个 .3mf 全部过 G8 子集校验**。**阴性对照**（把其中一个 .3mf 改一个字节）⇒ `verify --gate G8 --file` **exit 1**，原文件 **exit 0** ⇒ 这个包里的校验是承重的，不是装饰。载荷/单页装配的实测：`PL-G@0.8 dataBytes 12 pages 3 decode ok data-page-only true`（0.6/0.4/0.2 与 PL-D2@0.4 同样 true）。
+
+
+**本轮门限复跑（第 78 轮，全部实测）**：
+
+- 单测：`node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ **`tests 335 · pass 335 · fail 0 · duration_ms 144199`、exit 0**（本轮没动 `core/`，是回归）。
+- 进程内门限：`node cli/pskit.mjs verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（自列未评估 G4 G6 G9 G10 ⇒ 不得引用成「全部门限通过」）。
+- 验收包本身：`& .\tools\acceptance-kit.ps1` ⇒ **exit 0 / 8 PASS**（含 16 个 .3mf 过 G8 子集）；**阴性对照**：改一个字节 ⇒ `verify --gate G8 --file` **exit 1**、原文件 **exit 0**。
+- 台账表格：`node tools/check-docs-tables.mjs` ⇒ `clean -- 304 rows in 52 tables`、exit 0。
+**两处记账更正（判决未变）**：STATUS 的 M7 行与 G10 行都写着「只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点」—— **第 78 轮实测推翻**：`planPage('PL-G', {nozzle:0.2/0.4/0.6/0.8})` **四档全部可规划**（pitch 3.12/3.6/5.6/7.6mm；50×50/42×42/23×23/14×14 格），G7 门限自己打印 `PL-G@0.8 … recovered`；被 `glyphGeometry` 拒绝的是 **`PL-D3S`**（形状字母表 4 档 ⇒ 0.6/0.8 放不下，容量表那行本来就写对了）。原句把两个档位写混 ⇒ 就地划线 + 标注更正，**G10 判决不变**（完整矩阵仍未跑）。
 
 ### 第 77 轮（**D68 闭合：数据板的网格补上四角标记 —— 没有它，印出来的码牌照片登记不了**）
 

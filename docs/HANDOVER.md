@@ -103,7 +103,8 @@ node tools/smoke-sender.mjs                               # 期望 13 PASS / 0 F
 node tools/smoke-capture.mjs                              # 期望 exit 0 + "CAPTURE SMOKE: all assertions pass"
 node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 期望 321/321（≈138 s）
 & .\tools\usability.ps1                                   # 期望 27 PASS / 0 FAIL（≈222 s）
-& .\tools\mtf-probe.ps1                                   # 期望 0 FAIL / "all assertions pass"（≈26 s）
+& .\tools\mtf-probe.ps1                                   # 期望 0 FAIL / "all assertions pass"（≈40 s）
+& .\tools\acceptance-kit.ps1                              # 生成用户的硬件验收包（8 条 PASS / exit 0；≈90 s）
 node cli/pskit.mjs verify --gate all                      # G0 G1 G2 G3 G5 G7 G8 进程内
 node tools/check-docs-tables.mjs                          # 期望 "clean -- N rows in M tables"
 ```
@@ -223,7 +224,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 ## 12. 如果要继续，优先级建议
 
-**用户侧（价值最高，只有你能做）**：① G4 手机 500×8（闭合 M4 的唯一动作）→ ② G9 三浏览器 × 两源
+**用户侧（价值最高，只有你能做）**：⓿ **先跑 `& .\tools\acceptance-kit.ps1`** —— 第 78 轮起它会一次生成纸面页、每个喷嘴的码牌、MTF 板与一份 `README.txt`（逐步命令 + 失败时发回什么）⇒ ① G4 手机 500×8（闭合 M4 的唯一动作）→ ② G9 三浏览器 × 两源
 （同一批里顺带处理 `sender.js` 的 `data:`→`blob:` 决定与 `#outname`/`#burstname` 目视检查）→ ③ D8 打印缩放实测（一页 + 尺子）
 → ④ G10 四喷嘴（需打印机）→ ⑤ G8 用切片软件真打开一次 → ⑥ D43 的 https 半边。
 
