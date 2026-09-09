@@ -718,7 +718,15 @@ async function cmdReceive(args) {
       return;
     }
     if (noSession) {
-      console.log(`receive: INCOMPLETE -- not one page header could be read, so the receiver never learned the page geometry (${seen.size} distinct page(s) read out of ${names.length - skippedTiff} image(s) offered)`);
+      // `names` is now only the readable files (round 83 split them out); the count the user needs is
+      // how many images were offered in total, readable or not. The old expression referenced the
+      // variable that split removed, so this branch threw a ReferenceError instead of printing a
+      // diagnosis (measured by the user, round 90).
+      console.log(
+        `receive: INCOMPLETE -- not one page header could be read, so the receiver never learned the page geometry (` +
+          `${seen.size} distinct page(s) read out of ${names.length + unreadable.length} image(s) offered` +
+          `${unreadable.length ? `, ${unreadable.length} of them in a format this build cannot read (${fmtList})` : ''})`,
+      );
       console.log('  this is a whole-batch failure, not a missing page: parity cannot help when no page decoded');
     } else {
       console.log(`receive: INCOMPLETE (${dataHave}/${dataNeed} data pages) -- ${asm.error || 'still short'}`);
