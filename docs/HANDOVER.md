@@ -308,6 +308,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
+| `d44f98e` | 100 | **硬件验收包接入模块档**：`acceptance-kit.ps1` 生成 P-MX-300-6/5/4 三份 pack.pdf 与真平板扫描命令；README 第 1b 步给逐档 receive/hash 对比 |
 | `79c401b` | 99 | **module 物理编码**：`P-MX-300-4/5/6` 二进制实心模块阵；timing 行校准与局部自适应阈值；三档模拟扫描 16/16；旧 `P-M1-300` 默认与旧 profile code 不变 |
 | `8224646` | 98 | **D83**：纯白空白页在默认 INK2 纸色下不再被判成「擦镜头」，改由图内 inkness 动态范围与峰值尾部比例判 `blank-image`；三条阳性对照与 CLI 实跑入库 |
 | `d69d709` | 96 | **D82**：零依赖基线 TIFF 读取器（II/MM、多页、1/4/8/16 位、灰度/二值/调色板/RGB、自写 LZW 与 PackBits、Adobe Deflate 的 zlib 包裹、FillOrder 2、Predictor 2）；十种真文件变体 + 多页文件全部逐字节还原 |
@@ -325,10 +326,11 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 
 ## 14. 本次会话（第 90–99 轮）：改了什么、怎么复验、怎么推上去
 
-**3 个提交未推送**（`git status -sb` 会显示 `ahead 3`；含本轮代码提交、AGENTS 重写与本次交接同步）：
+**5 个提交未推送**（`git status -sb` 会显示 `ahead 5`；含模块代码、模块验收包、AGENTS 重写与交接同步）：
 
 | 提交 | 一句话 |
 |---|---|
+| `d44f98e` | 硬件验收包生成三个模块纸面 leg |
 | `79c401b` | 高密度二进制模块档 P-MX-300-4/5/6 |
 | `8224646` | D83：空白页诊断不再依赖底色假设 |
 | `d69d709` | TIFF 读取器（D82） |
@@ -348,6 +350,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 ```powershell
 node tools/mtf-matrix.mjs --selftest                 # 矩阵读数器自证（四喷嘴点名 + 两条对照）
 & .\tools\usability.ps1                              # 含 4g（PNG 变体）与 4h（TIFF 变体）两条新腿
+& .\tools\acceptance-kit.ps1                         # 含 P-MX-300-6/5/4 三个真平板扫描 leg
 node --test --test-isolation=none "tests/unit/module-matrix.test.mjs"       # P-MX 三档的渲染/读回/组装/bootstrap
 node --test --test-isolation=none "tests/unit/fiducial-corner-damage.test.mjs"   # D83 + D69 + 正常页对照
 node --test --test-isolation=none "tests/unit/png-read-depths.test.mjs"   # 8 例
