@@ -410,6 +410,39 @@ if (-not $parityOk) { $script:fails++ }
 Write-Host ("{0}  only the parity pages: the data page is rebuilt and named  (exit {1})" -f $(if ($parityOk) { " PASS" } else { " FAIL" }), $parityCode)
 if (-not $parityOk) { Get-Content $parityLog -Tail 4 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }
 
+# 4f. A "scan to PDF" directory -- the default output of many scanners. This build *writes* PDFs (that
+#     is the print path) and cannot rasterize one, so the receiver must say that and name an export,
+#     not "no pages found" (DEFECTS D79, round 93). Judged by exit code, by nothing-written, by the
+#     message naming PDF and PNG, and by the absence of the doubled "receive: receive:" prefix; the
+#     positive control is the same pages as PNG in the same directory, which must still decode.
+$pdfDir = Join-Path $tmp "fmt-pdf"
+$pdfOut = Join-Path $tmp "fmt-pdf-must-not-exist.bin"
+if (Test-Path $pdfDir) { Remove-Item -Recurse -Force $pdfDir }
+New-Item -ItemType Directory -Force -Path $pdfDir | Out-Null
+& node cli/pskit.mjs send $encPayload --profile P-M1-300 --format pdf --passphrase $encPw --out $pdfDir *> (Join-Path $tmp "step4f-make.log")
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $pdfDir "pack.pdf"))) {
+  Write-Host " SKIP  pdf leg: could not write a PDF to test with"
+} else {
+  $pdfLog = Join-Path $tmp "step4f-receive.log"
+  & node cli/pskit.mjs receive $pdfDir --photo --profile P-M1-300 --passphrase $encPw --out $pdfOut *> $pdfLog
+  $pdfCode = $LASTEXITCODE
+  $pdfText = Get-Content $pdfLog -Raw
+  $pdfWrote = Test-Path $pdfOut
+  $pdfOk = ($pdfCode -ne 0) -and (-not $pdfWrote) -and ($pdfText -match "PDF") -and ($pdfText -match "PNG") -and ($pdfText -match "export")
+  $pdfOk = $pdfOk -and (-not ($pdfText -match "receive:\s*receive:"))
+  if (-not $pdfOk) { $script:fails++ }
+  Write-Host ("{0}  a PDF-only directory is refused with PDF named and an export path  (exit {1}, wrote: {2})" -f $(if ($pdfOk) { " PASS" } else { " FAIL" }), $pdfCode, $pdfWrote)
+  if (-not $pdfOk) { Get-Content $pdfLog -Tail 3 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }
+  # Positive control: the same transfer as PNG pages must still decode from that directory.
+  Get-ChildItem -Path $encSrc -Filter "page-*.png" | Copy-Item -Destination $pdfDir
+  $pdfMixedOut = Join-Path $tmp "fmt-pdf-mixed.bin"
+  & node cli/pskit.mjs receive $pdfDir --photo --profile P-M1-300 --passphrase $encPw --out $pdfMixedOut *> (Join-Path $tmp "step4f-mixed.log")
+  $pdfMixedOk = ($LASTEXITCODE -eq 0) -and (Test-Path $pdfMixedOut)
+  if ($pdfMixedOk) { $pdfMixedOk = ((Get-FileHash -Algorithm SHA256 -Path $pdfMixedOut).Hash.ToLower() -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower()) }
+  if (-not $pdfMixedOk) { $script:fails++ }
+  Write-Host ("{0}  the same pages as PNG still decode from the PDF directory  (exit {1})" -f $(if ($pdfMixedOk) { " PASS" } else { " FAIL" }), $LASTEXITCODE)
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload

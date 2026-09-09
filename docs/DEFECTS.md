@@ -20,6 +20,12 @@
 | ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
+### 第 93 轮新增（D79 ⇒ **本轮已闭** ✓）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~D79~~ | **"扫描成 PDF"是最常见的扫描仪默认输出，而 `receive` 对一目录 PDF 说的是 `no pages found`** —— 把一个"格式读不了"说成"没有页"，用户会去重扫、去查文件名、去怀疑自己没扫上（与 D74 同一形状：那次是 JPEG/TIFF）。本 build **写得出一份 PDF（那就是打印路径）却光栅化不了一份**，而 PDF 恰好不在 `UNREADABLE` 名单里 ⇒ 目录里只有 `scan.pdf` 时直接落到兜底那句。**同一轮还查到一处会印在每条错误上的重复前缀**：`pskit <cmd>: ` 之后原样拼 `e.message`，而很多消息自己就带 `receive: ` ⇒ 用户看到 `pskit receive: receive: found ...` | **一条命令**（已入库为 `tools/usability.ps1` 的 **4f 腿**，`-Skip3D` 可跳）：`node cli/pskit.mjs send <载荷> --profile P-M1-300 --format pdf --out <目录>` 后 `node cli/pskit.mjs receive <目录> --photo --profile P-M1-300 --out <不该存在的文件>` ⇒ 修前 `receive: no pages found in ...`（exit 1、不写盘）；修后点名 PDF + 给出导出路径（`found 1 PDF file(s) ... does not rasterize PDF pages -- it only writes them. Export the scanned pages as PNG ...`）、exit 1、不写盘、且**不再出现 `receive: receive:`**。**阳性对照**：同一目录再放进同一次传输的 PNG 页 ⇒ 逐字节还原、exit 0（证明这条拒绝没有把能读的挡掉） | **FIXED ✓（第 93 轮）** ① `cli/pskit.mjs` 把 `pdf` 单独识别并给一句**自己的**话（写得出、读不了 ⇒ 导出而不是换阅读器；并提醒**别截屏**，截屏会重采样墨点、移动角标 —— D78 的教训）② 混合目录的提示行同时报出 PDF 与图片格式的计数 ③ 顶层 catch 只剥掉一层重复的命令前缀（不逐条改消息，测试与工具仍按原措辞匹配）④ usability 新增 4f 腿（拒绝 + 阳性对照两条断言）⇒ `USABILITY_EXIT=0`、211 s 全腿通过 |
+
 ### 第 91 轮新增（D78 ⇒ **本轮已闭** ✓）
 
 | # | 缺陷 | 复现 | 状态 |

@@ -581,16 +581,28 @@ async function cmdReceive(args) {
   const base = stat.isDirectory() ? dir : dirname(dir);
   const names = all.filter((n) => /\.png$/i.test(n));
   // Formats this build cannot read yet, named rather than silently skipped. A phone camera writes
-  // JPEG and a flatbed defaults to TIFF, so "no pages found" about a directory full of .jpg is a
-  // diagnosis that sends the user looking for a problem that is not there (round 83, DEFECTS D74).
+  // JPEG, a flatbed defaults to TIFF, and "scan to PDF" is a very common scanner default, so
+  // "no pages found" about a directory full of .jpg or .pdf is a diagnosis that sends the user
+  // looking for a problem that is not there (round 83, DEFECTS D74; PDF named in round 93).
   const UNREADABLE = /\.(tiff?|jpe?g|webp|gif|bmp|heic|heif)$/i;
   const unreadable = all.filter((n) => UNREADABLE.test(n));
-  const fmtList = [...new Set(unreadable.map((n) => extname(n).toLowerCase()))].sort().join(' ');
+  const pdfs = all.filter((n) => /\.pdf$/i.test(n));
+  const fmtList = [...new Set([...unreadable, ...pdfs].map((n) => extname(n).toLowerCase()))].sort().join(' ');
   if (!names.length) {
-    if (unreadable.length) {
+    // PDF gets its own sentence: this build *writes* PDFs (that is the print path) and cannot
+    // rasterize one, so the remedy is an export, not a different viewer -- and a page exported by
+    // an online converter can be geometrically altered (DEFECTS D78), which is worth saying.
+    if (pdfs.length && !unreadable.length) {
       throw new Error(
-        `receive: found ${unreadable.length} image(s) in ${dir}, but none in a format this build reads (${fmtList}). ` +
-          'Only PNG is supported for decoding today (TIFF read-back is not wired). Convert them first, e.g. ' +
+        `receive: found ${pdfs.length} PDF file(s) in ${dir}, and this build does not rasterize PDF pages -- it only writes them. ` +
+          'Export the scanned pages as PNG (scanner software: choose PNG; any PDF viewer: "export as image", 300 dpi, colour, ' +
+          'auto-crop off) and run receive again. Do not screenshot a viewer window: that resamples the ink and moves the markers.',
+      );
+    }
+    if (unreadable.length || pdfs.length) {
+      throw new Error(
+        `receive: found ${unreadable.length + pdfs.length} file(s) in ${dir}, but none in a format this build reads (${fmtList}). ` +
+          'Only PNG is supported for decoding today (TIFF read-back is not wired, and PDF is written but not read). Convert them first, e.g. ' +
           "magick convert '*.jpg' -png out/page-%03d.png  (ImageMagick) or python -c \"from PIL import Image; ...\" -- " +
           'or open the browser receiver, which decodes JPEG natively.',
       );
@@ -684,9 +696,10 @@ async function cmdReceive(args) {
         `${r.colourAlive ? '' : ' [colour channel dead -> erasure]'} [${ms}ms]${fed.duplicate ? ' (duplicate)' : ''}`,
     );
   }
-  if (unreadable.length) {
+  if (unreadable.length || pdfs.length) {
     console.log(
-      `  note: ${unreadable.length} image(s) in ${fmtList} were NOT read -- only PNG is decoded today. Convert them (e.g. ` +
+      `  note: ${unreadable.length + pdfs.length} file(s) in ${fmtList} were NOT read -- only PNG is decoded today` +
+        `${pdfs.length ? ', and PDF pages are written by this build but never rasterized by it' : ''}. Convert them (e.g. ` +
         "magick convert '*.jpg' -png out/page-%03d.png) or use the browser receiver, which decodes JPEG natively.",
     );
   }
@@ -1879,7 +1892,12 @@ try {
   else if (cmd === 'roundtrip') await cmdRoundtrip(args);
   else console.log(`unknown command "${cmd}"\n\n${HELP}`);
 } catch (e) {
-  console.error(`pskit ${cmd}: ${e.message}`);
+  // Many messages name their own command ("receive: no pages found in ...") because they are also
+  // read from tests and from other tools; without this the CLI would print
+  // "pskit receive: receive: no pages found". Strip one duplicate prefix instead of rewriting
+  // every throw, so both audiences keep the wording they match on.
+  const msg = String((e && e.message) || e).replace(new RegExp(`^${cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`), '');
+  console.error(`pskit ${cmd}: ${msg}`);
   if (process.env.PSKIT_TRACE) console.error(e.stack);
   process.exitCode = 1;
 }

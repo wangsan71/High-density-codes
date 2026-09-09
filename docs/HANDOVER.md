@@ -248,7 +248,8 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
-| (本轮) | 92 | **G10 的进程内半边补完**：`tools/mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数；文件名/`--label`/`mtf-labels.json` 三种标签；`names-itself` / `allowed-coarser` / `mismatch` / `unregistered` 四种判决；exit 0/1/2；`--selftest` 四条正例 + 两条对照）+ 6 个单测 + 验收包 README/USE §5 的照抄命令 |
+| (本轮) | 93 | **D79**：「扫描成 PDF」这条最常见的路被说成 `no pages found` ⇒ `receive` 现在点名 PDF + 给出导出路径（并提醒别截屏）+ 顶层错误前缀不再重复；usability 4f 腿（拒绝 + 阳性对照）|
+| `f3117c5` | 92 | **G10 的进程内半边补完**：`tools/mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数；文件名/`--label`/`mtf-labels.json` 三种标签；`names-itself` / `allowed-coarser` / `mismatch` / `unregistered` 四种判决；exit 0/1/2；`--selftest` 四条正例 + 两条对照）+ 6 个单测 + 验收包 README/USE §5 的照抄命令 |
 | `fe22372` | 91 | **D78**：PDF 图像流把 `/Columns` 写成 `width*3` ⇒ 每个主流阅读器按 3 倍行距取图、整页剪成平行四边形（用户报的「PDF 斜、PNG 直」就是这条）⇒ 改成裸 RGB 行、字典里不再写 predictor 参数 |
 | `a811673` | 89 | 页数上限的 hint 补上「每片多大」（板材档一次只装 ~21 kB，不是 split 默认的 1.4 MB）+ 可照抄的 `split --max-bytes`；并如实记下我第一版求上限的循环错（按字节往下试 ⇒ 打出「最多 ~255 B」）|
 | `cc119e1` | 88 | `receive` 点名被页间 RS 重建的页（`page 0 (page-000.png) rebuilt from the parity pages …`）+ usability 4e 腿（只放校验页 ⇒ 逐字节还原且点名）|
