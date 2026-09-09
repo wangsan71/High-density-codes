@@ -103,6 +103,16 @@ const MARKER_STAGES = new Set(['markers', 'fiducial', 'quad']);
 function classifyFailure(bitmap, stage, reason) {
   const markerish = MARKER_STAGES.has(stage) || /square|corner|quad|marker/i.test(String(reason));
   if (!markerish) return null;
+  // A capture with no ink/paper separation is a different physical failure from a mis-framed one,
+  // and the two need opposite retake advice (exposure vs framing). The decoder now says which it
+  // is (core/decode/fiducial.js:no-contrast); label it as its own kind so the corpus report does
+  // not tell a reader to reframe a photo that was simply blown out (DEFECTS D69).
+  if (reason === 'no-contrast') {
+    return {
+      kind: 'no-contrast',
+      detail: 'the capture has no ink/paper separation (the typical pixel sits at >=50% of the peak ink level; a healthy page is 6-25%): blown out, glaring, or shot from too far -- not a framing problem',
+    };
+  }
   let census;
   try {
     census = fiducialCensus(bitmap);

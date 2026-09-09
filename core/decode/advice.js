@@ -15,6 +15,11 @@ const ADVICE = {
     cause: 'the image is (almost) uniform -- nothing was printed, the lens was covered, or the scan was empty',
     do: 'check that this file is a page image; retake with the whole code inside the frame',
   },
+  'no-contrast': {
+    cause:
+      'the ink and the paper were not separable in this capture: more than half the picture binarises as ink, against 25-35% for a healthy page. Three things do this -- over-exposure, a glare band, or shooting from so far that the cells smear into one another. It is NOT a framing problem: the corners can be perfectly in frame and still invisible.',
+    do: 'lower the exposure (drag the brightness down before shooting), turn the flash off and move away from the reflection; then get closer or use 2x optical zoom so the code fills the frame. If you are scanning, switch auto-contrast/despeckle off. Reframing alone will not help',
+  },
   'no-square-candidates': {
     cause: 'no isolated square blob was found, so the corner markers are not resolvable -- usually defocus, extreme blur, or a print whose features are smaller than the camera can resolve',
     do: 'move closer or use 2x optical zoom, hold still, and wipe the lens; if the plate is FDM, print the next coarser nozzle profile',

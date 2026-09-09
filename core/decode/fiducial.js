@@ -75,6 +75,42 @@ export function otsu(ink, samples = 40000) {
   return (thr / 63) * peak;
 }
 
+/**
+ * Median inkness as a fraction of the peak: how far the *typical* pixel sits from the substrate
+ * relative to the most-inked pixel.
+ *
+ * This is the statistic that separates 「the marker is not here」 from 「this capture has no
+ * ink/paper separation at all」, and it was chosen by measurement (round 79), not by taste:
+ *
+ *   pristine render            0.063     300 dpi scan            0.060
+ *   pristine, cropped to code  0.063     blurred 4px at 300dpi   0.241
+ *   phone-hard capture         0.668-0.793   phone40 capture     0.743
+ *
+ * Everything a healthy capture does stays at or below ~0.25, and every capture the phone-stress
+ * channel produced sits at 0.67+. The cut is 0.5, in the gap. (The Otsu ink *fraction* was tried
+ * first and rejected: a sharp page cropped to its code area reaches 0.560 and a scrambled image
+ * reaches even higher, so that statistic fires on good captures -- measured.)
+ */
+export function medianInknessRatio(ink, samples = 20000) {
+  const v = ink && ink.values ? ink.values : ink;
+  const max = ink && ink.max !== undefined ? ink.max : (v && v.length ? Math.max(...v) : 0);
+  if (!v || !v.length || !(max > 0)) return 0;
+  const step = Math.max(1, Math.floor(v.length / samples));
+  const s = [];
+  for (let i = 0; i < v.length; i += step) s.push(v[i]);
+  s.sort((a, b) => a - b);
+  return s[s.length >> 1] / max;
+}
+
+/** Above this ratio the capture has no usable ink/paper separation (see medianInknessRatio). */
+export const FLAT_CAPTURE_RATIO = 0.5;
+
+/** Fraction of the image that binarises as ink -- reported alongside the ratio, never a cut. */
+export function inkFraction(bin) {
+  const n = (bin.width || 0) * (bin.height || 0);
+  return n > 0 ? bin.inkCount / n : 0;
+}
+
 /** Binary ink mask from an image. */
 export function binarize(bitmap, opts = {}) {
   const ink = inkness(bitmap);
@@ -328,6 +364,29 @@ export function findMarkers(bitmap, opts = {}) {
       bestScore = score;
       best = last;
     }
+  }
+  // Before reporting the furthest attempt, check whether the picture was ever segmentable.
+  // Measured (round 79, phone-stress channel): a flat or blown-out capture binarises 70.7% of its
+  // pixels as ink, and every attempt then fails with no square candidates -- which the user reads
+  // as 「the corners are not in the photo」 and answers by reframing, while the actual fix is
+  // exposure/glare. The diagnosis is added only here, on the failure path: no page becomes
+  // acceptable, the reason string just stops naming the wrong cause (DEFECTS D69).
+  const ratio = medianInknessRatio(base.inkness);
+  // The peak must be real ink: a uniform image has a median/peak ratio of 1 by arithmetic alone
+  // (both are the same tiny number), and that case is already named by 'blank-image' above.
+  if (base.inkness.max > 24 && ratio > FLAT_CAPTURE_RATIO) {
+    const out = {
+      ok: false,
+      reason: 'no-contrast',
+      flatRatio: ratio,
+      inkFraction: inkFraction(base),
+      threshold: base.threshold,
+      note:
+        `the typical pixel sits at ${(ratio * 100).toFixed(0)}% of the peak ink level (a healthy page is 6-25%): ` +
+        'the ink and the paper were not separable in this capture, so a missing marker says nothing about the framing',
+    };
+    if (best) Object.assign(out, { furthest: best.reason, furthestDetail: best });
+    return out;
   }
   if (best) return best;
   return last || { ok: false, reason: 'blank-image', threshold: base.threshold, note: `every threshold factor starved the page (peak ${peak.toFixed(1)}, otsu ${base.threshold.toFixed(1)}, ${starved} skipped)` };

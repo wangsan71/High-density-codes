@@ -26,7 +26,7 @@ import assert from 'node:assert/strict';
 import { encodeTransfer } from '../../core/protocol.js';
 import { pageLayout } from '../../core/render/layout.js';
 import { renderPageBitmap, echoBitsOf } from '../../core/render/raster.js';
-import { findMarkers } from '../../core/decode/fiducial.js';
+import { findMarkers, FLAT_CAPTURE_RATIO } from '../../core/decode/fiducial.js';
 
 // The same five calls tools/build-web.mjs uses to draw the PWA icon: module shapes copied
 // from working code rather than reconstructed from memory.
@@ -79,6 +79,66 @@ function synthetic(squares, size = 1200) {
   return bmp;
 }
 
+test('a washed-out capture is diagnosed as no-contrast, not as a framing problem (D69)', async () => {
+  const base = await cleanPage();
+  // Compress the whole picture into the top of the range: what an over-exposed / glaring phone
+  // shot looks like. The markers are still exactly where they were -- in frame -- they are just
+  // no longer separable from the paper.
+  // Measured mechanism: a 5x5 box blur at 300 dpi (0.17mm) already lifts the binarised ink
+  // fraction from 0.372 to 0.667 -- the cells smear into each other and every pixel looks like
+  // ink. That is the same signature the phone-stress channel produces at 3.2px/mm (70.7%).
+  // The measured signature of a hopeless capture is a *dim, flat* picture: the phone-stress channel
+  // produces median/peak inkness 0.67-0.79 while every healthy capture stays at 0.06-0.25. This
+  // fixture models that signature directly -- a mid-grey field (the page at ~120 instead of ~250)
+  // with a few small dark specks and no square markers at all. Reproducing the channel's exact
+  // mixture of JPEG, glare, noise and rotation in a unit test is not the point; the point is that
+  // when the detector has nothing to find AND the picture is flat, the reason names the flatness.
+  const w = 400;
+  const h = 300;
+  const washed = { width: w, height: h, pixels: new Uint8Array(w * h * 4) };
+  let seed = 12345;
+  const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < w * h; i++) {
+    const v = Math.round(120 + rnd() * 20);
+    const o = i * 4;
+    washed.pixels[o] = v;
+    washed.pixels[o + 1] = v;
+    washed.pixels[o + 2] = v;
+    washed.pixels[o + 3] = 255;
+  }
+  for (const [cx, cy] of [[40, 40], [120, 80], [200, 150], [300, 200], [360, 260]]) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const o = ((cy + dy) * w + cx + dx) * 4;
+        washed.pixels[o] = 40;
+        washed.pixels[o + 1] = 40;
+        washed.pixels[o + 2] = 40;
+      }
+    }
+  }
+  const found = findMarkers(washed, {});
+  assert.equal(found.ok, false);
+  assert.equal(found.reason, 'no-contrast', `expected the contrast diagnosis, got ${found.reason} (ratio ${found.flatRatio})`);
+  assert.ok(found.flatRatio > FLAT_CAPTURE_RATIO, `flat ratio ${found.flatRatio} should exceed the cut`);
+  // Positive control: the very same page, not washed out, must NOT get this diagnosis.
+  const healthy = findMarkers(base, {});
+  assert.notEqual(healthy.reason, 'no-contrast', 'a healthy page must never be called no-contrast');
+  // Second control: a genuinely mis-framed page (markers cut off) has a normal ink fraction and
+  // must keep the framing diagnosis -- otherwise this new reason would swallow the old one.
+  const cropped = { width: 900, height: 900, pixels: new Uint8Array(900 * 900 * 4) };
+  for (let y = 0; y < 900; y++) {
+    for (let x = 0; x < 900; x++) {
+      const from = ((y + 1200) * base.width + (x + 1200)) * 4;
+      const to = (y * 900 + x) * 4;
+      cropped.pixels[to] = base.pixels[from];
+      cropped.pixels[to + 1] = base.pixels[from + 1];
+      cropped.pixels[to + 2] = base.pixels[from + 2];
+      cropped.pixels[to + 3] = 255;
+    }
+  }
+  const cut = findMarkers(cropped, {});
+  assert.notEqual(cut.reason, 'no-contrast', `a cropped but well-exposed page must not be called no-contrast (ratio ${cut.flatRatio})`);
+});
 test('a real page with its corner damaged in frame is refused, and the report describes markers, not lattice', async () => {
   const base = await cleanPage();
 
