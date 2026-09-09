@@ -22,7 +22,11 @@
  * No performance work, by instruction: pages are rendered serially, PNGs re-encoded for
  * each download, and the mesh is rebuilt on every click.
  */
-import { PROFILES, planPage } from '../core/profiles.js';
+import { PROFILES, planPage, isUnqualifiedPaper, profileOptionLabel } from '../core/profiles.js';
+// Re-exported so the page keeps its own surface and tests/unit/profile-picker-warning.test.mjs can
+// import either the page or the core module; the implementation lives in core (round 82) so the
+// receiver page cannot drift from it.
+export { isUnqualifiedPaper, profileOptionLabel };
 import { encodeTransfer } from '../core/protocol.js';
 import { pageLayout } from '../core/render/layout.js';
 import { renderPageBitmap, renderSheetBitmap, echoBitsOf } from '../core/render/raster.js';
@@ -222,31 +226,7 @@ export function printPlan(pageCount, cap = PRINT_WINDOW_PAGE_CAP) {
 
 export const isPlate = (id) => !!PROFILES[id] && PROFILES[id].medium === 'plate';
 
-/**
- * G2 measured the paper side at 300 dpi as 200/200 byte-exact, and at 600 dpi as 162/200 with only
- * 43% of pages read directly (docs/DEFECTS.md D49, docs/ACCEPTANCE.md G2 section). The picker below
- * is built from *every* profile in core/profiles.js, so without a label a user can pick the
- * unqualified one and lose a file about one time in five -- and nothing warns them until the
- * receiver names the missing pages.
- *
- * The profile is deliberately NOT hidden: hiding it would quietly remove a capability, and today's
- * measurement may be superseded (calibration is unimplemented, so a capability gap cannot even be
- * ruled out). When the 600 dpi side passes G2, delete this predicate and the label suffix; the guard
- * test `tests/unit/profile-picker-warning.test.mjs` pins both to the ledger so they cannot rot.
- */
-export const isUnqualifiedPaper = (p) => !!p && p.medium !== 'plate' && (p.dpi || 0) >= 600;
-
-/**
- * The dropdown label. Measured numbers stay in the ledger rather than in this string, so the UI
- * cannot go stale the way a hardcoded ratio would (the same rule the CLI manifest note follows).
- */
-export const profileOptionLabel = (id, p) =>
-  `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}` +
-  (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '') +
-  // Round 80: the phone40 channel measured PL-G at 8/8 byte-exact with a whole plate in one phone
-  // frame, against 0/8 for the paper profile in the same framing. The hint repeats the profile's
-  // own declared purpose (PLAN §2/§3) at the point where the choice is made.
-  (p.phoneSafe ? ' · 手机拍摄首选' : '');
+// profileOptionLabel / isUnqualifiedPaper now live in core/profiles.js and are re-exported above.
 
 /**
  * Ported verbatim from cli/pskit.mjs pickPalette (a page cannot import from cli/, and a

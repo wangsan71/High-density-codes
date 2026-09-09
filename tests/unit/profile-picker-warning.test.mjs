@@ -86,16 +86,47 @@ test('qualified profiles are NOT warned (negative control)', () => {
   assert.ok(!/未达标/.test(profileOptionLabel('P-M1-300', PROFILES['P-M1-300'])));
 });
 
-test('the picker renders through the helper, and the warning text lives in exactly one place', () => {
-  const src = readFileSync(new URL('../../web/sender.js', import.meta.url), 'utf8');
+test('the outname listener is registered once, outside run() (D73)', () => {
+  const app = readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8');
+  const listeners = app.match(/addEventListener\('input'/g) || [];
+  assert.equal(listeners.length, 1, `expected exactly one input listener, found ${listeners.length}`);
+  // The registration must not sit inside run(): that is what leaked one listener per transfer.
+  const runStart = app.indexOf('async function run()');
+  const runEnd = app.indexOf('\nfunction ', runStart + 10);
+  assert.ok(runStart > 0, 'run() is gone -- this guard is reading a different file');
+  const runBody = app.slice(runStart, runEnd > 0 ? runEnd : app.length);
+  assert.ok(!/addEventListener\('input'/.test(runBody), 'the input listener is registered inside run() again -- it leaks one per transfer');
+  // Positive control: the same slicing does find the click listener that IS inside run's scope.
+  assert.ok(/addEventListener\('click'/.test(app), 'the file has no listeners at all -- the guard is vacuous');
+});
+test('both pages render through the shared helper, and the warning wording lives in exactly one file', () => {
+  const sender = readFileSync(new URL('../../web/sender.js', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8');
+  const core = readFileSync(new URL('../../core/profiles.js', import.meta.url), 'utf8');
   assert.match(
-    src,
+    sender,
     /o\.textContent = profileOptionLabel\(id, p\);/,
     'sender.js no longer builds its dropdown labels through profileOptionLabel -- the warning can be bypassed',
   );
+  // Round 82: the receiver page has a profile dropdown too, and it used to hand-roll its label, so
+  // it silently showed neither the D49 warning nor the phone hint.
+  assert.match(
+    app,
+    /o\.textContent = profileOptionLabel\(id, PROFILES\[id\]\);/,
+    'app.js hand-rolls its profile label instead of using profileOptionLabel -- the receiver then shows neither warning',
+  );
+  assert.ok(
+    !/o\.textContent = `\$\{id\} \(/.test(app),
+    'app.js still builds a raw profile label somewhere',
+  );
   assert.equal(
-    (src.match(/未达标/g) || []).length,
+    (core.match(/未达标/g) || []).length,
     1,
-    'the warning wording must live in exactly one place (the helper) so it cannot drift',
+    'the warning wording must live in exactly one file (core/profiles.js) so it cannot drift',
+  );
+  assert.equal(
+    ((sender + app).match(/未达标/g) || []).length,
+    0,
+    'a page still spells the warning itself instead of importing the helper',
   );
 });

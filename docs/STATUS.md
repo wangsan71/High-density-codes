@@ -123,6 +123,18 @@
 
 ## 已知风险 / 待办
 
+### 第 82 轮（**接收端也有档位下拉框，却既没有 D49 警告也没有手机提示；顺手修掉 `#outname` 监听器泄漏 —— D73 已闭**）
+
+**查法**：把「同一件事在两处各写一遍」当线索去找。发送页的档位标签走 `profileOptionLabel()`（带 D49 警告 + 第 80 轮加的「手机拍摄首选」），而**接收页 `web/app.js` 是手搓的**（`${id} (${medium} ${dpi}dpi)`）⇒ 用户在接收端选档时，**两条信息都没有**。同一轮核到台账里记着的 `#outname` 监听器泄漏（HANDOVER §9 记为「属泄漏、不属错误」），一并修掉。
+
+**修法（D73）**：
+
+1. 标签策略搬进 **`core/profiles.js`**（`isUnqualifiedPaper` + `profileOptionLabel`）—— 两页共用，`web/sender.js` 重新导出以保持自己的对外面；接收页改用它。
+2. `web/app.js` 的 `#outname` 监听器**提到模块加载时注册一次**，当前传输的命名输入放进 `currentNaming`（原来是每次 `run()` 里 `addEventListener` 一次，每次闭包住那一整份装配好的载荷）。
+
+**实测**：`node --test --test-isolation=none "tests/unit/profile-picker-warning.test.mjs"` ⇒ 6/6 通过，其中两条新断言：`input` 监听器全文件**恰好一个**且**不在 `run()` 体内**（反例：同一段切片仍能找得到 `run` 作用域里的 click 监听器 ⇒ 不是空跑）；两页都走 `profileOptionLabel`、`未达标` 字样在 `web/` 出现 **0** 次（只在 `core/profiles.js` 出现 1 次）。`build-web` + `check-dist`（13 断言）exit 0、`smoke-sender` 全绿。
+
+**门限**：单测 **340/340 exit 0**、`verify --gate all` ⇒ **ALL GATES PASS**（6/7）、`usability` exit 0、台账 clean。判据未动。
 ### 第 81 轮（**诊断要能到得了手机：D69/D71 那两条话术，之前一个字都到不了 —— D72 已修**）
 
 **这轮补的是前两轮的「最后一公里」**。第 79/80 轮修的两条诊断（`no-contrast`、`echo-no-contrast`）是**写给手机用户**的，但它们在手机那条路上**到不了用户**：

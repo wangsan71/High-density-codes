@@ -15,7 +15,7 @@ import { TransferAssembler } from './core/protocol.js';
 // 页内 RS + 帧 CRC + 摘要才被接受（docs/DEFECTS.md D51）。这是接收端与 CLI、G2 门限共用的同一段逻辑。
 import { feedPageWithRecalibration } from './core/decode/recalibrate.js';
 import { sha256Hex } from './core/hash.js';
-import { PROFILE_IDS, PROFILES } from './core/profiles.js';
+import { PROFILE_IDS, PROFILES, profileOptionLabel } from './core/profiles.js';
 import { advise } from './core/decode/advice.js';
 // The download-name policy (DEFECTS D62): shared with capture.js and the CLI's users, pure, and pinned
 // by tests/unit/naming.test.mjs. Not improvised here, because a `download` attribute built from typed
@@ -30,7 +30,9 @@ const setStatus = (m) => { $('status').textContent = m; };
 for (const id of PROFILE_IDS) {
   const o = document.createElement('option');
   o.value = id;
-  o.textContent = `${id} (${PROFILES[id].medium}${PROFILES[id].dpi ? ` ${PROFILES[id].dpi}dpi` : ''})`;
+  // Same label policy as the sender page (core/profiles.js), so the receiver's dropdown carries
+  // the D49 warning and the phone hint too -- it used to hand-roll a label and show neither.
+  o.textContent = profileOptionLabel(id, PROFILES[id]);
   $('profile').appendChild(o);
 }
 
@@ -44,6 +46,22 @@ $('files').addEventListener('change', (e) => {
 
 let busy = false;
 $('go').addEventListener('click', () => { if (!busy) run(); });
+
+/**
+ * Naming inputs of the last completed transfer, and the one listener that uses them.
+ *
+ * Registered here, once, because the alternative -- adding an `input` listener inside run() -- leaks
+ * one listener (and its closure over the whole assembled payload) per transfer (DEFECTS D73).
+ * `null` until the first transfer completes, so typing before then changes nothing.
+ */
+let currentNaming = null;
+const applyName = () => {
+  if (!currentNaming) return;
+  const name = downloadName({ ...currentNaming, userText: $('outname').value });
+  $('download').download = name;
+  $('outname-note').textContent = `将保存为：${name}`;
+};
+$('outname').addEventListener('input', applyName);
 
 async function run() {
   busy = true;
@@ -134,12 +152,11 @@ async function run() {
   // name here instead. The policy that turns typed text into one safe path component is
   // core/naming.js, shared with capture.js. The note says which name will be used, since a
   // download whose name the user cannot see is a download the user cannot find afterwards.
-  const applyName = () => {
-    const name = downloadName({ byteLength: asm.result.length, sha256Hex: digest, userText: $('outname').value });
-    $('download').download = name;
-    $('outname-note').textContent = `将保存为：${name}`;
-  };
-  $('outname').addEventListener('input', applyName);
+  // The listener is registered once at module load (below), not here: registering it inside run()
+  // added one more listener per transfer, each closing over that run's asm/digest (DEFECTS D73).
+  // The visible effect was a leak, not a wrong name -- listeners fire in registration order, so the
+  // newest one always won -- but stale closures holding a whole assembled payload are not free.
+  currentNaming = { byteLength: asm.result.length, sha256Hex: digest };
   applyName();
   $('result-line').textContent = `已逐字节还原：${asm.result.length} 字节 · SHA-256 ${digest.slice(0, 16)}…（与页头声明摘要一致才走到这里）· ${accepted} 页被接受`;
   $('out').hidden = false;

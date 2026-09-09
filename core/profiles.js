@@ -96,6 +96,40 @@ export const PROFILES = {
 export const PROFILE_IDS = Object.keys(PROFILES);
 export const DEFAULT_PROFILE = 'PL-D2';
 
+/**
+ * The sender's and receiver's profile dropdown labels, and the one predicate behind the warning.
+ *
+ * This lived in web/sender.js while only the sender rendered a dropdown. The receiver page builds
+ * one too (web/app.js, for the case where auto-detection has to be told the profile), and it was
+ * hand-rolling a label inline -- so the receiver silently lacked both the D49 warning and the
+ * round-80 phone hint, and a user who picked a profile there chose without the same information.
+ * Moved here (round 82) so there is one label policy, not two that can drift.
+ *
+ * G2 measured the paper side at 300 dpi as 200/200 byte-exact, and at 600 dpi as 162/200 with only
+ * 43% of pages read directly (docs/DEFECTS.md D49, docs/ACCEPTANCE.md G2 section). The dropdown is
+ * built from *every* profile in this table, so without a label a user can pick the unqualified one
+ * and lose a file about one time in five -- and nothing warns them until the receiver names the
+ * missing pages.
+ *
+ * The profile is deliberately NOT hidden: hiding it would quietly remove a capability, and today's
+ * measurement may be superseded. When the 600 dpi side passes G2, delete this predicate and the
+ * label suffix; tests/unit/profile-picker-warning.test.mjs pins both to the ledger so they cannot rot.
+ */
+export const isUnqualifiedPaper = (p) => !!p && p.medium !== 'plate' && (p.dpi || 0) >= 600;
+
+/**
+ * The dropdown label. Measured numbers stay in the ledger rather than in this string, so the UI
+ * cannot go stale the way a hardcoded ratio would.
+ */
+export const profileOptionLabel = (id, p) =>
+  `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}` +
+  (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '') +
+  // Round 80: the phone40 channel measured PL-G at 8/8 byte-exact with a whole plate in one phone
+  // frame, against 0/8 for the paper profile in the same framing. The hint repeats the profile's
+  // own declared purpose (PLAN §2/§3) at the point where the choice is made.
+  (p.phoneSafe ? ' · 手机拍摄首选' : '');
+
+
 export function getProfile(id) {
   const p = PROFILES[id];
   if (!p) throw new RangeError(`unknown profile "${id}" (have: ${PROFILE_IDS.join(', ')})`);
