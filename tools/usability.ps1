@@ -472,6 +472,45 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host ("{0}  scanner variants decode byte-identically: 8-bit gray, 1-bit black-and-white, palette, 16-bit gray  (failed: {1})" -f $(if ($variantFails.Count -eq 0) { " PASS" } else { " FAIL" }), $(if ($variantFails.Count) { $variantFails -join ',' } else { 'none' }))
 }
 
+# 4h. TIFF is the other default a flatbed writes, and an air-gapped workflow cannot answer
+#     "install ImageMagick first" (DEFECTS D82). PIL makes the variants a scanner would produce --
+#     uncompressed, LZW, Adobe Deflate, PackBits, 8-bit gray, 1-bit bilevel, palette, 16-bit gray --
+#     plus one multi-page TIFF, and every one of them must come back byte-identical.
+$tifRoot = Join-Path $tmp "fmt-tiff"
+if (Test-Path $tifRoot) { Remove-Item -Recurse -Force $tifRoot }
+New-Item -ItemType Directory -Force -Path $tifRoot | Out-Null
+& python -c "from PIL import Image; import numpy as np, os; src=Image.open(r'$encSrc\page-000.png').convert('RGB'); r=r'$tifRoot'; m={'rgb-none':(src,{}),'rgb-lzw':(src,{'compression':'tiff_lzw'}),'rgb-deflate':(src,{'compression':'tiff_adobe_deflate'}),'rgb-packbits':(src,{'compression':'packbits'}),'gray8-lzw':(src.convert('L'),{'compression':'tiff_lzw'}),'bw1-none':(src.convert('L').convert('1',dither=Image.NONE),{}),'bw1-lzw':(src.convert('L').convert('1',dither=Image.NONE),{'compression':'tiff_lzw'}),'pal8':(src.convert('P',palette=Image.ADAPTIVE,colors=16),{}),'gray16':(Image.fromarray((np.asarray(src.convert('L')).astype('uint16')*257),mode='I;16'),{})}; [ (os.makedirs(os.path.join(r,k),exist_ok=True), v[0].save(os.path.join(r,k,'page-000.tif'), **v[1])) for k,v in m.items() ]; ps=[Image.open(r'$encSrc\page-%03d.png'%i).convert('RGB') for i in range(3)]; os.makedirs(os.path.join(r,'multipage'),exist_ok=True); ps[0].save(os.path.join(r,'multipage','pages.tif'),save_all=True,append_images=ps[1:],compression='tiff_lzw')" *> (Join-Path $tmp "step4h-make.log")
+if ($LASTEXITCODE -ne 0) {
+  Write-Host " SKIP  tiff leg: PIL could not write the fixtures"
+} else {
+  $tifFails = @()
+  foreach ($name in 'rgb-none', 'rgb-lzw', 'rgb-deflate', 'rgb-packbits', 'gray8-lzw', 'bw1-none', 'bw1-lzw', 'pal8', 'gray16') {
+    $td = Join-Path $tifRoot $name
+    $tOut = Join-Path $tmp "fmt-tiff-$name.bin"
+    & node cli/pskit.mjs receive $td --photo --profile P-M1-300 --passphrase $encPw --out $tOut *> (Join-Path $tmp "step4h-$name.log")
+    $tOk = ($LASTEXITCODE -eq 0) -and (Test-Path $tOut)
+    if ($tOk) { $tOk = ((Get-FileHash -Algorithm SHA256 -Path $tOut).Hash.ToLower() -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower()) }
+    if (-not $tOk) {
+      $tifFails += $name
+      Get-Content (Join-Path $tmp "step4h-$name.log") -Tail 2 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) }
+    }
+  }
+  # one multi-page TIFF must expand into three pages, not one
+  $mpOut = Join-Path $tmp "fmt-tiff-multipage.bin"
+  & node cli/pskit.mjs receive (Join-Path $tifRoot 'multipage') --photo --profile P-M1-300 --passphrase $encPw --out $mpOut *> (Join-Path $tmp "step4h-multipage.log")
+  $mpOk = ($LASTEXITCODE -eq 0) -and (Test-Path $mpOut)
+  if ($mpOk) {
+    $mpOk = ((Get-FileHash -Algorithm SHA256 -Path $mpOut).Hash.ToLower() -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower())
+    $mpOk = $mpOk -and ((Get-Content (Join-Path $tmp "step4h-multipage.log") -Raw) -match "3 pages in one file")
+  }
+  if (-not $mpOk) {
+    $tifFails += 'multipage'
+    Get-Content (Join-Path $tmp "step4h-multipage.log") -Tail 3 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) }
+  }
+  if ($tifFails.Count) { $script:fails++ }
+  Write-Host ("{0}  scanner TIFF variants decode byte-identically: none/LZW/Deflate/PackBits, 8-bit gray, 1-bit, palette, 16-bit, and a 3-page file  (failed: {1})" -f $(if ($tifFails.Count -eq 0) { " PASS" } else { " FAIL" }), $(if ($tifFails.Count) { $tifFails -join ',' } else { 'none' }))
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload

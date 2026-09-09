@@ -575,16 +575,19 @@ async function cmdReceive(args) {
   const { decodePage } = await import('../core/decode/page.js');
   const { advise } = await import('../core/decode/advice.js');
   const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
+  const { decodeTIFF } = await import('../core/decode/tiff-read.js');
   const dir = resolve(args._[0] || '.');
   const stat = statSync(dir);
   const all = stat.isDirectory() ? readdirSync(dir).sort() : [basename(dir)];
   const base = stat.isDirectory() ? dir : dirname(dir);
-  const names = all.filter((n) => /\.png$/i.test(n));
-  // Formats this build cannot read yet, named rather than silently skipped. A phone camera writes
-  // JPEG, a flatbed defaults to TIFF, and "scan to PDF" is a very common scanner default, so
-  // "no pages found" about a directory full of .jpg or .pdf is a diagnosis that sends the user
-  // looking for a problem that is not there (round 83, DEFECTS D74; PDF named in round 93).
-  const UNREADABLE = /\.(tiff?|jpe?g|webp|gif|bmp|heic|heif)$/i;
+  // PNG and TIFF are both read natively now: a flatbed's two most common defaults are "PNG" and
+  // "TIFF", and in an air-gapped workflow "install ImageMagick first" is not an answer (DEFECTS
+  // D82). What is left over is named rather than silently skipped -- a phone camera writes JPEG,
+  // and "scan to PDF" is very common, so "no pages found" about a directory full of .jpg or .pdf
+  // sends the user looking for a problem that is not there (round 83, DEFECTS D74).
+  const TIFF_RE = /\.(tiff?)$/i;
+  const names = all.filter((n) => /\.png$/i.test(n) || TIFF_RE.test(n));
+  const UNREADABLE = /\.(jpe?g|webp|gif|bmp|heic|heif)$/i;
   const unreadable = all.filter((n) => UNREADABLE.test(n));
   const pdfs = all.filter((n) => /\.pdf$/i.test(n));
   const fmtList = [...new Set([...unreadable, ...pdfs].map((n) => extname(n).toLowerCase()))].sort().join(' ');
@@ -602,7 +605,7 @@ async function cmdReceive(args) {
     if (unreadable.length || pdfs.length) {
       throw new Error(
         `receive: found ${unreadable.length + pdfs.length} file(s) in ${dir}, but none in a format this build reads (${fmtList}). ` +
-          'Only PNG is supported for decoding today (TIFF read-back is not wired, and PDF is written but not read). Convert them first, e.g. ' +
+          'PNG and TIFF are decoded natively; JPEG, WebP and friends are not (PDF is written but never rasterized). Convert them first, e.g. ' +
           "magick convert '*.jpg' -png out/page-%03d.png  (ImageMagick) or python -c \"from PIL import Image; ...\" -- " +
           'or open the browser receiver, which decodes JPEG natively.',
       );
@@ -645,15 +648,26 @@ async function cmdReceive(args) {
     log: args.verbose ? (m) => console.log(`    ${m}`) : null,
   };
   const seen = new Map();
+  // One file may hold several pages: a scanner that writes one multi-page TIFF is the normal
+  // case, not a corner case, and making the user split it by hand would be exactly the kind of
+  // needless dependency this project refuses (DEFECTS D82). Each page is decoded as its own
+  // bitmap and reported with the file name plus its page number.
+  const images = [];
   for (const name of names) {
     const bytes = new Uint8Array(readFileSync(join(base, name)));
-    let bitmap;
     try {
-      bitmap = decodePNG(bytes);
+      if (TIFF_RE.test(name)) {
+        const { pages } = decodeTIFF(bytes);
+        if (pages.length > 1) console.log(`  ${name}: ${pages.length} pages in one file`);
+        pages.forEach((bitmap, i) => images.push({ label: pages.length > 1 ? `${name} [page ${i}]` : name, bitmap }));
+      } else {
+        images.push({ label: name, bitmap: decodePNG(bytes) });
+      }
     } catch (e) {
-      console.log(`  ${name}: not a readable PNG (${e.message})`);
-      continue;
+      console.log(`  ${name}: not a readable image (${e.message})`);
     }
+  }
+  for (const { label: name, bitmap } of images) {
     bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
     const t0 = performance.now();
     const r = decodePage(bitmap, { geom, layout, paletteId }, opts);
@@ -698,8 +712,8 @@ async function cmdReceive(args) {
   }
   if (unreadable.length || pdfs.length) {
     console.log(
-      `  note: ${unreadable.length + pdfs.length} file(s) in ${fmtList} were NOT read -- only PNG is decoded today` +
-        `${pdfs.length ? ', and PDF pages are written by this build but never rasterized by it' : ''}. Convert them (e.g. ` +
+      `  note: ${unreadable.length + pdfs.length} file(s) in ${fmtList} were NOT read -- this build decodes PNG and TIFF` +
+        `${pdfs.length ? ', writes PDF but never rasterizes one' : ''}. Convert them (e.g. ` +
         "magick convert '*.jpg' -png out/page-%03d.png) or use the browser receiver, which decodes JPEG natively.",
     );
   }
@@ -1709,6 +1723,7 @@ async function cmdCalibrate(args) {
   if (args['make-mtf']) return cmdMakeMtf(args, mod);
   if (args.mtf) return cmdReadMtf(args, mod);
   const { decodePNG } = await import('../core/decode/png-read.js');
+  const { decodeTIFF } = await import('../core/decode/tiff-read.js');
   const { decodePage } = await import('../core/decode/page.js');
   const { advise } = await import('../core/decode/advice.js');
   const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
@@ -1758,20 +1773,26 @@ async function cmdCalibrate(args) {
   const asm = new mod.protocol.TransferAssembler({ passphrase: args.passphrase });
   const opts = { allowFastPath: !args.photo, requireFastPath: false, log: null };
   const rows = [];
+  // PNG and TIFF both decode now, and a multi-page TIFF expands into one measurement per page
+  // (DEFECTS D82). JPEG/WebP are still named as skipped rather than silently ignored.
+  const images = [];
   for (const name of names) {
-    if (!/\.png$/i.test(name)) {
-      console.log(`  ${name}: skipped (only PNG is decoded today; see receive's note on converting)`);
-      continue;
-    }
     const bytes = new Uint8Array(readFileSync(join(base, name)));
-    let bitmap;
     try {
-      bitmap = decodePNG(bytes);
+      if (/\.(tiff?)$/i.test(name)) {
+        const { pages } = decodeTIFF(bytes);
+        pages.forEach((bitmap, i) => images.push({ label: pages.length > 1 ? `${name} [page ${i}]` : name, bitmap }));
+      } else if (/\.png$/i.test(name)) {
+        images.push({ label: name, bitmap: decodePNG(bytes) });
+      } else {
+        console.log(`  ${name}: skipped (this build decodes PNG and TIFF; see receive's note on converting)`);
+      }
     } catch (e) {
-      console.log(`  ${name}: not a readable PNG (${e.message})`);
+      console.log(`  ${name}: not a readable image (${e.message})`);
       rows.push({ name, stage: 'file', reason: e.message });
-      continue;
     }
+  }
+  for (const { label: name, bitmap } of images) {
     bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
     const t0 = performance.now();
     const r = decodePage(bitmap, { geom, layout, paletteId }, opts);

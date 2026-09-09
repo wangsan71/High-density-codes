@@ -248,7 +248,8 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
-| (本轮) | 95 | **D80/D81**：扫描仪默认档"黑白/线稿"（1-bit 灰或调色板 PNG）与 16-bit 灰度此前一律被拒 ⇒ `decodePNG` 现在支持 colour type 0/2/3/4/6 × 1/2/4/8/16 位深（含 PLTE/tRNS、亚字节 bpp=1 滤波）；顺手修掉 pHYs 单位字节被当 4 字节读 ⇒ `dpi` 恒 null、快路 dpi 守卫空过 |
+| (本轮) | 96 | **D82**：TIFF 是扫描仪的另一个默认输出，而接收端只会说"读不了"（还让用户装 ImageMagick —— 气隙里不是答案）⇒ 新增零依赖基线 TIFF 读取器（II/MM、多页、1/4/8/16 位、灰度/二值/调色板/RGB、自写 LZW 与 PackBits、Adobe Deflate 的 zlib 包裹、FillOrder 2、Predictor 2），十种真文件变体 + 多页文件全部逐字节还原 |
+| `869abf4` | 95 | **D80/D81**：扫描仪默认档"黑白/线稿"（1-bit 灰或调色板 PNG）与 16-bit 灰度此前一律被拒 ⇒ `decodePNG` 现在支持 colour type 0/2/3/4/6 × 1/2/4/8/16 位深（含 PLTE/tRNS、亚字节 bpp=1 滤波）；顺手修掉 pHYs 单位字节被当 4 字节读 ⇒ `dpi` 恒 null、快路 dpi 守卫空过 |
 | `7f4e556` | 94 | **台账收口**：D51 的状态列头上还写着"未修"（第 63 轮就落地了）⇒ 用 D51 自己点名的两条命令复验：`level-diff` 首读**仍**塌陷（设计如此）、`receive` 把整条传输**救回且逐字节相同** ⇒ 改记 CLOSED 并纠正当时写错的验收形态；同时启动 600 dpi 的 G2 重跑（D49 的最终判决）|
 | `9e68db5` | 93 | **D79**：「扫描成 PDF」这条最常见的路被说成 `no pages found` ⇒ `receive` 现在点名 PDF + 给出导出路径（并提醒别截屏）+ 顶层错误前缀不再重复；usability 4f 腿（拒绝 + 阳性对照）|
 | `f3117c5` | 92 | **G10 的进程内半边补完**：`tools/mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数；文件名/`--label`/`mtf-labels.json` 三种标签；`names-itself` / `allowed-coarser` / `mismatch` / `unregistered` 四种判决；exit 0/1/2；`--selftest` 四条正例 + 两条对照）+ 6 个单测 + 验收包 README/USE §5 的照抄命令 |

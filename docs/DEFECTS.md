@@ -20,6 +20,12 @@
 | ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
+### 第 96 轮新增（D82 ⇒ **本轮已闭** ✓）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~D82~~ | **TIFF 是平板扫描仪的另一个默认输出，而接收端只会说"这个格式读不了"**：`receive` 的输入过滤只收 `.png`，其余格式里 TIFF 被点名 `TIFF read-back is not wired` 并让用户去装 ImageMagick/PIL —— **在气隙环境里"先装个工具"不是答案**，而这个仓库连 PNG 编解码都是自己写的（`core/render/tiff.js` 一直写得出一份 TIFF，只是读不回来）。扫描仪"输出 TIFF"与"输出 PNG"同样常见，多页 TIFF（一次扫多页存一个文件）更是常态 | **一条命令**（已入库为 `tools/usability.ps1` 的 **4h 腿**）：用 PIL 从我们自己的页造出扫描仪会写的十种 TIFF（未压缩 / LZW / Adobe Deflate / PackBits / 8-bit 灰度 / 1-bit 二值 / 调色板 / 16-bit 灰度 + 一个 **3 页多页 TIFF**），逐个 `receive --photo` ⇒ 修前 `found 1 file(s) ... none in a format this build reads (.tif)`、exit 1；修后**十个全部 exit 0 且 sha256 与载荷逐位相同**，多页那份打印 `pages.tif: 3 pages in one file` 后逐页读出。单测 **`tests/unit/tiff-read.test.mjs`（9 例）**自己按字节造 TIFF（不依赖第三方编码器）：**II 与 MM** 两种字节序 · `WhiteIsZero`/`BlackIsZero` 语义相反 · **FillOrder 2（LSB 优先）** · 4/16-bit 灰度定标与取高字节 · `ColorMap` 三块布局 · **Predictor 2**（8-bit 与 16-bit）· LZW / PackBits / raw Deflate / **zlib 包裹的 Adobe Deflate** 四种压缩解出同一批像素 · 第二个 IFD 即第二页 · 以及八条具名拒绝（压缩 3、PlanarConfiguration 2、orientation 3、32-bit、4 samples、SampleFormat 3、坏字节序、空文件）| **FIXED ✓（第 96 轮）** 新增 `core/decode/tiff-read.js`（基线 TIFF 读取器，**零依赖、自写 LZW/PackBits**）：II/MM · 多 IFD 多页 · 条带式 chunky 布局 · 光度 0/1/2/3 · 位深 1/4/8/16 · 1 或 3 samples · 压缩 1/5/8/32946/32773 · FillOrder 1/2 · Predictor 1/2 · orientation 1 · XResolution+ResolutionUnit ⇒ dpi；**其余一律具名抛错**（瓦片、分离平面、CMYK/YCbCr、浮点、JPEG-in-TIFF、其它朝向）。CLI 的 `receive` 与 `calibrate` 都接上：`.tif/.tiff` 与 PNG 并列，**多页文件展开成多页**（日志用 `文件 [page N]` 区分）。**如实记一处我自己的错**：写 FillOrder 测试时把 `BlackIsZero` 的语义写反了（我按"1=黑"写预期），是测试把我纠回来的 —— 规范里 1 是**白**（纸），0 才是墨 |
+
 ### 第 95 轮新增（D80 / D81 ⇒ **两条都已闭** ✓）
 
 | # | 缺陷 | 复现 | 状态 |

@@ -123,6 +123,29 @@
 
 ## 已知风险 / 待办
 
+### 第 96 轮（**扫描仪的另一个默认输出 TIFF，我们只会说"读不了"⇒ D82 已闭：自写基线 TIFF 读取器，十种变体 + 多页文件全部逐字节还原**）
+
+**① 为什么做这一条**：第 95 轮补上了 PNG 的各种位深/调色板，剩下的大洞是**容器**：`receive` 只收 `.png`，TIFF 被点名 `TIFF read-back is not wired` 并让用户去装 ImageMagick/PIL —— **在气隙环境里"先装个工具"不是答案**，而这个仓库连 PNG 编解码都是自己写的（`core/render/tiff.js` 一直写得出一份 TIFF，只是读不回来）。平板扫描仪"输出 TIFF"与"输出 PNG"同样常见，**多页 TIFF**（一次扫多页存一个文件）更是常态。
+
+**② 做了什么**：新增 `core/decode/tiff-read.js`（**零依赖、自写 LZW 与 PackBits**，基线范围写进文件头注释）：
+
+- 字节序 **II/MM** · **多 IFD ⇒ 多页** · 条带式 chunky 布局 · 光度 **0/1/2/3**（白零/黑零/RGB/调色板）· 位深 **1/4/8/16**（16 取高字节）· **1 或 3 samples** · 压缩 **1/5/8/32946/32773**（Adobe Deflate 是 **zlib 包裹**的，raw Deflate 是裸流 —— 这两种我第一版混了，是 PIL 造的真文件把它照出来的）· **FillOrder 1/2** · **Predictor 2**（8/16-bit）· orientation 1 · XResolution+ResolutionUnit ⇒ dpi。
+- **其余一律具名抛错**：瓦片、分离平面、CMYK/YCbCr、浮点、JPEG-in-TIFF、其它朝向、缺 StripOffsets。
+- CLI：`receive` 与 `calibrate` 都把 `.tif/.tiff` 与 PNG 并列，**多页文件展开成多页**（日志用 `文件 [page N]` 区分），剩余不可读格式仍具名（JPEG/WebP/PDF）。
+
+**③ 验证**
+
+- **真文件十种**（PIL 从我们自己的页造出，`tools/usability.ps1` **4h 腿**）：未压缩 / LZW / Adobe Deflate / PackBits / 8-bit 灰度 / 1-bit 二值 / 调色板 / 16-bit 灰度 + **3 页多页 TIFF** ⇒ **十个全部 exit 0、sha256 与载荷逐位相同**（本轮独立复核：10 个输出文件全部与 `enc-payload.bin` 摘要相等、多页日志出现 `pages.tif: 3 pages in one file`）。
+- **单测 9 例**（`tests/unit/tiff-read.test.mjs`，自己按字节造 TIFF、不依赖第三方编码器）：II/MM · WhiteIsZero/BlackIsZero 语义相反 · FillOrder 2 · 4/16-bit 定标 · ColorMap 三块布局 · Predictor 2（8 与 16-bit）· **四种压缩解出同一批像素** · 第二个 IFD 即第二页 · 八条具名拒绝。
+- **如实记我自己的一个错**：写 FillOrder 测试时我把 `BlackIsZero` 的语义写反了（按"1=黑"写预期）⇒ 测试当场红，是它把我纠回来的（规范里 1 是**白**、0 才是墨）。这正是"先写测试"的价值。
+- 门限：单测 **`tests 365 · pass 365 · fail 0`、`SUITE_EXIT=0`**（本轮 +9）· `verify --gate all` ⇒ **见 ④** · `USABILITY_EXIT=0`、**231 s 全腿通过**（新增 4h 腿）· `check-docs-tables` 干净（337 行 / 58 张表）。
+
+**④ 门限结果**：`verify --gate all` ⇒ **`ALL GATES PASS`（6/7 evaluated）`VERIFY_EXIT=0`**（未评估 G4 G6 G9 G10，与每轮一致）。
+
+**⑤ 用户影响（如实）**：`docs/USE.md` 的"扫描格式"与验收包 README 第 1b 步都改成"**存成 PNG 或 TIFF 都行**"（PNG 的黑白/灰度/彩色/调色板/16-bit、TIFF 的未压缩/LZW/Deflate/PackBits、二值/灰度/调色板/RGB/16-bit、多页 TIFF 全部直接吃）；只有 JPEG 仍需先转 PNG 或改用浏览器接收端。**总账不变**：✅5 · 🟡5 · ⬜1。
+
+**用户指示**：本轮是持久目标的自动续跑（用户上一条直接指示是「好了可以继续」）。
+
 ### 第 95 轮（**扫描仪的默认档"黑白 / 线稿"我们一直读不了 ⇒ D80 已闭；写这组测试时又抓出"dpi 从来没读出来过"⇒ D81 已闭**）
 
 **① 怎么发现的**：沿着用户真正会走的路做了一次格式普查 —— 把同一页用 PIL 转成扫描仪实际会写出的几种 PNG，各跑一次 `receive --photo`。8-bit 灰度 **exit 0 逐字节还原**（阳性对照），而**1-bit（无抖动）、1-bit（抖动）、16 色调色板、16-bit 灰度四种全部 exit 2、不写盘**，用户看到的是 `not a readable PNG (decodePNG: bit depth 1 unsupported (need 8))` —— 工具内部的一句话，而且**被挡住的恰好是最干净的输入**（1-bit 扫描没有半色调，墨点边界比彩色扫描锐利）。
