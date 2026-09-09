@@ -205,7 +205,13 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     // 手机连拍这条路也要能救回「被页内码拒绝」的页：与 app.js、CLI、G2 门限共用同一段仲裁逻辑
     // （docs/DEFECTS.md D51）。少改这一处，手机端就仍是旧读法。
     const { feedPageWithRecalibration } = await import('./core/decode/recalibrate.js');
-    const asm = new TransferAssembler({});
+    // The burst section needs its own passphrase field. The sender page offers encryption (send.html
+    // #spw) and the file-intake half of THIS page has #pass, so without it a phone could receive every
+    // page of an encrypted transfer and still be unable to open it -- with nowhere to type the key, and
+    // (before D66) a message blaming missing pages. Read once at burst start: the assembler derives the
+    // key when the batch closes, and the collected frames are not kept afterwards.
+    const burstPass = $('burstpass');
+    const asm = new TransferAssembler(burstPass && burstPass.value ? { passphrase: burstPass.value } : {});
     // 重读需要「这一帧认出来的几何」。addFrame 内部总是先 decode 再 feed、且逐帧 await，
     // 所以暂存本帧几何是精确的，不是取巧。
     let frameGeom = null;
@@ -245,10 +251,15 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
             stream.getTracks().forEach((t) => t.stop());
             const out = asm.result;
             if (!out) {
-              say(`组装失败：${asm.error || '未知原因'}（页收齐但内容不完整，勿当作成功）`, 'bad');
+              if (asm.needPassphrase) {
+                // Every page arrived, so "未知原因" or anything about missing pages would send the user
+                // after the wrong thing (D66). No markdown: say() assigns textContent.
+                say('页收齐了，但这批是加密传输，而「口令」框是空的：填入口令后按「开始连拍」重来一次。没有写出任何文件。', 'bad');
+                say('如实说清代价：连拍不留已解出的页（在手机上常驻每页的判读结果太贵），所以这次要重拍 —— 下次先填口令再按开始。', 'hint');
+              } else {
+                say(`组装失败：${asm.error || '未知原因'}（页收齐但内容不完整，勿当作成功）`, 'bad');
+              }
             } else {
-              let s = '';
-              for (let i = 0; i < out.length; i += 0x8000) s += String.fromCharCode.apply(null, out.subarray(i, i + 0x8000));
               const a = document.createElement('a');
               const dg = sha256Hex(out);
               // The default name still comes from the bytes: the printed header has no name field, so
@@ -259,7 +270,21 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
               // nothing here improvises a filename.
               const nameEl = $('burstname');
               const name = downloadName({ byteLength: out.length, sha256Hex: dg, userText: nameEl ? nameEl.value : '' });
-              a.href = `data:application/octet-stream;base64,${btoa(s)}`;
+              // Blob + createObjectURL: the same mechanism the desktop half of THIS page already ships
+              // (app.js: new Blob([asm.result]) + URL.createObjectURL). It used to be a data: URL built
+              // by btoa over a chunked String.fromCharCode loop -- the mechanism a browser is least
+              // likely to honour for `download`, on the platform where downloads are most constrained,
+              // for the last step of the phone path (decoding is worthless if the file cannot be
+              // retrieved). This is NOT a claim that blob: is verified on every phone: neither mechanism
+              // has been exercised in a real browser here, and the G4/G9 checklist says to check once on
+              // a real phone that the file lands and opens. What it does claim is that one page no longer
+              // saves two different ways. Not the D63 decision reversed either: D63 recorded the SENDER's
+              // data: URL (up to 63 MB of artifacts, send.html's CSP) and that stays untouched in the G9
+              // batch; this payload is capped by the protocol at ~1.52 MB.
+              // Deliberately not revoked: revokeObjectURL right after a programmatic click races the
+              // download in some browsers, and one blob per completed burst is not worth that risk.
+              const blob = new Blob([out], { type: 'application/octet-stream' });
+              a.href = URL.createObjectURL(blob);
               a.download = name;
               document.body.appendChild(a);
               a.click();

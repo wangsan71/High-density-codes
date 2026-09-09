@@ -23,6 +23,13 @@
                             byte-identical. Ends with a negative control: corrupt one received part
                             and join must REFUSE it (exit 1, nothing written), because a join that
                             cannot fail would make the pass above mean nothing.
+     4c. encrypted          a --passphrase transfer, received three ways: WITHOUT the key it must
+                            refuse and name the passphrase (not blame missing pages -- every page
+                            arrived, and core has computed needPassphrase for ages while all three
+                            receivers dropped it, D66); with a WRONG key it must refuse too (the
+                            digest gate, i.e. criterion 3's zero misaccepts); with the right key the
+                            same page images must come back byte-identical -- which is also the
+                            positive control proving the two refusals were about the key.
     5. 3D side             pskit send --format 3mf,stl on a plate profile, then the Core 1.4
                            subset checker on the files it wrote (gate G8 --file)
     6. client data paths   tools/smoke-sender.mjs (the web sender's real buildArtifacts path,
@@ -49,6 +56,7 @@
   & .\tools\usability.ps1 -Preset phone40       # the camera preset instead of the scanner
   & .\tools\usability.ps1 -Skip3D               # paper only, faster
   & .\tools\usability.ps1 -SkipMultipart        # single-transfer paper path only (skips split/join)
+  & .\tools\usability.ps1 -SkipCrypto           # skip the encrypted-transfer leg
   & .\tools\usability.ps1 -SkipServe            # no local http server (-ServePort N moves it)
   # Call it with &, never by dot-sourcing: the script ends in `exit`, and dot-sourcing would take
   # the calling shell down with it (AGENTS.md trap table). The earlier examples here were wrong.
@@ -63,6 +71,7 @@ param(
   [switch]$Skip3D,
   [switch]$SkipChannel,
   [switch]$SkipMultipart,
+  [switch]$SkipCrypto,
   [switch]$SkipServe
 )
 
@@ -89,6 +98,16 @@ $mpGot = Join-Path $tmp 'mp-recovered.bin'
 $mpBad = Join-Path $tmp 'mp-must-not-exist.bin'
 $mpBytes = 51200
 $mpPartBytes = 20000
+# Encrypted leg (4c). Small payload on purpose: 6000 B is 1 data page + 2 parity, so the leg costs one
+# channel pass, and what it proves is the diagnosis and the digest gate, not capacity.
+$encPayload = Join-Path $tmp 'enc-payload.bin'
+$encSrc = Join-Path $tmp 'enc-src'
+$encScan = Join-Path $tmp 'enc-scan'
+$encNoPw = Join-Path $tmp 'enc-nopw.bin'
+$encWrong = Join-Path $tmp 'enc-wrong.bin'
+$encGot = Join-Path $tmp 'enc-recovered.bin'
+$encBytes = 6000
+$encPw = 'pskt-r73-pass'
 $script:fails = 0
 $script:t0 = [Diagnostics.Stopwatch]::StartNew()
 
@@ -246,6 +265,64 @@ if ($SkipMultipart) {
   }
 }
 
+# 4c. An encrypted transfer, and the diagnosis when the key is missing. core/protocol.js has set
+#     needPassphrase for a long time and tests/unit/protocol.test.mjs pins it ("receiver must ask for
+#     the passphrase, not fail silently"), but that branch left `error` unset, so all three receivers
+#     printed their generic fallback: the CLI said "still short", the web page said "仍缺料", the phone
+#     said "未知原因" -- while their own progress line read N/N pages. And the phone's burst section had
+#     no passphrase field at all, so a transfer the sender page can create could not be opened on a
+#     phone (DEFECTS D66). Judged by exit code and by what landed on disk; the WORDING is judged too,
+#     because the wording is this fix -- and the with-key run at the end is the positive control that
+#     proves both refusals were about the key, not about the pages or the channel.
+if ($SkipCrypto) {
+  Write-Host ' SKIP  encrypted-transfer leg (-SkipCrypto)'
+} else {
+  foreach ($d in $encSrc, $encScan) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+  foreach ($f in $encNoPw, $encWrong, $encGot) { if (Test-Path $f) { Remove-Item $f -Force } }
+  New-Payload -Path $encPayload -N $encBytes
+  $null = Step "pskit send --passphrase ($encBytes B encrypted: 1 data page + 2 parity)" {
+    node cli/pskit.mjs send $encPayload --profile P-M1-300 --format png --passphrase $encPw --out $encSrc
+  } (Join-Path $tmp 'step4c-send.log')
+  if ($SkipChannel) {
+    Copy-Item -Path $encSrc -Destination $encScan -Recurse -Force
+  } else {
+    $encSeed = $Seed + 200
+    $null = Step "sim/channel.py --seed $encSeed (the encrypted pages)" {
+      python sim/channel.py --in $encSrc --out $encScan --seed $encSeed --preset $Preset --modifier nocrop
+    } (Join-Path $tmp 'step4c-chan.log')
+  }
+  $nopwLog = Join-Path $tmp 'step4c-nopw.log'
+  node cli/pskit.mjs receive $encScan --photo --out $encNoPw *> $nopwLog
+  $nopwCode = $LASTEXITCODE
+  $nopwWrote = Test-Path $encNoPw
+  $nopwMsg = [string](Get-Content $nopwLog -Raw)
+  $namesKey = ($nopwMsg -match 'NEEDS PASSPHRASE') -and ($nopwMsg -match '--passphrase')
+  $blamesPages = ($nopwMsg -match 'still short')
+  $nopwOk = ($nopwCode -ne 0) -and (-not $nopwWrote) -and $namesKey -and (-not $blamesPages)
+  if (-not $nopwOk) { $script:fails++ }
+  Write-Host ("{0}  no key -> refuses, writes nothing, and names the passphrase instead of blaming pages  (exit {1}, wrote: {2}, names --passphrase: {3}, says 'still short': {4})" -f ($(if ($nopwOk) { ' PASS' } else { ' FAIL' })), $nopwCode, $nopwWrote, $namesKey, $blamesPages)
+  if (-not $nopwOk) { Get-Content $nopwLog -Tail 6 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+  node cli/pskit.mjs receive $encScan --photo --passphrase not-the-key --out $encWrong *> (Join-Path $tmp 'step4c-wrong.log')
+  $wrongCode = $LASTEXITCODE
+  $wrongWrote = Test-Path $encWrong
+  $wrongOk = ($wrongCode -ne 0) -and (-not $wrongWrote)
+  if (-not $wrongOk) { $script:fails++ }
+  Write-Host ("{0}  a WRONG key is refused too, never silently accepted  (exit {1}, wrote: {2})" -f ($(if ($wrongOk) { ' PASS' } else { ' FAIL' })), $wrongCode, $wrongWrote)
+  $null = Step 'pskit receive --passphrase (the same page images, now with the key)' {
+    node cli/pskit.mjs receive $encScan --photo --passphrase $encPw --out $encGot
+  } (Join-Path $tmp 'step4c-ok.log')
+  if (Test-Path $encGot) {
+    $encGotHash = (Get-FileHash -Algorithm SHA256 -Path $encGot).Hash.ToLower()
+    $encWantHash = (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower()
+    $encSame = ($encGotHash -eq $encWantHash)
+    if (-not $encSame) { $script:fails++ }
+    Write-Host ("{0}  encrypted transfer came back identical once the key was given  ({1} B, sha256 {2} vs {3})" -f ($(if ($encSame) { ' PASS' } else { ' FAIL' })), (Get-Item $encGot).Length, $encGotHash.Substring(0, 16), $encWantHash.Substring(0, 16))
+  } else {
+    $script:fails++
+    Write-Host ' FAIL  receive with the right passphrase wrote no file at all'
+  }
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
@@ -344,6 +421,10 @@ if ($script:fails -eq 0) {
   if (-not $SkipMultipart) {
     Write-Host '           Also: a file too big for one 255-page transfer went split -> per-part send/scan/'
     Write-Host '           receive -> join, byte-identical, and join refused a one-byte-corrupted part.'
+  }
+  if (-not $SkipCrypto) {
+    Write-Host '           Also: an encrypted transfer refused without a key (naming the passphrase, not'
+    Write-Host '           missing pages), refused with a wrong key, and came back identical with the right one.'
   }
   Write-Host '           Not proven here: real ink/paper, a real phone camera, browser print scaling (D8),'
   Write-Host '           PWA install (needs https), and G4/G6/G9/G10. See docs/USE.md for those steps.'

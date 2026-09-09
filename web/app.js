@@ -102,6 +102,16 @@ async function run() {
   setStatus('核对摘要…');
   if (!asm.result) {
     const p = asm.progress;
+    if (asm.needPassphrase) {
+      // Every page arrived, so "仍缺料" would send the user back to the printer for nothing (D66).
+      // No markdown here: log() assigns textContent, so asterisks would show up literally.
+      log(`未完成：页收齐了（数据页 ${p.dataHave}/${p.dataNeed}），但这批是加密传输，而第 2 节的「口令」是空的。`);
+      log('      缺的不是页、是口令：在上面填入口令，再按一次「3 · 开始还原」就行 —— 已选的文件还在，不必重新选，更不必重印重扫。');
+      log('      没有写出任何文件：没有钥匙就没有明文，也就无从核对页头声明的摘要。');
+      busy = false;
+      setStatus('需要口令');
+      return;
+    }
     log(p.noSession
       ? '未完成：没有任何一页的头能读出来 —— 这是整批失败，缺页校验也帮不上（几何还没认出来）'
       : `未完成（数据页 ${p.dataHave}/${p.dataNeed}）：${asm.error || '仍缺料'}`);

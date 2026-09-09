@@ -569,6 +569,16 @@ async function cmdReceive(args) {
   const out = args.out ? resolve(args.out) : join(base, 'pskt-received.out');
   if (!asm.result) {
     const { dataHave, dataNeed, noSession } = asm.progress;
+    if (asm.needPassphrase) {
+      // Not the INCOMPLETE branch: every page arrived, and telling the user to reprint or rescan
+      // would send them after the wrong thing (DEFECTS D66).
+      console.log(`receive: NEEDS PASSPHRASE -- all ${dataNeed} data page(s) arrived, but this transfer is encrypted and no key was given`);
+      console.log('  this is not a missing-page problem: re-run the same command with --passphrase <pw>');
+      console.log('  the page images are still on disk -- nothing to reprint, nothing to rescan');
+      console.log('  nothing was written: without the key there is no plaintext to match the declared digest against');
+      process.exitCode = 2;
+      return;
+    }
     if (noSession) {
       console.log(`receive: INCOMPLETE -- not one page header could be read, so the receiver never learned the page geometry (${seen.size} distinct page(s) read out of ${names.length - skippedTiff} image(s) offered)`);
       console.log('  this is a whole-batch failure, not a missing page: parity cannot help when no page decoded');

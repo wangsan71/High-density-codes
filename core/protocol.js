@@ -563,7 +563,14 @@ async function finish(pageContents) {
       const nonce = payload.subarray(16, 16 + NONCE_LEN);
       const body = payload.subarray(16 + NONCE_LEN);
       if (!this.opts.passphrase && !this.opts.key) {
+        // Every consumer reads `error` when `result` is null, and this branch used to leave it unset --
+        // so all three receivers fell through to their generic fallback and told the user the batch was
+        // SHORT OF PAGES ("still short" / "仍缺料" / "未知原因") while their own progress line read N/N.
+        // The pages are all here; what is missing is the key. `needPassphrase` stays the boolean the
+        // tests pin, and `error` now carries a machine-readable reason that cannot be mistaken for a
+        // missing page (DEFECTS D66). Nothing about acceptance changes: still no result, still no bytes.
         this.needPassphrase = true;
+        this.error = 'need-passphrase';
         return null;
       }
       const key = this.opts.key || (await deriveKey(this.opts.passphrase, salt, this.opts.iterations || 150000));

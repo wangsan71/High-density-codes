@@ -473,6 +473,10 @@ test('transfer: wrong passphrase is detected, never silently wrong output', asyn
   await feedAll(locked, t.pages);
   assert.equal(locked.result, null);
   assert.equal(locked.needPassphrase, true, 'receiver must ask for the passphrase, not fail silently');
+  // Every consumer reads `error` when `result` is null, and all three receivers used to fall through to
+  // a generic "short of pages" fallback while their own progress line read N/N (DEFECTS D66). Pin the
+  // machine-readable reason, so a refactor cannot quietly un-set it and send users back to the printer.
+  assert.equal(locked.error, 'need-passphrase');
 });
 
 test('transfer: a passphrase alone requests encryption (the flag must say so)', async () => {
@@ -495,6 +499,7 @@ test('transfer: a passphrase alone requests encryption (the flag must say so)', 
   await feedAll(printable, t.pages);
   assert.equal(printable.result, null, 'a receiver without the key must not be handed the payload');
   assert.equal(printable.needPassphrase, true);
+  assert.equal(printable.error, 'need-passphrase', 'the reason must not read like a missing page');
 
   const open = new TransferAssembler({ passphrase: 'sole flag', iterations: 2000 });
   await feedAll(open, t.pages);

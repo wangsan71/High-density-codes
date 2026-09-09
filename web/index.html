@@ -88,6 +88,8 @@
     <button id="burststop" type="button" hidden>停止</button>
     <span id="burstprog" class="hint"></span>
   </div>
+  <p class="row"><label>口令（若打印时加了口令）<input id="burstpass" type="password" autocomplete="off"></label>
+    <span class="hint">加密传输必须在这里填与发送时相同的口令，否则页收齐了也解不开。<b>开始连拍前先填</b>：连拍不留已解出的页，事后补口令要重拍。缺口令时页面会明说「需要口令」，不会把它报成缺页。</span></p>
   <p class="row"><label>存成什么名字（可选）<input id="burstname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf"></label>
     <span class="hint">收齐后按这个名字下载；留空则用摘要名 <code>pskt-…B-….bin</code>。<b>手机上想直接打开就带上扩展名</b>（只填 <code>.pdf</code> 也可以）。名字只用于本机命名下载，不发送、不进页码。</span></p>
   <pre id="burst-log" class="log" aria-live="polite"></pre>
