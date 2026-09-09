@@ -788,13 +788,18 @@ async function cmdStatus() {
       continue;
     }
     const p = mod.profiles.PROFILES[r.profile];
+    // The phone hint the web picker shows belongs here too: this table is where a CLI user chooses.
+    // (PL-G is the profile PLAN §2/§3 calls readable by any phone; round 80 measured 8/8 byte-exact
+    // with a whole plate in one phone frame, against 0/8 for the paper profile in the same framing.)
+    const note = (p.note || '') + (p.phoneSafe ? '  [手机拍摄首选]' : '');
     console.log(
       `${r.profile.padEnd(10)} ${String(p.medium).padEnd(6)} ${(r.nozzle || '-').padEnd(6)} ${String(r.monoSafe).padEnd(9)} ` +
-        `${String(r.pitchMm).padEnd(7)} ${(r.cols + 'x' + r.rows).padEnd(12)} ${String(r.netPerPage).padEnd(10)} ${String(r.rate).padEnd(5)} ${p.note || ''}`,
+        `${String(r.pitchMm).padEnd(7)} ${(r.cols + 'x' + r.rows).padEnd(12)} ${String(r.netPerPage).padEnd(10)} ${String(r.rate).padEnd(5)} ${note}`,
     );
   }
   console.log('\nnozzles: ' + Object.entries(mod.nozzles.NOZZLES).map(([k, v]) => `${k}mm EW=${v.ewMm}`).join('  '));
   console.log(`universal floor PL-G pitch: ${mod.nozzles.UNIVERSAL_PITCH_MM}mm`);
+  console.log('a phone camera needs a coarse profile: PL-G (3.12-7.6mm cells) reads at whole-page framing, a paper page (0.85mm cells) does not -- docs/USE.md section 2');
 }
 
 /* ------------------------------------------------------------------ */
