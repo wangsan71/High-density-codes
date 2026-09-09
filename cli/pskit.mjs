@@ -581,7 +581,13 @@ async function cmdReceive(args) {
   const nozzle = manifest?.nozzle || args.nozzle;
   const dpi = args.dpi ? Number(args.dpi) : manifest?.dpi || 300;
   const paletteId = manifest?.palette || args.palette || 'INK2';
-  if (!profileId) throw new Error('receive: no manifest.json and no --profile, cannot know the page geometry');
+  if (!profileId) {
+    throw new Error(
+      `receive: ${dir} has no manifest.json and no --profile was given, so the page geometry is unknown. ` +
+        'Pass the profile the pages were printed with (e.g. --profile P-M1-300, or --profile PL-G --nozzle 0.4 --plate 200 for a plate) ' +
+        '-- or use the browser receiver (web/dist/pskt-file.html), which searches the candidate geometries for you.',
+    );
+  }
   const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
   const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
   const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });
@@ -1668,7 +1674,12 @@ async function cmdCalibrate(args) {
   const nozzle = args.nozzle || manifest?.nozzle;
   const dpi = args.dpi ? Number(args.dpi) : manifest?.dpi || 300;
   const paletteId = args.palette || manifest?.palette || 'INK2';
-  if (!profileId) throw new Error('calibrate: no manifest.json and no --profile, cannot know the page geometry');
+  if (!profileId) {
+    throw new Error(
+      `calibrate: ${dir} has no manifest.json and no --profile was given, so the page geometry is unknown. ` +
+        'Pass the profile the pages were printed with (e.g. --profile P-M1-300), or point --spec at the plate spec that calibrate --make-mtf wrote.',
+    );
+  }
   const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
   const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
   const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });

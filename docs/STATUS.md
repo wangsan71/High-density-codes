@@ -137,6 +137,8 @@
 ```
 
 板材档则打印 `slice <out>\page-000.3mf …` + 带 `--nozzle 0.4` 的 receive 命令。**实测**：纸面与板材两条都实测过（`--profile P-M1-300` / `--profile PL-G --nozzle 0.4`）；断言入库为 `usability.ps1` 的 1 号腿附加检查（日志必须含 `next` + `pskit.mjs receive` + 本次 profile）。**判据未动**。
+
+**同一主题的第二处（同轮）**：`receive`/`calibrate` 在「没有 manifest.json 也没给 `--profile`」时只说「无法知道页面几何」，现在点名**该给什么**（纸面 `--profile P-M1-300`；板材 `--profile PL-G --nozzle 0.4 --plate 200`）并提示**浏览器接收端会自动搜候选几何**（它本来就会）。实测：`receive .tmp/nomanifest --photo` ⇒ exit 1 + 上述整句。
 ### 第 85 轮（**D8 量到一半答案：缩放本身不致命，「必须 100%」这句手册话可以放宽**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只回答一个用户第一天就会问的问题：**打印时选错缩放会怎样？**
