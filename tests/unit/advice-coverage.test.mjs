@@ -24,7 +24,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { advise } from '../../core/decode/advice.js';
+import { advise, knownReasons, localizedReasons } from '../../core/decode/advice.js';
 
 const SCAN = ['core/decode', 'core/render', 'core'];
 const reasonRe = () => /reason:\s*'([a-z0-9-]+)'/g;
@@ -186,6 +186,23 @@ test('on the real tree, stripping changes nothing today -- and names it if that 
   assert.ok(stripped.size >= 20, `stripped scan found only ${stripped.size} reasons -- the stripper is eating code`);
 });
 
+
+test('the phone UI translation table names real reasons and covers the phone path (D72)', () => {
+  const known = new Set(knownReasons());
+  const zh = localizedReasons();
+  // Anti-vacuity: an empty table would make the rest pass without translating anything.
+  assert.ok(zh.length >= 10, `only ${zh.length} localized reason(s) -- the phone UI would fall back to English`);
+  for (const r of zh) {
+    assert.ok(known.has(r), `${r} has a Chinese line but no entry in ADVICE -- a rename left it dangling`);
+    assert.ok(advise({ reason: r }).zh.length > 8, `${r}: the Chinese line is empty or a stub`);
+  }
+  // Every reason the burst UI can realistically surface must be localized, or the phone user
+  // (the audience those diagnoses were written for) sees English or a generic line again.
+  const phonePath = ['no-contrast', 'echo-no-contrast', 'no-square-candidates', 'no-rectangular-quad', 'no-hollow-corner', 'fourth-corner-out-of-frame', 'blank-image', 'no-geometry-matched', 'intra-fail', 'digest-mismatch'];
+  for (const r of phonePath) assert.ok(zh.includes(r), `${r} can reach the phone but has no Chinese line`);
+  // Negative control: an unmapped reason must NOT borrow a translation.
+  assert.equal(advise({ reason: 'definitely-not-a-reason' }).zh, undefined);
+});
 test('an unknown reason says so instead of borrowing somebody else advice', () => {
   const a = advise({ stage: 'markers', reason: 'reason-invented-by-a-future-commit' });
   assert.equal(a.known, false);

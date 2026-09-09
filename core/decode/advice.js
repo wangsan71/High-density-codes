@@ -114,6 +114,11 @@ const ADVICE = {
     cause: 'fewer bytes than the fixed header length were available to read',
     do: 'the input was cut short -- re-export the image (or re-copy the file) and check it is complete; partial files also cause this',
   },
+  'digest-mismatch': {
+    cause:
+      'the bytes that came back do not hash to the digest the transfer declared, so the receiver refuses to write them -- the one failure this project never papers over (a wrong payload is worse than no payload)',
+    do: 'supply the missing or unreadable pages (the parity pages rebuild them), or re-photograph the pages that failed; if the transfer was encrypted, check the passphrase is the one that was used',
+  },
   'other-session': {
     cause: 'this page belongs to a different transfer (session id) than the pages already collected, so mixing them would reconstruct the wrong file',
     do: 'separate the printouts: one scan should contain the pages of one transfer only, or re-scan each transfer on its own',

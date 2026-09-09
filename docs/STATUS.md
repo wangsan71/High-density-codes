@@ -139,7 +139,12 @@
 
 **实测**：`node tools/smoke-capture.mjs` ⇒ 修前那张平帧报 `kind no-page · reason no-geometry-matched`，修后 **`reason no-contrast`**，且 `advice.zh` 是「照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— **重新取景没用**。」；**阳性对照**：好帧必须被接受且**不带** advice（否则这条断言只是在测「每帧都有 advice」）。另一条腿：裁切的页从 `no-geometry-matched` 变成 **`no-rectangular-quad`**（更具体、且指向正确的补救）。
 
-**门限**：单测 **338/338 exit 0**、`verify --gate all` ⇒ **ALL GATES PASS**（6/7）、`usability` exit 0（含 smoke-capture 的新断言）、`check-docs-tables` clean。**判据未动**：没有任何帧因此被接受。
+**门限**：单测 **339/339 exit 0**（含本轮新增的 `ZH` 表守卫）、`verify --gate all` ⇒ **ALL GATES PASS**（6/7）、`usability` exit 0（含 smoke-capture 的新断言）、`check-docs-tables` clean。**判据未动**：没有任何帧因此被接受。
+**同一轮顺手做的两件小事（都已入库）**：
+
+1. `core/decode/advice.js` 补 `digest-mismatch` 的正式条目（它一直只作为 `fed.reason` 直接打印、没有 advice；第 81 轮把它接进手机 UI 后暴露出来），并新增单测：**`ZH` 表的每个键都必须是真 reason**（改名后不会留下悬空翻译）、手机路径那 10 个 reason 必须都有中文、未映射的 reason **不得**借用翻译。
+2. **第二条正面证据**：`& .\tools\g4-probe.ps1 -Seeds 8 -Preset plate-matte`（FDM 板材照片档）⇒ 纸面 `P-M1-300` **0/8**、**板材 `PL-G@0.4` 8/8 = 100%**（`crop` 生效时 2/8）。加上第 80 轮的 `phone40`（8/8），**粗档板材在两个互不相同的信道预设下都是 100%** —— 这是目前对「手机/相机拍板材」最强的进程内证据（仍是仿真信道 ⇒ G10/G4 判决不变）。
+
 ### 第 80 轮（**同一张照片的第二层误诊：条带没对比度，被说成「头字段损坏/另一套码」⇒ D71 已修**）
 
 **接第 79 轮的线**：那一轮修的是「照片整体没有墨/纸分离」被说成「四角没拍全」（D69）。这一轮查的是**下一层**：`phone40`（较温和的手机档）下角标**找得到**（6.3px）、校正 100%，但页面在 `readEcho` 处失败，报 `echo-bad-magic`，而 `advice.js` 对它的解释是「条带损坏，或这是另一套码」——**字节层面是真的，成因层面是错的**：真实原因是**拍得太远**，条带的 1-bit 微格（数据格的一半宽，是页上最细的特征）糊成一条灰带。用户照这条建议会去**重印**，而正确动作是**拍近/换粗档**。
