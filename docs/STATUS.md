@@ -123,6 +123,15 @@
 
 ## 已知风险 / 待办
 
+### 第 84 轮（**用户的第一条命令就是坑：不带 `--profile` 的 `send` 默认走板材档 ⇒ D75 已闭**）
+
+**用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只修**第一次使用就会撞上**的那一个坑，不加功能。
+
+**实测到的坑**：`node cli/pskit.mjs send 任意文件 --format png`（不写 `--profile`，也就是手册之外最自然的写法）⇒ **`needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile`**。原因：`defaultProfileFor(ext)` 收着扩展名却从不看它，对所有输入返回 `PL-D2`（板材档，~220 B/页），而手册教的是 `P-M1-300`（~7514 B/页）——**两个数量级**。拒绝本身是对的（一次传输最多 255 页），但那句话没告诉用户该换成哪个档。
+
+**修法（D75）**：① 默认档按输入类型选：`.stl/.3mf/.obj` → `PL-D2`（发模型给板材是用户本意），其余 → `P-M1-300`；② 撞到页数上限时 CLI 补一行**可执行**的 hint（本次多大、两个档各自每页多少字节、纸面档约需多少页、或 `pskit split` 切分）。
+
+**实测**：不带 `--profile` ⇒ `profile P-M1-300`、3 页、exit 0；显式 `--profile PL-D2` 喂同样载荷 ⇒ exit 2 + `hint: … P-M1-300 (paper) carries ~7514 B per page … about 28 page(s) … Or cut the file into parts with pskit split`。两条都已入库为 `usability.ps1` 的 **1b 腿**（前者是正向契约，后者是带点名的拒绝）。
 ### 第 83 轮（**手机拍的 JPEG 拷到电脑上，`receive` 说「没找到页」——D74 已闭；用户指示「先用上、别过度设计」⇒ 本轮收尾**）
 
 **用户口径（本轮直接指令）**：「其实我想先用上，没必要做过度设计」⇒ 本轮只做**挡在「用上」路上的那一件事**，然后把最短可用路径写清楚，不再往下深挖。

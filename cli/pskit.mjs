@@ -140,8 +140,20 @@ async function load() {
   return { profiles, protocol, raster, layoutMod, png, tiff, nozzles, palette, hash, frame };
 }
 
+/**
+ * Which profile a bare `pskit send FILE` uses when the user names none.
+ *
+ * The function always took the extension and always ignored it, returning PL-D2 for everything --
+ * a plate profile that carries ~180 B per page, so the documented main path (`P-M1-300`, a paper
+ * page of ~7.5 kB) was one forgotten flag away from a refusal: measured, `pskit send some.bin`
+ * answered "needs 1120 pages > 255". A model file still gets the plate profile, because sending a
+ * 3D model to a plate is what the user means; everything else gets the paper workhorse USE.md
+ * tells people to use.
+ */
 function defaultProfileFor(ext) {
-  return 'PL-D2';
+  const e = String(ext || '').toLowerCase();
+  if (e === '.stl' || e === '.3mf' || e === '.obj') return 'PL-D2';
+  return 'P-M1-300';
 }
 
 function pickPalette(mod, profileId, explicit) {
@@ -171,7 +183,28 @@ async function cmdSend(args) {
     parityPct: args.parity ? Number(args.parity) : undefined,
     monoSafe: args.monoSafe,
   });
-  const plan = mod.profiles.planTransfer(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined, sheet: args.sheet, parityPct: args.parity ? Number(args.parity) : undefined, monoSafe: args.monoSafe }, raw.length);
+  let plan;
+  try {
+    plan = mod.profiles.planTransfer(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined, sheet: args.sheet, parityPct: args.parity ? Number(args.parity) : undefined, monoSafe: args.monoSafe }, raw.length);
+  } catch (e) {
+    // The refusal itself is core's (and correct: one transfer is at most 255 pages). What the CLI
+    // can add is which profile would fit, because "use a denser profile" names nothing -- a plate
+    // page carries ~180 B against a paper page's ~7.5 kB, two orders of magnitude apart. Measured
+    // (round 84): a bare `send file` used to hit this with the plate default and name no way out.
+    if (/inter-page RS limit/.test(String(e && e.message))) {
+      const per = mod.profiles.planPage('P-M1-300', {}).ecc.netBytesPerPage;
+      const here = mod.profiles.planPage(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined }).ecc.netBytesPerPage;
+      console.log(`pskit send: ${e.message}`);
+      console.log(
+        `  hint: this transfer is ${raw.length} B; ${profileId} carries ~${here} B per page, while P-M1-300 (paper) carries ~${per} B per page ` +
+          `and allows up to 255 pages -- about ${Math.ceil(raw.length / per)} page(s) for this file before compression. ` +
+          'Or cut the file into parts with `pskit split` and send each part as its own transfer.',
+      );
+      process.exitCode = 2;
+      return;
+    }
+    throw e;
+  }
 
   console.log(`pskit send  ${basename(file)} (${raw.length} bytes)`);
   console.log(`  profile   ${profileId}${nozzle ? ` @ ${nozzle}mm nozzle` : ''}  palette ${paletteId}${args.mono ? '  [mono render]' : ''}`);
@@ -188,16 +221,38 @@ async function cmdSend(args) {
   }
 
   const t0 = performance.now();
-  const t = await mod.protocol.encodeTransfer(raw, {
-    profile: profileId,
-    nozzle,
-    plateMm: args.plate ? Number(args.plate) : undefined,
-    sheet: args.sheet,
-    parityPct: args.parity ? Number(args.parity) : undefined,
-    monoSafe: args.monoSafe,
-    cipher: !!args.passphrase,
-    passphrase: args.passphrase,
-  });
+  let t;
+  try {
+    t = await mod.protocol.encodeTransfer(raw, {
+      profile: profileId,
+      nozzle,
+      plateMm: args.plate ? Number(args.plate) : undefined,
+      sheet: args.sheet,
+      parityPct: args.parity ? Number(args.parity) : undefined,
+      monoSafe: args.monoSafe,
+      cipher: !!args.passphrase,
+      passphrase: args.passphrase,
+    });
+  } catch (e) {
+    // The refusal itself is core's (and correct: one transfer is at most 255 pages). What the CLI
+    // can add is which profile would fit, because "use a denser profile" names nothing -- and a
+    // plate profile carries ~180 B per page against a paper page's ~7.5 kB, so the difference is
+    // two orders of magnitude, not a nudge. Measured (round 84): a bare `send file` used to hit
+    // this with the plate default and gave the user no way to act on it.
+    if (/inter-page RS limit/.test(String(e && e.message))) {
+      const paper = mod.profiles.PROFILES['P-M1-300'];
+      const per = mod.profiles.planPage('P-M1-300', {}).ecc.netBytesPerPage;
+      console.log(`pskit send: ${e.message}`);
+      console.log(
+        `  hint: this transfer is ${raw.length} B and ${profileId} carries ~${mod.profiles.planPage(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined }).ecc.netBytesPerPage} B per page. ` +
+          `${paper.id} (paper) carries ~${per} B per page and allows up to 255 pages, so about ${Math.ceil(raw.length / per)} page(s) before compression; ` +
+          'or cut the file into parts with `pskit split` and send each part as its own transfer.',
+      );
+      process.exitCode = 2;
+      return;
+    }
+    throw e;
+  }
   const t1 = performance.now();
 
   const outDir = resolve(args.out || join(ROOT, 'artifacts', basename(file, extname(file))));

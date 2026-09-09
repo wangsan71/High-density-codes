@@ -159,6 +159,30 @@ $pdf = Get-ChildItem -Path $src -Filter '*.pdf' -ErrorAction SilentlyContinue | 
 Write-Host ("          wrote {0} page PNG(s){1}" -f $pngs.Count, $(if ($pdf) { ", " + $pdf.Name + " (" + [int]($pdf.Length / 1KB) + " KB)" } else { ", NO PDF" }))
 if ($pngs.Count -eq 0) { Write-Host ' FAIL  nothing to print -- stopping here'; exit 1 }
 
+
+# 1b. The first command a user actually types: `send FILE` with no --profile. It must produce the
+#     documented paper pages, and if someone does force a plate profile on a paper-sized payload the
+#     refusal must name a way out (DEFECTS D75, round 84).
+$bare = Join-Path $tmp "bare-default"
+$bareLog = Join-Path $tmp "step1b-bare.log"
+if (Test-Path $bare) { Remove-Item -Recurse -Force $bare }
+$null = Step "pskit send with no --profile (the first command a user types)" {
+  node cli/pskit.mjs send $payload --format png --out $bare
+} $bareLog
+$barePng = @(Get-ChildItem -Path $bare -Filter "page-*.png" -ErrorAction SilentlyContinue).Count
+$bareText = Get-Content $bareLog -Raw
+$bareOk = ($barePng -gt 0) -and ($bareText -match "P-M1-300")
+if (-not $bareOk) { $script:fails++ }
+Write-Host ("{0}  a bare send defaults to the paper profile  ({1} page PNG(s))" -f $(if ($bareOk) { " PASS" } else { " FAIL" }), $barePng)
+$hintLog = Join-Path $tmp "step1b-hint.log"
+& node cli/pskit.mjs send $payload --profile PL-D2 --format png --out (Join-Path $tmp "bare-plate") *> $hintLog
+$hintCode = $LASTEXITCODE
+$hintText = Get-Content $hintLog -Raw
+$hintOk = ($hintCode -ne 0) -and ($hintText -match "P-M1-300") -and ($hintText -match "split")
+if (-not $hintOk) { $script:fails++ }
+Write-Host ("{0}  forcing a plate profile on a big payload refuses and names the way out  (exit {1})" -f $(if ($hintOk) { " PASS" } else { " FAIL" }), $hintCode)
+if (-not $hintOk) { Get-Content $hintLog -Tail 3 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }
+
 # 2. channel: the printer and the scanner this machine does not have.
 if ($SkipChannel) {
   Write-Host ' SKIP  sim/channel.py (-SkipChannel): decoding the pristine pages instead, which proves less'
