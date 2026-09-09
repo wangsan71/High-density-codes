@@ -39,7 +39,7 @@
 | G7 单色兜底 100% | ✅ | — | `verify --gate G7`（`colourAlive=false` → 整道擦除复原 ✓） |
 | G8 3MF/STL 独立解析 | 🟡 | STL ✅（13/13 + 承重反例 ✓）· 投影对拍 ✅（三条独立算路互证 ✓）· **3MF XSD 子集校验器：第 38 轮已写、进程内可跑、对我们所有产物 PASS ✅**（`tools/check-3mf.mjs` + `verify --gate G8` ✓ 规则逐条抄自 vendored `ref/3mf-core-1.4.0.xsd` 并注行号 ✓ 25 条测试 = 21 篡改 + 4 正例含"D40 回归守卫"✓ **绿了 ⇒ 已并入 `--gate all`** ✓）· 仍**不等于过 schema**（本机无 XSD 引擎 ✗ Python 侧 `verify_model.py` 无 `--xsd` 开关 ✗）· ~~**D41 OPEN**：表与权威 XSD 之间**还没有自动对拍** ✗（本轮就是靠抄错权威翻了车 ✓）~~（**过期记账，第 64 轮更正**：D41 **第 39 轮已闭** ✓ 修法 = `tests/unit/threeMF-xsd-parity.test.mjs`，用本校验器自己的 `scanXml` 读 vendored 权威 XSD、逐项比对 `CT_*` 属性集与 16 个元素名 ⇒ 表再抄错就红 ✓ 原句划掉保留为历史、不改写） | `node cli/pskit.mjs verify --gate G8`（或 `--file a.3mf,b.3mf`）· `python ref/verify_model.py --dir .tmp/m5verify --selftest` |
 | G9 Web 扫描端（Pages） | 🟡（产物级全绿 ✓ 浏览器内未验证） | `node tools/build-web.mjs && node tools/check-dist.mjs` ⇒ **第 56 轮复量：`13 pass / 0 skipped / 0 fail` + `G9 CHECK: all 12 assertions pass`、exit 0**（原先这里记的"8/8 全绿""SW 78 条清单"是第 22–23 轮的数 ⇒ 这类数字随构建内容变、**别背**，看工具自己打印的汇总即可 ✓ 第 53 轮构建实测：`web/dist` **54 个文件**、SW 预缓存 **52 条**）：零第三方加载点、两页 CSP `default-src 'self'`、SW 清单哈希逐字节对上磁盘、页面每个引用都有对应产物、`pskt-file.html` 只含 data: ✓ **`web/dist/selftest.js` 在产物内跑出 13 pass / 0 fail** ✓ **bundle 无人告知几何解磁盘页 → 摘要等于 `manifest.sourceSha256`** ✓ 差多少：**本机无浏览器** ⇒ "`?selftest=1` 在页面里绿"与"`file://` 双击→选照片→解出文件"这两条只被 Node 侧等价物证明 ✓ 摄像头授权、SW 注册、iOS 主屏图标全属推定；要人在这台机器之外点一次才算闭合 | 第 22–23 轮 ✓ |
-| G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（~~`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝~~ —— **第 78 轮更正 ✗**：`PL-G` 四档全可规划（实测见 M7 行），被拒绝的是 `PL-D3S`；原句档位写混，判决未变）⇒ 完整矩阵未跑 ✓ **第 75 轮起有 MTF 板可量**（`& .\tools\mtf-probe.ps1` ⇒ 0 FAIL / 26s：EW 0.45/0.70/0.95 各点名自己的喷嘴、EW 1.40 正确拒绝、EW 0.26 因渗墨被判 filled 并如实记 NOTE）⇒ **判决仍不成立**：那四条是**仿真打印机 + Python 信道**，不是真打印机 ⇒ 仍差真机 | `& .\tools\mtf-probe.ps1`（仿真）· `pskit calibrate --make-mtf` + 真打印 + `pskit calibrate <照片> --mtf`（真机） |
+| G10 喷嘴 × 参数矩阵 | 🟡 | 只测到矩阵里**一个真实边界点**（~~`PL-G` 在 0.6/0.8 喷嘴被 `glyphGeometry` 正确拒绝~~ —— **第 78 轮更正 ✗**：`PL-G` 四档全可规划（实测见 M7 行），被拒绝的是 `PL-D3S`；原句档位写混，判决未变）⇒ 完整矩阵未跑 ✓ **第 75 轮起有 MTF 板可量**（`& .\tools\mtf-probe.ps1` ⇒ 0 FAIL / 26s：EW 0.45/0.70/0.95 各点名自己的喷嘴、EW 1.40 正确拒绝、EW 0.26 因渗墨被判 filled 并如实记 NOTE）⇒ **判决仍不成立**：那四条是**仿真打印机 + Python 信道**，不是真打印机 ⇒ 仍差真机 ✓ **第 92 轮起有矩阵读数器**（`node tools/mtf-matrix.mjs --dir 照片目录`：四张照片 → 逐张"建议喷嘴 + 判决"，`--selftest` 四条正例 + 两条对照、`--provenance` 只记录用户所说不认假件 ⇒ **判决仍未变**） | `& .\tools\mtf-probe.ps1`（仿真）· `node tools/mtf-matrix.mjs --selftest`（仿真）· `pskit calibrate --make-mtf` + 真打印 + `node tools/mtf-matrix.mjs --dir 照片目录 --spec mtf\mtf-plate.json --provenance real-print`（真机） |
 
 **总账（不主张完成 ✓）**：`✅ 5（G0 G1 G3 G5 G7）· 🟡 5（G2 G6 G8 G9 G10）· ⬜ 1（G4）`（**第 74 轮更正计数 ✗→✓**：G9 那一行的判决早就是 🟡「产物级全绿、浏览器内未验证」，而这里还把它算在 ⬜ 里 ⇒ 过期记账；**判决本身一字未改**） ⇒ **"通过 G0–G10" 不成立** ✓ 全程未降低任何判据来制造"通过" ✓ 基线：单测条数**以 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` 自己打印的汇总为准、别背数字**（**第 59 轮实测：`tests 297 · pass 297 · fail 0 · duration_ms 136148`、`SUITE_EXIT=0`**；此前最后一次抄下的是第 52 轮 **296/296 · 0 fail**；第 53 轮加了纸面斜拍 1 例后实测 `exit 0`，但当轮没抄下汇总 ⇒ **不写没量过的数** ✗ 原先这里写死的 `231/231` 早已过期，第 56 轮改掉 ⇒ 与 `docs/USE.md` §0 同一口径 ✓）✓ `verify --gate all` `ALL GATES PASS`（**该命令每次都会打印本次未评估哪些门限** ⇒ 不得引用成覆盖 G4/G6/G9/G10 ✓）
 
@@ -122,6 +122,31 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 92 轮（**G10 的进程内半边补完：用户拍回的四张照片 → 喷嘴矩阵读数（`tools/mtf-matrix.mjs`）**）
+
+**① 为什么是这一条**：`docs/HANDOVER.md` §12 进程内优先级第 1 条。第 75/76 轮做出了 MTF 板与它的可打印模型（板带四角标记），但读者只能**一张一张**读，而 G10 要的是**四个喷嘴 × 参数**的矩阵 —— 用户拍回来的照片此前没有自动路径，只能我逐张手工跑再手工记账。本轮把它变成一条命令。
+
+**② 做了什么**
+
+- 新增 **`tools/mtf-matrix.mjs`**（纯 ESM、零依赖、不 spawn 子进程 ⇒ 受限沙箱里也跑得动）：
+  - **标签三种来源**（优先级从高到低）：`--label 0.4=n04.png` · `<dir>/mtf-labels.json`（两种方向都认）· **文件名**（`n02` / `nozzle_0.6` / `ew070` / `0.45` …）。**认不出就不猜**：一个名字里出现两个喷嘴、或出现不存在的规格（`0.5`、`n13`）⇒ 该张记 `unlabelled`，绝不硬套一个喷嘴让行变绿。
+  - **逐张判决**：`names-itself`（认出了打印它的喷嘴）· `allowed-coarser`（**只有 0.2 那一档允许**，且必须由读数说明"0.26 mm 孔被渗墨填了"）· `mismatch` · `unregistered`（四角标记没找到 = 数据不是工具错误）· `unreadable` · `unlabelled`。
+  - **exit 0 / 1 / 2**（全对 / 有认错 / 工具没跑起来），并**每次必打一行 provenance**：`--provenance` 只把你说的记下来（像素分不出真假），没给就明写 `unstated -- ... docs/STATUS.md must not claim G10 without it` ⇒ **仿真件不可能被无声地当成真机件**。
+  - **`--selftest`**：把板按四个喷嘴的挤出宽度各渲一次（`renderMtfPlate(..., {printEwMm})`，与 `tools/mtf-probe.ps1` 用的同一个"打印机"仿真），读回必须点名自己；另加两条对照 —— EW 1.40（比所有喷嘴都粗）**必须推荐不出任何喷嘴**、原始渲染**必须解出至少一档**（否则"总是点名自己"的读数器会靠正例蒙过去）。
+- 新增单测 **`tests/unit/mtf-matrix.test.mjs`**（6 例）：标签解析（含 `0.5`/`n13`/两名并列 ⇒ `null`）· `--label` **必须能压过误导性文件名** · sidecar 双向 · 判决规则（含"0.2 允许更粗"的**前提**）· 表格与 exit code · `selftest()` 四正例两对照。
+- **用户路径**：验收包 `README.txt` 第 3 步改写（**同一块板用四个喷嘴各打一次** —— 喷嘴是切片软件/打印机的设置、不是文件 + 命名 + 一条命令 + 三种判决的含义）、`docs/USE.md` §5 与命令清单同步；并**改掉 USE/README 里"让你拍近一点"那句**（D76 的教训对 MTF 板同样成立：角标在板四角，拍近就出画 ⇒ 连登记都做不到；正确动作是改用 300 dpi 扫描或如实接受"这一档读不出"）。
+
+**③ 实测**
+
+- `node tools/mtf-matrix.mjs --selftest` ⇒ 四行全 `names-itself`、`MTF MATRIX SELFTEST: pass (4 nozzles named themselves, 2 controls held)`、**exit 0**。
+- 真文件路径（`.tmp/mtf-matrix/`：四张 `--print-ew` 仿真件 + 一份 spec）：**文件名标签 ⇒ 4/4 `names-itself`、exit 0**；**sidecar 标签 ⇒ 同上**；**故意错标** `--label 0.8=n04.png` ⇒ 该行 `mismatch`、**exit 1**；目录不存在 ⇒ **exit 2**；`--json` 写出 `tool/version/spec/dir/provenance/summary/rows/measurements`。
+- 门限：单测 **`tests 348 · pass 348 · fail 0`、`SUITE_EXIT=0`**（本轮 +6 例）· `verify --gate all` ⇒ **`ALL GATES PASS`（6/7 evaluated）`VERIFY_EXIT=0`** · `check-docs-tables` **干净** · `acceptance-kit.ps1` **`KIT_EXIT=0`**（16 个 3MF 过 G8 子集、README 已含新步骤）。
+- **门限总账不变**：✅5（G0 G1 G3 G5 G7）· 🟡5（G2 G6 G8 G9 G10）· ⬜1（G4）。**G10 没有被本轮变绿**：进程内半边就绪，真打印机仍未跑。
+
+**④ 没做的事（如实）**：`--provenance real-print` 只是**记录用户的话**，仿真件永远不能当 G10 证据；判决要等用户按 README 打印四块板、拍四张照片。本轮改动只在 `tools/` 与 `docs/`（不进 web bundle）⇒ 没跑 `build-web`/`check-dist`。
+
+**用户指示**：本轮是持久目标的自动续跑（用户上一条直接指示是「好了可以继续」）。
 
 ### 第 91 轮（**用户报的「PDF 斜」是真的，而且是我们自己写出去的参数：`/Columns` 让每个主流阅读器按 3 倍行距取图 ⇒ D78 已闭；PDF 图像流从此不带任何 predictor 参数**）
 
