@@ -123,6 +123,16 @@
 
 ## 已知风险 / 待办
 
+### 第 98 轮（**用户指示「阅读交接文档，继续循环工作」⇒ 按 HANDOVER §12 进程内优先级第一项修 D83：空白白页不再被默认 INK2 色板误诊成「擦镜头」**）
+
+**① 为什么做这一条**：第 97 轮登记的 D83 是唯一 OPEN 的代码缺陷。空白页不产出错误数据，但会把用户指向错误的补救动作；这正是 D69/D71/D76 同一族的最后一处已知诊断错误。
+
+**② 修法**：`core/decode/fiducial.js` 新增 `inkRangeRatio()`。它从 `inkness` 的 **p1/p99 动态范围**与 **峰值到 p99 的尾部比例**判断图内是否基本均匀；两者都低于 `BLANK_INK_RANGE_RATIO = 0.02` 时，在阈值阶梯之前返回 `blank-image`。范围量不依赖底色，因此纯白页相对 INK2 纸色 `[246,242,234]` 整体偏亮时也不会再被当成大片墨点。峰值尾部条件同时避免把「只有少量稀疏墨块」的合法图误判为空白。
+
+**③ 阳性对照**：`tests/unit/fiducial-corner-damage.test.mjs` 新增 D83 用例，纯白页带 INK2 底色必须判 `blank-image`；同文件原有 D69 用例继续证明平光/糊图仍判 `no-contrast`，原有正常页与损伤页用例继续证明可读路径未动。CLI 实跑两条：默认 INK2 与显式 PAPER1 都打印 `markers/blank-image`、exit 2、不写盘。
+
+**④ 门限**：单测 **`tests 366 · pass 365 · fail 0 · skipped 1`、exit 0**（1 条 skip 是本机禁 spawn Python 的已知 PIL 对拍）；`verify --gate all` 打印 **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**；`build-web` + `check-dist` 的 **G9 CHECK: all 13 assertions pass**；`smoke-sender` 与 `smoke-capture` 全绿；完整 `usability.ps1` **247 s、全腿 PASS、exit 0**。**总账不变**：✅5 · 🟡5 · ⬜1。
+
 ### 第 97 轮（**用户指示「暂停所有的动作，编写交接文档」⇒ 本轮只做交接：D83 登记为 OPEN、600 dpi 重跑中止、两处未完成的 CLI 改动按纪律还原；`docs/HANDOVER.md` 全量重写**）
 
 **① 用户指示**：「暂停所有的动作，编写交接文档，详细的」⇒ 持久目标转为 **paused**；本轮**不再新增代码**。

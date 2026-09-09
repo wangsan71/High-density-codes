@@ -139,6 +139,21 @@ test('a washed-out capture is diagnosed as no-contrast, not as a framing problem
   const cut = findMarkers(cropped, {});
   assert.notEqual(cut.reason, 'no-contrast', `a cropped but well-exposed page must not be called no-contrast (ratio ${cut.flatRatio})`);
 });
+test('a blank white page stays blank even when it is brighter than the assumed substrate (D83)', () => {
+  const white = {
+    width: 400,
+    height: 300,
+    pixels: new Uint8Array(400 * 300 * 4).fill(255),
+    substrate: [246, 242, 234], // INK2's natural-PLA background
+  };
+  const found = findMarkers(white, {});
+  assert.equal(found.ok, false, 'a blank page must never become acceptable');
+  assert.equal(found.reason, 'blank-image', `got ${found.reason}`);
+  assert.ok(found.flatRangeRatio < 0.02, `the substrate-relative image still had dynamics: ${found.flatRangeRatio}`);
+
+  const exactPaper = { ...white, substrate: [255, 255, 255] };
+  assert.equal(findMarkers(exactPaper, {}).reason, 'blank-image', 'the pre-existing PAPER1 blank path must remain intact');
+});
 test('a real page with its corner damaged in frame is refused, and the report describes markers, not lattice', async () => {
   const base = await cleanPage();
 

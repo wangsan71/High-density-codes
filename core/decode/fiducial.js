@@ -102,6 +102,34 @@ export function medianInknessRatio(ink, samples = 20000) {
   return s[s.length >> 1] / max;
 }
 
+/**
+ * Robust dynamic range of the inkness signal, independent of the assumed substrate.
+ *
+ * A blank white page is only blank relative to the ink/paper difference in the image itself.
+ * Under the default INK2 palette the assumed paper is tinted ([246,242,234]), so a pure-white
+ * scan is uniformly brighter than the substrate and every pixel binarises as ink. The p99-p1
+ * range stays zero in that case, while a page with any real ink/paper separation has a large
+ * range. p1/p99 rather than min/max prevent a handful of dust specks from turning a blank page
+ * into a contrast diagnosis.
+ */
+export function inkRangeRatio(ink, samples = 20000) {
+  const v = ink && ink.values ? ink.values : ink;
+  const max = ink && ink.max !== undefined ? ink.max : (v && v.length ? Math.max(...v) : 0);
+  if (!v || v.length < 4 || !(max > 0)) return { p1: 0, p99: 0, range: 0, ratio: 0, tailRatio: 0 };
+  const step = Math.max(1, Math.floor(v.length / samples));
+  const s = [];
+  for (let i = 0; i < v.length; i += step) s.push(v[i]);
+  s.sort((a, b) => a - b);
+  const p1 = s[Math.floor((s.length - 1) * 0.01)];
+  const p99 = s[Math.ceil((s.length - 1) * 0.99)];
+  const range = p99 - p1;
+  const tail = max - p99;
+  return { p1, p99, range, ratio: range / max, tailRatio: tail / max };
+}
+
+/** Above this range ratio a capture has usable ink/paper dynamics; see inkRangeRatio. */
+export const BLANK_INK_RANGE_RATIO = 0.02;
+
 /** Above this ratio the capture has no usable ink/paper separation (see medianInknessRatio). */
 export const FLAT_CAPTURE_RATIO = 0.5;
 
@@ -323,6 +351,23 @@ const SQUARE_FILL = 0.5;
 export function findMarkers(bitmap, opts = {}) {
   const base = binarize(bitmap, opts);
   if (base.inkCount < 32) return { ok: false, reason: 'blank-image', threshold: base.threshold };
+  // A blank page can be brighter than an assumed tinted substrate, which makes inkCount huge.
+  // Classify it from its own dynamic range before the threshold ladder turns "no ink at all"
+  // into "the lens needs cleaning" (DEFECTS D83).
+  const rangeInfo = inkRangeRatio(base.inkness);
+  if (rangeInfo.ratio < BLANK_INK_RANGE_RATIO && rangeInfo.tailRatio < BLANK_INK_RANGE_RATIO) {
+    return {
+      ok: false,
+      reason: 'blank-image',
+      threshold: base.threshold,
+      flatRangeRatio: rangeInfo.ratio,
+      flatTailRatio: rangeInfo.tailRatio,
+      inkRange: rangeInfo.range,
+      note:
+        `the image inkness range ${rangeInfo.range.toFixed(2)} is ${(rangeInfo.ratio * 100).toFixed(1)}% of its peak, ` +
+        `and the top 1% of samples are only ${(rangeInfo.tailRatio * 100).toFixed(1)}% below that peak, so it is effectively uniform`,
+    };
+  }
   // The ladder used to be one-sided: 1, 1.35, 1.7, 2.1 -- it could only get
   // STRICTER. That is the right direction when a low threshold bridges the lattice
   // into a mesh, but it is the wrong direction when the capture leaves only the
