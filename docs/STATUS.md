@@ -123,6 +123,38 @@
 
 ## 已知风险 / 待办
 
+### 第 77 轮（**D68 闭合：数据板的网格补上四角标记 —— 没有它，印出来的码牌照片登记不了**）
+
+**这轮修的是一个"看起来全了、其实不能用"的缺口**：`core/mesh/plate.js` 的 `facts.notModelled` 一直明写"板材只带点阵、不带角标"，理由是角标线宽在 `core/render` 里是像素量、而 `MESH-CONTRACT.md` §3 不许凭空发明半径。后果不是"少点装饰"，而是**用户按手册印一块 `PL-D2` 码牌、拍照回来，`receive --photo` 的 `findMarkers` 找不到四角** ⇒ G10 的实机那一半根本走不通。
+
+**修法（不发明任何数字）**：角标几何全部取自 `pageLayout()` 的 `layout.fiducials`（像素）按 `mmPerPx` 换算 —— 中心 `(f.x,f.y)`、半边 `f.half`、**环宽 = 该标记自己的 `f.ringPx`**（布局给的是 `max(cellPx,ewPx)` ⇒ ≥1 EW；薄于一格 EW 时装配**直接拒绝**）。空心角标 = 外方框减内方框，用第 76 轮的 `rectilinear.js` 挤出（逐对象水密）。四个标记进 `relief-ink0` 桶 ⇒ **object 划分不变**（还是底板 + 每料一岛），G8 的部件判据一字未改。
+
+**判据必须跟着长**：标记按设计落在点阵之外的静区里，所以"点阵外不得有料"这条判据会**误杀**它们。做法不是放水，而是**让声明成为被检查的陈述**：`facts.markers` 声明位置与期望面积，投影对拍只排除**声明过**的标记，且**每个被声明的标记必须真的在、面积对得上（<8%）**。两侧同一条规则：JS `projectTopToCells({markers})` 与 `ref/verify_model.py` 新增 `g8-3/marker-material`。单测里带**反例**：同一批三角形**不声明**标记 ⇒ 必须红（否则"标记"两个字可以随便写）。
+
+**实测（真命令）**：
+
+- `node cli/pskit.mjs verify --gate G8` ⇒ PASS，`PL-D2@0.4 -> 3 objects, **378064** triangles`（比上一轮 377964 **正好多 100** = 3 个实心角标 ×12 + 1 个空心 ×64）。
+- `python ref/verify_model.py --dir .tmp/m5verify77` ⇒ **`RESULT: PASS (62 checks, 0 failed)`**，其中新增行 `PASS g8-3/marker-material  4 marker(s) measured, areas vs declared: tl=121.1467, tr=121.1467, bl=121.1467, br=107.2686`（空心角标比实心小 13.88mm² = 内方框面积 ✓）、`PASS g8-3/no-straddling-material  0 triangles cross a cell boundary, 0.000e+00 mm^2 of material outside the lattice (markers excluded: 4 declared)`。
+- `python ref/verify_model.py --dir .tmp/m5verify77 --selftest` ⇒ **`RESULT: PASS (11 checks)`、`all broken copies were rejected`**（修完匹配算法后重跑，确认没有把检查器弄瞎）。
+- 单测 `tests/unit/mesh-3mf.test.mjs` **30/30**（新增标记断言 + 不声明即红的反例）。
+
+**顺带修掉两个真问题（都是实测暴露、不是推测）**：
+
+1. **判定框不能用 4 位小数**：facts 里原本 `round4()` 存标记框，而待判网格是**焊接过**的（6 位小数）⇒ 框可能比顶点窄 5e-5mm ⇒ 实测两个标记读成 `0.000mm²`、10 个三角形被报成"跨界"。改成**全精度**存框 + 判定容差 **1 µm**（比任何真实几何错误小三个数量级）。
+2. **`cross/same-triangle-multiset` 的匹配算法是贪心的、会漏配**：原来"按排序位 ±64 的窗口找最近的未用元素"，加了 4 个标记后**末尾 56 个三角形配不上**、最大偏差报成 **169.8mm**（把 `(177.09,8.52)` 配到 `(185.67,178.34)`）—— 而"同序号逐点"那条 `max 1e-3` 是通过的 ⇒ **不是几何不同，是匹配算法把窗口里的候选先用光了**。换成**按坐标分箱（3 位小数 + 3×3×3 邻域，边界跳格由邻域吸收）**，判据**一字未改**（`unmatched==0 且 dev ≤ 1e-3`）⇒ 现在实测 `max deviation 7.454e-06 mm, 0 unmatched of 425488`（float32 噪声量级）。
+
+
+**本轮门限复跑（第 77 轮，全部实测）**：
+
+- 单测：`node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ **`tests 335 · pass 335 · fail 0 · duration_ms 146840`、exit 0**（本轮没有新增用例文件，是 `mesh-3mf.test.mjs` 内新增断言 + 反例）。
+- 进程内门限：`node cli/pskit.mjs verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**；G8 侧 `PL-D2@0.4 -> 3 objects, 378064 triangles`（自列未评估 G4 G6 G9 G10 ⇒ 不得引用成「全部门限通过」）。
+- **独立解析侧**：`python ref/verify_model.py --dir .tmp/m5verify77` ⇒ **`PASS (62 checks, 0 failed)`**；`--selftest` ⇒ **`PASS (11 checks)`**、`all broken copies were rejected`。
+- 端到端冒烟：`& .\tools\usability.ps1` ⇒ **exit 0、235s**（3D 腿含 `send --format 3mf,stl` + G8 `--file`）。
+- 真信道探针：`& .\tools\mtf-probe.ps1` ⇒ **0 FAIL / 40s**（回归：校准板网格与数据板网格共用 `rectilinear.js`）。
+- 台账表格：`node tools/check-docs-tables.mjs` ⇒ `clean -- 304 rows in 52 tables`、exit 0。
+
+**仍未做（如实）**：真打印机印一次、真手机拍一次（G10/G4）—— 本轮只把"印出来能被找到"这件事做进了产物；**照片里能不能真的锁住浮雕角标**仍然只有真机能回答（单色板上角标靠阴影，双色板上靠料色，两者都没在真照片上验过）。
+
 ### 第 76 轮（**D67 闭合：校准板有了可打印的 3MF/STL —— 而且"水密"是构造出来的，不是希望**）
 
 **这轮补的是第 75 轮自己留下的窟窿**：上一轮交付了"能量喷嘴的板"，但用户**印不出来**（只有外观光栅）。本轮把它变成实物，顺带做掉一个只有做这件事才会暴露的几何问题。

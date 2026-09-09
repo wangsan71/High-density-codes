@@ -400,11 +400,26 @@ function centroidsSorted(tris) {
 test('投影对拍：从**文件里**的三角形逐格复现渲染掩码，面积差远小于 8%', () => {
   const f = plateFixture();
   const { tris } = fileTriangles(f.bytes);
-  const rep = projectTopToCells(tris, { geom: f.geom, layout: f.layout, levels: f.levels });
+  // 四角标记按设计落在点阵之外的静区里（D68）：只有 facts 声明了它们的位置，对拍才知道
+  // 那部分料是"标记"而不是"点阵外长出来的料"。下面紧跟一条反例证明这条声明是承重的。
+  const rep = projectTopToCells(tris, { geom: f.geom, layout: f.layout, levels: f.levels, markers: f.model.facts.markers });
   assert.equal(rep.ok, true, JSON.stringify(rep.detail));
   assert.equal(rep.cellsOverTolerance, 0);
   assert.equal(rep.inkedMismatch, 0);
   assert.equal(rep.straddlingTriangles, 0);
+  // 反例（同一批三角形、不声明标记）⇒ 必须被判成"点阵外有料"
+  const undeclared = projectTopToCells(tris, { geom: f.geom, layout: f.layout, levels: f.levels });
+  assert.equal(undeclared.ok, false, '不声明标记就应当红 —— 否则"标记"这四个字可以随便写');
+  assert.ok(undeclared.materialOutsideLatticeMm2 > 100, `标记面积应当被计入点阵外：${undeclared.materialOutsideLatticeMm2}`);
+  // 每个被声明的标记必须真的在、面积对得上
+  assert.equal(rep.markers.length, 4);
+  for (const m of rep.markers) {
+    assert.equal(m.ok, true, `${m.role} marker area ${m.measuredMm2} vs declared ${m.expectedMm2}`);
+    assert.ok(m.upTriangles > 0, `${m.role} marker has no up-facing triangles`);
+  }
+  const hollow = rep.markers.find((m) => !m.solid);
+  const solid = rep.markers.find((m) => m.solid);
+  assert.ok(hollow.expectedMm2 < solid.expectedMm2, '空心角标的墨面积必须小于实心角标');
   assert.ok(rep.maxPct < PROJECTION_TOL_PCT, `max ${rep.maxPct}% 必须 < ${PROJECTION_TOL_PCT}%`);
   assert.ok(rep.maxPct < 3, `实测应当在 1.5% 以内（24 段多边形 vs 圆），实得 ${rep.maxPct.toFixed(3)}%`);
   assert.equal(rep.upTriangles > 0, true);

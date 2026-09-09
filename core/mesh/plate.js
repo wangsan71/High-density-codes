@@ -57,6 +57,7 @@
  */
 
 import { boxTriangles, ringTriangles, discTriangles, weldTriangles, expandIndexedTriangles, boundingBox } from './solids.js';
+import { extrudeRectilinear, subtractRects } from './rectilinear.js';
 import { splitCellLevel } from '../protocol.js';
 import { dotRadiusForRho, rhoFor } from '../render/glyphs.js';
 import { buildCoverageTiles } from '../render/raster.js';
@@ -75,6 +76,9 @@ export const QUIET_MM = 6.0;
 
 /** 顶点焊接的小数位数；3MF 的坐标文本用同一位数（见 threeMF.js）。 */
 export const WELD_DECIMALS = 6;
+
+/** 只用于 facts 里的可读数字（几何本身一律保留全精度）。 */
+const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /** 圆分段下限/上限（偶数）：24 段 ⇒ 多边形面积偏差 (2π/24)²/6 ≈ 1.1%。 */
 export const MIN_FACETS = 24;
@@ -259,6 +263,51 @@ export function buildPlateModel({ geom, levels, layout, mono = false, palette = 
     }
   }
 
+
+  // ── 四角标记（D68）────────────────────────────────────────────────────────────
+  // 没有标记的板材**照片登记不了**：`receive --photo` 的 findMarkers 找不到四角，G10 的实机
+  // 那一半就根本走不通。几何**不发明**任何半径：尺寸直接取自 `layout.fiducials`（像素）按
+  // mmPerPx 换算，环宽 = 该标记自己的 `ringPx`（页面布局给的是 max(cellPx, ewPxGuess) ⇒
+  // ≥1 EW，可打印）。三个实心 + 一个空心（空心角决定朝向），与纸面同一套约定。
+  // 它们离点阵至少一个 cell（静区 5 cells，标记占 1..4 cells）⇒ 不与任何格子接触。
+  const markerSolids = [];
+  for (const f of layout.fiducials) {
+    const halfMm = f.half * mmPerPx;
+    const ringPx = Math.max(1, f.ringPx ?? Math.round(halfMm / 4 / mmPerPx));
+    const ringMm = ringPx * mmPerPx;
+    if (ringMm + 1e-9 < ewMm) {
+      throw new Error(
+        `buildPlateModel: ${f.role} marker ring ${ringMm.toFixed(3)}mm is thinner than one extrusion width ${ewMm}mm -- ` +
+          'a marker that cannot be printed cannot be found, and inventing a wider ring would change the geometry the decoder predicts',
+      );
+    }
+    const cxMm = f.x * mmPerPx;
+    const cyMm = pageHMm - f.y * mmPerPx;
+    const outer = { x0: cxMm - halfMm, x1: cxMm + halfMm, y0: cyMm - halfMm, y1: cyMm + halfMm };
+    const inner = f.solid
+      ? null
+      : { x0: outer.x0 + ringMm, x1: outer.x1 - ringMm, y0: outer.y0 + ringMm, y1: outer.y1 - ringMm };
+    const e = extrudeRectilinear(subtractRects(outer, inner ? [inner] : []), { zBottom: PLATE_MM, zTop: reliefTopMm(0) });
+    if (!e.ok) throw new Error(`buildPlateModel: ${f.role} marker could not be extruded: ${e.reason}`);
+    buckets[0].parts.push(e.triangles);
+    buckets[0].solids += 1;
+    const outerArea = (outer.x1 - outer.x0) * (outer.y1 - outer.y0);
+    const innerArea = inner ? (inner.x1 - inner.x0) * (inner.y1 - inner.y0) : 0;
+    markerSolids.push({
+      role: f.role,
+      solid: !!f.solid,
+      // Full precision, NOT rounded: the projection check decides "inside the declared marker"
+      // with a 1e-9 tolerance, and a box rounded to 4 decimals can shrink by 5e-5mm and exclude
+      // its own boundary vertices -- measured (two markers read 0.000mm2 and 16 triangles
+      // "straddled"). Readability is not worth a false defect.
+      outerMm: { x0: outer.x0, x1: outer.x1, y0: outer.y0, y1: outer.y1 },
+      ringMm,
+      topMm: reliefTopMm(0),
+      expectedMm2: outerArea - innerArea,
+      quads: e.quads,
+    });
+  }
+
   const paletteId = palette || (colourLevels > 2 ? 'INK4' : colourLevels > 1 ? 'INK2' : 'PAPER1');
   const pal = getPalette(paletteId);
   const objects = [];
@@ -380,10 +429,17 @@ export function buildPlateModel({ geom, levels, layout, mono = false, palette = 
         'internal faces. It is not a boolean union, and MESH-CONTRACT.md §4 forbids claiming one -- slicers resolve the overlap by ' +
         'treating each closed shell as its own extrusion, which is exactly the per-object reading used here.',
     },
+    /**
+     * 四角标记（D68，第 77 轮）：尺寸来自 `layout.fiducials` 的像素换算，环宽 = 该标记自己的
+     * `ringPx`。投影对拍与独立解析侧（`ref/verify_model.py`）靠这份清单把"点阵之外的料"分成
+     * "标记"与"缺陷"两类 —— 没有它，静区里的标记会被判成"点阵外长出料"。
+     */
+    markers: markerSolids,
     // 模型里没有建模的东西也要说清楚，别让人以为文件"看起来全了"。
     notModelled: [
-      'corner fiducials and the echo strip: their radii/line widths are pixel-derived in core/render, not glyphGeometry radii, ' +
-        'and MESH-CONTRACT.md §3 forbids inventing radii -- so the plate carries the data lattice only.',
+      'the echo strip: its line widths are pixel-derived in core/render, not glyphGeometry radii, and MESH-CONTRACT.md §3 ' +
+        'forbids inventing radii. The four corner markers ARE modelled (facts.markers) -- a plate nobody can register is a ' +
+        'plate nobody can use (D68).',
     ],
     projection: null, // 由 projectTopToCells()/projectionReport() 填
   };
@@ -464,7 +520,7 @@ function clipArea(x0, y0, x1, y1, x2, y2, rect) {
  * @param {number} [o.tolPct=8] 逐格面积差容差（百分比）
  * @param {number} [o.floorZmm=PLATE_MM] 低于这个 Z 的朝上面不算浮雕（底板顶面）
  */
-export function projectTopToCells(triangles, { geom, layout, levels, tolPct = PROJECTION_TOL_PCT, floorZmm = PLATE_MM } = {}) {
+export function projectTopToCells(triangles, { geom, layout, levels, tolPct = PROJECTION_TOL_PCT, floorZmm = PLATE_MM, markers = null } = {}) {
   if (!geom || !layout || !levels) throw new Error('projectTopToCells: needs {geom, layout, levels}');
   const shapeCh = (geom.channels || []).find((c) => c.name === 'shape');
   if (!shapeCh) throw new Error(`projectTopToCells: profile ${geom.profile} has no shape channel`);
@@ -487,6 +543,24 @@ export function projectTopToCells(triangles, { geom, layout, levels, tolPct = PR
   };
   const rectOf = (c, r) => [originXmm + c * pitchMm, pageHMm - (originYmm + (r + 1) * pitchMm), originXmm + (c + 1) * pitchMm, pageHMm - (originYmm + r * pitchMm)];
 
+  // Markers are ink by design and sit in the quiet zone, i.e. *outside the lattice*. They are
+  // excluded from the lattice accounting only because the facts declare where they are, and
+  // each declared marker must then actually be there with the declared area -- otherwise
+  // "excluded" would be a hole in the check rather than a statement about the artifact.
+  const markerBoxes = (markers || []).map((m) => ({ ...m, measuredMm2: 0, upTriangles: 0 }));
+  // 1 µm, not 1e-9: the mesh under test is the *welded* one, whose vertices are rounded to
+  // WELD_DECIMALS (6) and can therefore sit up to 5e-7mm outside a box declared at full
+  // precision -- measured: two markers read 0.000mm² and 10 triangles were called straddles.
+  // 1 µm is still a thousand times smaller than any real geometry error.
+  const MARKER_BOX_TOL_MM = 1e-3;
+  const markerAt = (ax, ay, bx, by, cx, cy) => {
+    for (const m of markerBoxes) {
+      const { x0, x1, y0, y1 } = m.outerMm;
+      const inside = (x, y) => x >= x0 - MARKER_BOX_TOL_MM && x <= x1 + MARKER_BOX_TOL_MM && y >= y0 - MARKER_BOX_TOL_MM && y <= y1 + MARKER_BOX_TOL_MM;
+      if (inside(ax, ay) && inside(bx, by) && inside(cx, cy)) return m;
+    }
+    return null;
+  };
   let upTris = 0;
   let straddling = 0;
   let outsideMm2 = 0;
@@ -500,6 +574,12 @@ export function projectTopToCells(triangles, { geom, layout, levels, tolPct = PR
     if (az <= floorZmm && bz <= floorZmm && cz <= floorZmm) continue; // 底板顶面不是浮雕
     upTris++;
     const area = nz / 2;
+    const marker = markerBoxes.length ? markerAt(ax, ay, bx, by, cx, cy) : null;
+    if (marker) {
+      marker.measuredMm2 += area;
+      marker.upTriangles++;
+      continue;
+    }
     const xMin = Math.min(ax, bx, cx), xMax = Math.max(ax, bx, cx);
     const yMin = Math.min(ay, by, cy), yMax = Math.max(ay, by, cy);
     const [c0, r0] = cellOf(xMin, yMax); // 左上角：x 最小、model y 最大 ⇒ 图像行最小
@@ -554,17 +634,24 @@ export function projectTopToCells(triangles, { geom, layout, levels, tolPct = PR
     if (wantInk !== gotInk) inkedMismatch++;
   }
   const n = total || 1;
+  const markerRows = markerBoxes.map((m) => {
+    const pct = m.expectedMm2 > 1e-9 ? (Math.abs(m.measuredMm2 - m.expectedMm2) / m.expectedMm2) * 100 : m.measuredMm2 > 1e-9 ? Infinity : 0;
+    return { role: m.role, solid: m.solid, expectedMm2: m.expectedMm2, measuredMm2: m.measuredMm2, pct, upTriangles: m.upTriangles, ok: pct <= tolPct };
+  });
+  const markersOk = markerRows.every((r) => r.ok);
   return {
     cells: total,
     upTriangles: upTris,
     straddlingTriangles: straddling,
     materialOutsideLatticeMm2: outsideMm2,
+    markers: markerRows,
+    markerMaterialMm2: markerRows.reduce((a, r) => a + r.measuredMm2, 0),
     tolerancePct: tolPct,
     maxPct,
     meanPct: sumPct / n,
     cellsOverTolerance: over,
     inkedMismatch,
-    ok: total > 0 && over === 0 && inkedMismatch === 0 && straddling === 0 && outsideMm2 < 1e-9,
+    ok: total > 0 && over === 0 && inkedMismatch === 0 && straddling === 0 && outsideMm2 < 1e-9 && markersOk,
     worst,
     reference: ref,
     detail,
@@ -578,6 +665,7 @@ export function projectionReport(model, opt = {}) {
     layout: model.layout,
     levels: model.levels,
     tolPct: opt.tolPct ?? PROJECTION_TOL_PCT,
+    markers: model.facts ? model.facts.markers : null,
   });
   model.facts.projection = {
     cells: out.cells,
@@ -588,6 +676,8 @@ export function projectionReport(model, opt = {}) {
     inkedMismatch: out.inkedMismatch,
     straddlingTriangles: out.straddlingTriangles,
     materialOutsideLatticeMm2: out.materialOutsideLatticeMm2,
+    markers: out.markers,
+    markerMaterialMm2: out.markerMaterialMm2,
     ok: out.ok,
     worst: out.worst,
   };

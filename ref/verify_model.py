@@ -535,26 +535,38 @@ def check_same_mesh(stl_tris, model_tris, rep):
     # 置附近 ±W 的窗口里找最接近的未使用元素。
     sa = signature(stl_tris)
     sb = signature(model_tris)
-    window = 64
+    # 匹配算法第 77 轮换过一次（**判据没变**：unmatched == 0 且 dev <= SAME_MESH_TOL_MM）。
+    # 原来是"按排序位 ±64 的窗口里找最近的未用元素"，那是一个贪心匹配：第 77 轮给数据板加了
+    # 四角标记后，末尾 56 个三角形配不到对（实测 max deviation 169.8mm、worst 把
+    # (177.09, 8.52) 配到了 (185.67, 178.34)）—— 不是几何不同（同序号逐点那条 max 1e-3 通过），
+    # 而是贪心把窗口里的候选先用掉了、尾巴上剩下的永远配不上。
+    # 换成按**坐标分箱**（3 位小数，查 3×3×3 邻域，边界跳格由邻域吸收），每个三角形只在
+    # 自己那一格及其邻格里找未用的最近质心。判据一字未改，只是**找得到**真正的对手。
+    buckets = {}
+    for j, p in enumerate(sb):
+        k = (round(p[0], 3), round(p[1], 3), round(p[2], 3))
+        buckets.setdefault(k, []).append(j)
     used = [False] * len(sb)
     dev = 0.0
     worst = None
     unmatched = 0
     for i, x in enumerate(sa):
-        lo = max(0, i - window)
-        hi = min(len(sb), i + window + 1)
+        cx, cy, cz = round(x[0], 3), round(x[1], 3), round(x[2], 3)
         best_j = -1
         best_d = None
-        for j in range(lo, hi):
-            if used[j]:
-                continue
-            d = max(abs(x[k] - sb[j][k]) for k in range(3))
-            if best_d is None or d < best_d:
-                best_d = d
-                best_j = j
-                if d == 0.0:
-                    break
-        if best_j < 0:
+        for dx in (-0.001, 0.0, 0.001):
+            for dy in (-0.001, 0.0, 0.001):
+                for dz in (-0.001, 0.0, 0.001):
+                    for j in buckets.get((round(cx + dx, 3), round(cy + dy, 3), round(cz + dz, 3)), ()):
+                        if used[j]:
+                            continue
+                        d = max(abs(x[k] - sb[j][k]) for k in range(3))
+                        if best_d is None or d < best_d:
+                            best_d = d
+                            best_j = j
+                            if d == 0.0:
+                                break
+        if best_j < 0 or best_d > SAME_MESH_TOL_MM:
             unmatched += 1
             continue
         used[best_j] = True
@@ -562,8 +574,9 @@ def check_same_mesh(stl_tris, model_tris, rep):
             dev = best_d
             worst = (i, best_j, x, sb[best_j])
     rep.add("cross/same-triangle-multiset", unmatched == 0 and dev <= SAME_MESH_TOL_MM,
-            "order-independent aligned centroid signatures: max deviation %.3e mm, %d unmatched of %d (window +/-%d)"
-            % (dev, unmatched, len(sa), window))
+            "order-independent centroid multiset (keyed by 3-decimal coordinate buckets, 3x3x3 neighbourhood): "
+            "max deviation %.3e mm, %d unmatched of %d"
+            % (dev, unmatched, len(sa)))
 
 
 def check_projection(model_tris, facts, rep):
@@ -594,6 +607,23 @@ def check_projection(model_tris, facts, rep):
     straddling = 0
     up = 0
     outside = 0.0
+    # 四角标记（D68，第 77 轮）：它们**按设计**在点阵之外的静区里。只有在 facts 声明了它们的
+    # 位置时才从"点阵外材料"里排除，且每个被声明的标记必须真的在、面积也对得上 —— 否则
+    # "排除"就成了判据上的一个洞，而不是关于产物的陈述。容差 1µm：待判的网格是**焊接过**的
+    # （坐标 6 位小数），顶点可能落在声明框外最多 5e-7mm。
+    marker_boxes = facts.get("markers") or []
+    marker_meas = [0.0] * len(marker_boxes)
+    marker_tris = [0] * len(marker_boxes)
+    marker_tol = 1e-3
+
+    def marker_index(a, b, c):
+        for mi, m in enumerate(marker_boxes):
+            o = m["outerMm"]
+            x0, x1, y0, y1 = o["x0"], o["x1"], o["y0"], o["y1"]
+            if all(x0 - marker_tol <= p[0] <= x1 + marker_tol and y0 - marker_tol <= p[1] <= y1 + marker_tol for p in (a, b, c)):
+                return mi
+        return None
+
     for (a, b, c) in model_tris:
         nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
         if nz <= 0:
@@ -601,6 +631,12 @@ def check_projection(model_tris, facts, rep):
         if max(a[2], b[2], c[2]) <= plate:
             continue  # 底板顶面不是浮雕
         up += 1
+        if marker_boxes:
+            mi = marker_index(a, b, c)
+            if mi is not None:
+                marker_meas[mi] += nz / 2.0
+                marker_tris[mi] += 1
+                continue
         xs = [a[0], b[0], c[0]]
         ys = [a[1], b[1], c[1]]
         c0 = int(math.floor((min(xs) - ox) / pitch))
@@ -649,7 +685,21 @@ def check_projection(model_tris, facts, rep):
     rep.add("g8-3/second-reference-analytic-circles", max(pcts_analytic) < PROJ_TOL_PCT if pcts_analytic else False,
             "same mesh areas vs pure-Python ideal-circle areas: max %.3f%% mean %.3f%% (raster-vs-analytic disagreement itself: the two references agree to that order)"
             % (max(pcts_analytic) if pcts_analytic else 999.0, sum(pcts_analytic) / n))
-    rep.add("g8-3/no-straddling-material", straddling == 0 and outside < 1e-9, "%d triangles cross a cell boundary, %.3e mm^2 of material outside the lattice" % (straddling, outside))
+    rep.add("g8-3/no-straddling-material", straddling == 0 and outside < 1e-9, "%d triangles cross a cell boundary, %.3e mm^2 of material outside the lattice (markers excluded: %d declared)" % (straddling, outside, len(marker_boxes)))
+    # 每个被声明的标记必须真的在、面积对得上：这条让"标记被排除"成为被检查的陈述，而不是洞。
+    if marker_boxes:
+        bad_marker = []
+        for mi, m in enumerate(marker_boxes):
+            want = float(m.get("expectedMm2") or 0.0)
+            got = marker_meas[mi]
+            pct = abs(got - want) / want * 100.0 if want > 1e-9 else (0.0 if got <= 1e-9 else 999.0)
+            if pct >= PROJ_TOL_PCT or marker_tris[mi] == 0:
+                bad_marker.append("%s(got %.4f want %.4f, %.2f%%, %d tris)" % (m.get("role", "?"), got, want, pct, marker_tris[mi]))
+        rep.add("g8-3/marker-material", not bad_marker,
+                "%d marker(s) measured, areas vs declared: %s%s" % (
+                    len(marker_boxes),
+                    ", ".join("%s=%.4f" % (m.get("role", "?"), marker_meas[i]) for i, m in enumerate(marker_boxes)),
+                    "" if not bad_marker else " -- BAD: " + "; ".join(bad_marker)))
     # 逐格"有/无材料"也必须一致：shape 档 0 也画外环，所以任何一格都不该是空的。
     empty = sum(1 for k in levels if mesh.get(k, 0.0) <= 0.0)
     rep.add("g8-3/every-cell-has-relief", empty == 0, "%d lattice cells with no projected relief area (level 0 still carries the outer ring)" % empty)
