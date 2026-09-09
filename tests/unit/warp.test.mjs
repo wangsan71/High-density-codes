@@ -363,6 +363,76 @@ test('a strip with no contrast is diagnosed as such, not as a damaged header (D7
   const soft = readEcho(boxBlur(base, 2), layout);
   assert.notEqual(soft.reason, 'no-contrast', `a readable strip must not be called no-contrast (separation ${soft.separation})`);
 });
+test('a scaled print still decodes: the marker homography absorbs the scale (D8 measured)', async () => {
+  // D8 has been 'not quantified' in the ledger since round 8, and USE.md told users that scaling
+  // 'breaks the geometry'. Measured here: the four corner markers define the homography, so any
+  // AFFINE rescale of the printed sheet -- uniform or not -- is undone exactly. What is fatal is
+  // losing a marker (cropping), which the control below checks.
+  const raw = new Uint8Array(1536).map((_, i) => (i * 149 + 7) & 0xff);
+  const t = await encodeTransfer(raw, { profile: 'P-M1-300' });
+  const layout = pageLayout(t.geom, 300, { sheetMm: t.geom.sheetMm });
+  const page = t.pages[0];
+  const bmp = renderPageBitmap({ geom: t.geom, levels: page.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(page.header) });
+  const sheet = bmp.sheetMm ? renderSheetBitmap(bmp) : bmp;
+  const resample = (src, sx, sy) => {
+    const W = Math.round(src.width * sx);
+    const H = Math.round(src.height * sy);
+    const out = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const fx = Math.min(src.width - 1.001, (x + 0.5) / sx - 0.5);
+        const fy = Math.min(src.height - 1.001, (y + 0.5) / sy - 0.5);
+        const x0 = Math.floor(fx);
+        const y0 = Math.floor(fy);
+        const ax = fx - x0;
+        const ay = fy - y0;
+        const o = (y * W + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          const p00 = src.pixels[(y0 * src.width + x0) * 4 + c];
+          const p10 = src.pixels[(y0 * src.width + x0 + 1) * 4 + c];
+          const p01 = src.pixels[((y0 + 1) * src.width + x0) * 4 + c];
+          const p11 = src.pixels[((y0 + 1) * src.width + x0 + 1) * 4 + c];
+          out[o + c] = Math.round((p00 * (1 - ax) + p10 * ax) * (1 - ay) + (p01 * (1 - ax) + p11 * ax) * ay);
+        }
+        out[o + 3] = 255;
+      }
+    }
+    return { width: W, height: H, pixels: out, substrate: src.substrate };
+  };
+  const decodeScaled = async (img) => {
+    const found = findMarkers(img, {});
+    if (!found.ok) return { ok: false, why: `markers/${found.reason}` };
+    const rect = rectifyPage(img, layout, found.quad, {});
+    if (!rect.ok) return { ok: false, why: `rectify/${rect.reason}` };
+    const echo = readEcho(rect, layout);
+    if (!echo.ok) return { ok: false, why: `echo/${echo.reason}` };
+    const read = readPageIdeal(rect, layout, t.geom, 'PAPER1');
+    let err = 0;
+    for (let i = 0; i < read.levels.length; i++) if (read.levels[i] !== page.levels[i]) err++;
+    return { ok: err === 0, err, cells: read.levels.length };
+  };
+  for (const [tag, sx, sy] of [['95%', 0.95, 0.95], ['110%', 1.1, 1.1], ['95%x100%', 0.95, 1.0], ['100%x110%', 1.0, 1.1]]) {
+    const r = await decodeScaled(resample(sheet, sx, sy));
+    assert.equal(r.ok, true, `${tag}: ${r.why || `${r.err}/${r.cells} symbol errors`}`);
+  }
+  // Control: the left margin of this layout is ~9.3mm of paper plus a 2.1mm quiet zone, so the
+  // markers start about 11.4mm in. Cutting 16mm off the left edge removes them, and that must be
+  // REFUSED rather than decoded from the three that remain (a homography needs four points).
+  const cutPx = Math.round((16 / 25.4) * 300);
+  const cropped = { width: sheet.width - cutPx, height: sheet.height, pixels: new Uint8Array((sheet.width - cutPx) * sheet.height * 4), substrate: sheet.substrate };
+  for (let y = 0; y < sheet.height; y++) {
+    for (let x = 0; x < cropped.width; x++) {
+      const from = (y * sheet.width + x + cutPx) * 4;
+      const to = (y * cropped.width + x) * 4;
+      cropped.pixels[to] = sheet.pixels[from];
+      cropped.pixels[to + 1] = sheet.pixels[from + 1];
+      cropped.pixels[to + 2] = sheet.pixels[from + 2];
+      cropped.pixels[to + 3] = 255;
+    }
+  }
+  const cut = await decodeScaled(cropped);
+  assert.equal(cut.ok, false, 'a print that lost a corner marker must be refused, not guessed');
+});
 test('blank and scrambled photos are refused, never guessed', () => {
   const blank = { width: 400, height: 300, pixels: new Uint8Array(400 * 300 * 4).fill(250), substrate: [250, 250, 246] };
   const r0 = findMarkers(blank);
