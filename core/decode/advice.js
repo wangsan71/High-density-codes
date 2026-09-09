@@ -18,7 +18,7 @@ const ADVICE = {
   'no-contrast': {
     cause:
       'the ink and the paper were not separable in this capture: more than half the picture binarises as ink, against 25-35% for a healthy page. Three things do this -- over-exposure, a glare band, or shooting from so far that the cells smear into one another. It is NOT a framing problem: the corners can be perfectly in frame and still invisible.',
-    do: 'lower the exposure (drag the brightness down before shooting), turn the flash off and move away from the reflection; then get closer or use 2x optical zoom so the code fills the frame. If you are scanning, switch auto-contrast/despeckle off. Reframing alone will not help',
+    do: 'lower the exposure (drag the brightness down before shooting), turn the flash off and move away from the reflection; get closer only while all four corner markers stay in frame (the whole page). If you are scanning, switch auto-contrast/despeckle off. Reframing alone will not help',
   },
   'no-square-candidates': {
     cause: 'no isolated square blob was found, so the corner markers are not resolvable -- usually defocus, extreme blur, or a print whose features are smaller than the camera can resolve',
@@ -223,8 +223,8 @@ const ADVICE = {
  * **手机连拍那条路真的会遇到的 reason**，其余仍走英文。
  */
 const ZH = {
-  'no-contrast': '照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— 重新取景没用。',
-  'echo-no-contrast': '页顶那条回显条（页上最细的特征）糊了：靠近一点、让页顶边进画面并对上焦；还是不行就改用更粗的档（板材 PL-G）或换成扫描仪 300 dpi。',
+  'no-contrast': '照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— 但**四个角标必须还在画面里**（拍近到角标出画就彻底定位不了）。重新取景没用。',
+  'echo-no-contrast': '页顶那条回显条（页上最细的特征）糊了：让**整页含四角**进画面、页顶边对上焦；还是不行就改用更粗的档（板材 PL-G）或换成扫描仪 300 dpi。',
   'no-square-candidates': '一个方形角标都认不出来：多半是失焦/太糊，或者打印的特征比相机能分辨的更小。靠近、2× 变焦、擦镜头；板材档请换更粗的喷嘴档。',
   'no-marker-size-cluster': '找到了方块但不是四个同样大的：页面有一部分在画面外，或者透视太强。把整页（含四角）框进画面，相机尽量与纸面平行。',
   'no-hollow-corner': '四个角标都找到了，但没有一个是空心的（朝向标）：朝向标被磨花、过曝，或拍的是板材的反面。用正面重拍，别让空心角反光。',
