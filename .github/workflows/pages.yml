@@ -1,0 +1,55 @@
+# Deploy the PSKT client pages to GitHub Pages.
+#
+# Why this exists: the PWA needs a *secure context* (https or localhost) for the service worker and
+# the camera, and a LAN http origin is refused by the browser -- that is DEFECTS D43, whose https half
+# only a real host can close. GitHub Pages gives that https origin, and the build is the same command
+# a user runs locally (`node tools/build-web.mjs`), so what is deployed is what the repo produces:
+# zero runtime dependencies, no third-party origin in any page (tools/check-dist.mjs asserts it).
+#
+# The gate on the build is the same one the user has: check-dist refuses to be green about a page
+# that loads something external, an icon that is not square, or a service-worker precache entry whose
+# bytes do not match the artifact. If it fails here, the site is not deployed.
+name: pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build the client pages (no npm install: dependencies are {} by contract)
+        run: node tools/build-web.mjs
+      - name: Assert the artifacts (zero third-party origins, CSP, SW manifest hashes)
+        run: node tools/check-dist.mjs
+      - name: Unit suite
+        run: node --test --test-isolation=none "tests/unit/**/*.test.mjs"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
