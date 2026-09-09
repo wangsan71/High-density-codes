@@ -242,7 +242,11 @@ export const isUnqualifiedPaper = (p) => !!p && p.medium !== 'plate' && (p.dpi |
  */
 export const profileOptionLabel = (id, p) =>
   `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}` +
-  (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '');
+  (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '') +
+  // Round 80: the phone40 channel measured PL-G at 8/8 byte-exact with a whole plate in one phone
+  // frame, against 0/8 for the paper profile in the same framing. The hint repeats the profile's
+  // own declared purpose (PLAN §2/§3) at the point where the choice is made.
+  (p.phoneSafe ? ' · 手机拍摄首选' : '');
 
 /**
  * Ported verbatim from cli/pskit.mjs pickPalette (a page cannot import from cli/, and a

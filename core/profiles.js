@@ -77,6 +77,14 @@ export const PROFILES = {
     id: 'PL-G', medium: MEDIUM.PLATE, pitchMm: UNIVERSAL_PITCH_MM,
     channels: [{ name: 'shape', levels: 2 }], intra: { k: 127, nsym: 127 },
     parityPct: 33, note: 'universal floor: readable on any nozzle 0.2-0.8 and any phone',
+    /**
+     * The one profile PLAN §2/§3 calls readable by any phone. Measured in round 80 through the
+     * phone40 channel preset (a whole 200mm plate inside a 1600x1200 phone frame): 8/8 transfers
+     * byte-exact, while the paper profile P-M1-300 -- whose cells land at ~2.7 px in the same
+     * framing -- was 0/8. Surfaced in the sender's profile picker so the choice is made with the
+     * measurement in view, and pinned by tests/unit/profile-picker-warning.test.mjs.
+     */
+    phoneSafe: true,
   },
   'REL-H1': {
     id: 'REL-H1', medium: MEDIUM.PLATE,

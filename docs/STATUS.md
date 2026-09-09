@@ -142,6 +142,22 @@
 | 板材 `PL-G@0.4` | `crop` | **6/8 = 75%** |
 
 ⇒ **产品结论（第一次由实测给出，而不是推断）**：手机拍整页时，**纸面档读不出来、粗档板材读得出来** —— 3.6mm 的格子在一张 1600×1200 的手机照片里还有 ~15px，而 0.85mm 的纸面格子只剩 ~2.7px。失败时两条新诊断会**分别**指向正确动作（`no-contrast` = 曝光/反光/太远；`echo-no-contrast` = 拍近/换粗档），不再让用户去重印。**仍然是仿真信道，不是真手机** ⇒ G4 判决不变。
+**同轮第二件事：把「手机该用哪一档」做进产品，而不是只写在台账里（`core/profiles.js` + 发送页 + 手册）**：
+
+- `core/profiles.js` 给 `PL-G` 加 `phoneSafe: true`（PLAN §2/§3 本来就称它是「任何喷嘴/手机必可读」的保底档，第 80 轮的 `phone40` 实测 8/8 是它的证据）；
+- `web/sender.js` 的 `profileOptionLabel()` 给带这个标记的档追加 **` · 手机拍摄首选`**（**只有它**，单测钉住：恰好一个、其余一律不带 —— 否则提示会变成噪音）；
+- `docs/USE.md` §2 开头补一段实测结论（手机用 `PL-G` 或拍近；纸面档的正确用法是扫描仪 300 dpi）。
+
+⇒ 这是**把测量变成默认选择**：用户不需要读台账，选档那一刻就看见「这个能手机拍」。
+
+**本轮门限复跑（第 80 轮第二段；`core/profiles.js` + `web/sender.js` 被改过）**：
+
+- 单测：**`tests 338 · pass 338 · fail 0 · duration_ms 151883`、exit 0**（+1 例：只有 `PL-G` 带手机提示、其余一律不带）。
+- 进程内门限：`verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**。
+- 产物级：`build-web` exit 0、`check-dist` exit 0（含 13 断言与 id 契约）。
+- 台账：`check-docs-tables` ⇒ `clean -- 313 rows in 54 tables`、exit 0。
+
+
 **阳性对照**（`tests/unit/warp.test.mjs` 新增 1 例）：同一页锐利 ⇒ 仍能读；轻微模糊（分离度 0.546）⇒ **不得**被判 `no-contrast`（否则这条诊断会吞掉真正的「条带受损」）。
 
 **本轮门限复跑（第 80 轮，全部实测；`core/decode/echo.js` 被改过，所以全套重跑）**：
