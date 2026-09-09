@@ -31,7 +31,8 @@
 param(
   [string]$Out = '.tmp\acceptance-kit',
   [int]$PlateMm = 200,
-  [int]$PaperBytes = 204800
+  [int]$PaperBytes = 204800,
+  [int]$ModuleBytes = 20000
 )
 
 $ErrorActionPreference = 'Continue'
@@ -39,7 +40,9 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $kit = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $root $Out }
 if (Test-Path $kit) { Remove-Item -Recurse -Force $kit }
-foreach ($d in 'paper', 'plates', 'mtf') { New-Item -ItemType Directory -Force -Path (Join-Path $kit $d) | Out-Null }
+foreach ($d in 'paper', 'plates', 'mtf', 'module-6', 'module-5', 'module-4') {
+  New-Item -ItemType Directory -Force -Path (Join-Path $kit $d) | Out-Null
+}
 
 $script:fails = 0
 function Fail([string]$msg) { $script:fails++; Write-Host " FAIL  $msg" }
@@ -54,8 +57,13 @@ $paperPayload = Join-Path $kit 'payload-paper.bin'
 $buf = New-Object 'byte[]' $PaperBytes
 for ($i = 0; $i -lt $PaperBytes; $i++) { $buf[$i] = [byte](($i * 167 + ($i -shr 3)) -band 255) }
 [IO.File]::WriteAllBytes($paperPayload, $buf)
+$modulePayload = Join-Path $kit 'payload-module.bin'
+$moduleBuf = New-Object 'byte[]' $ModuleBytes
+for ($i = 0; $i -lt $ModuleBytes; $i++) { $moduleBuf[$i] = [byte](($i * 197 + ($i -shr 5)) -band 255) }
+[IO.File]::WriteAllBytes($modulePayload, $moduleBuf)
 $plateHash = (Get-FileHash -Algorithm SHA256 -Path $platePayload).Hash.ToLower()
 $paperHash = (Get-FileHash -Algorithm SHA256 -Path $paperPayload).Hash.ToLower()
+$moduleHash = (Get-FileHash -Algorithm SHA256 -Path $modulePayload).Hash.ToLower()
 
 Write-Host ''
 Write-Host "PSKT acceptance kit -> $kit"
@@ -68,6 +76,21 @@ if ($LASTEXITCODE -ne 0) {
 } else {
   $pages = @(Get-ChildItem (Join-Path $kit 'paper') -Filter 'page-*.png').Count
   Ok "paper leg: $pages page PNG(s) + pack.pdf for a $PaperBytes B payload"
+}
+
+# ---- dense binary-module paper legs ------------------------------------------------
+$moduleLines = @()
+foreach ($profile in 'P-MX-300-6', 'P-MX-300-5', 'P-MX-300-4') {
+  $suffix = $profile.Substring($profile.Length - 1)
+  $dir = Join-Path $kit "module-$suffix"
+  & node cli/pskit.mjs send $modulePayload --profile $profile --format png,pdf --out $dir *> (Join-Path $kit "module-$suffix-send.log")
+  if ($LASTEXITCODE -ne 0) {
+    Fail "$profile (exit $LASTEXITCODE, see module-$suffix-send.log)"
+  } else {
+    $modulePages = @(Get-ChildItem $dir -Filter 'page-*.png' -ErrorAction SilentlyContinue).Count
+    $moduleLines += "     $profile  ->  module-$suffix\pack.pdf  ($modulePages page PNGs)"
+    Ok "$profile -> $modulePages page PNG(s) + pack.pdf"
+  }
 }
 
 # ---- plate legs ------------------------------------------------------------------------
@@ -108,7 +131,15 @@ if ($mfCount -gt 0) { Ok "G8 subset check on $mfCount 3MF file(s)" }
 # ---- README for the human half ---------------------------------------------------------
 $template = Get-Content (Join-Path $PSScriptRoot 'acceptance-readme.txt') -Raw -Encoding utf8
 $plateLines = (($plateDirs | ForEach-Object { "     " + $_.profile + " @ " + $_.nozzle + "mm  ->  " + $_.dir + "\page-000.3mf / .stl" }) -join "`n")
-$readme = $template.Replace('{{PAPER_BYTES}}', "$PaperBytes").Replace('{{PAPER_SHA}}', $paperHash).Replace('{{PLATE_SHA}}', $plateHash).Replace('{{PLATE_MM}}', "$PlateMm").Replace('{{PLATE_LINES}}', $plateLines)
+$moduleReadmeLines = ($moduleLines -join "`n")
+$readme = $template.Replace('{{PAPER_BYTES}}', "$PaperBytes")
+$readme = $readme.Replace('{{PAPER_SHA}}', $paperHash)
+$readme = $readme.Replace('{{MODULE_BYTES}}', "$ModuleBytes")
+$readme = $readme.Replace('{{MODULE_SHA}}', $moduleHash)
+$readme = $readme.Replace('{{MODULE_LINES}}', $moduleReadmeLines)
+$readme = $readme.Replace('{{PLATE_SHA}}', $plateHash)
+$readme = $readme.Replace('{{PLATE_MM}}', "$PlateMm")
+$readme = $readme.Replace('{{PLATE_LINES}}', $plateLines)
 [IO.File]::WriteAllText((Join-Path $kit 'README.txt'), $readme, (New-Object Text.UTF8Encoding($false)))
 
 Write-Host ''

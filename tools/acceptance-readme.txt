@@ -6,6 +6,8 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
 包里有什么
   payload-paper.bin    纸面那一路要传的文件（{{PAPER_BYTES}} B），sha256 {{PAPER_SHA}}
   paper/               纸面页 page-000.png... + pack.pdf
+  payload-module.bin   高密度模块纸面要传的文件（{{MODULE_BYTES}} B），sha256 {{MODULE_SHA}}
+{{MODULE_LINES}}
   payload-plate.bin    板材那一路要传的文件（6 B），sha256 {{PLATE_SHA}}
   plates/              码牌（每个喷嘴一块，**只打 page-000 那一块**）
 {{PLATE_LINES}}
@@ -24,6 +26,18 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
         (Get-FileHash -Algorithm SHA256 got-paper.bin).Hash
       应当等于 {{PAPER_SHA}}
   ✗ 不一致：把 1c 的完整输出发回来（它会点名哪一页读不出）。
+
+第 1b 步 · 高密度模块纸面（验新的二进制模块表示）
+  1b-a. 依次打印 module-6\pack.pdf、module-5\pack.pdf、module-4\pack.pdf：
+        选 100% / 实际大小，**关掉**"适应页面"
+  1b-b. 每份都用 300 dpi、彩色扫描，**关掉**自动裁剪/去边界，**存成 PNG 或 TIFF**
+  1b-c. 分别接收（把 4 换成实际模块尺寸）：
+          node cli/pskit.mjs receive scans-module-6 --photo --profile P-MX-300-6 --out got-module-6.bin
+          node cli/pskit.mjs receive scans-module-5 --photo --profile P-MX-300-5 --out got-module-5.bin
+          node cli/pskit.mjs receive scans-module-4 --photo --profile P-MX-300-4 --out got-module-4.bin
+  1b-d. 三个输出文件的 sha256 都应当等于 {{MODULE_SHA}}
+  ✗ 任一档读不出：把对应命令的完整输出发回来；真平板扫描是这三档从“模拟 16/16”
+      变成“真实已验证”的必要一步。
 
 第 2 步 · 板材（验 G10：每个喷嘴一块码牌）
   2a. 把 plates\ 里**每个**喷嘴的 page-000.3mf 丢进切片软件，按那个喷嘴打一块

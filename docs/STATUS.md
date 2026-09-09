@@ -126,6 +126,14 @@
 
 ## 已知风险 / 待办
 
+### 第 100 轮（**把模块档接进用户硬件验收包：`acceptance-kit.ps1` 现在生成 6/5/4 三份 pack.pdf 与真平板扫描命令**）
+
+**① 为什么做**：第 99 轮的 `P-MX-300-4/5/6` 只有模拟信道证据。真平板扫描需要用户执行，但原验收包只生成默认 `P-M1-300` 纸面产物；用户要自己拼 `send --profile` 命令，容易漏掉一档或打印错误尺寸。
+
+**② 改动**：`tools/acceptance-kit.ps1` 增加 `module-6/module-5/module-4` 目录，用同一个 20,000 B payload 分别生成 PNG + 真尺寸 `pack.pdf`；`tools/acceptance-readme.txt` 新增第 1b 步，写明 100% 打印、300 dpi 扫描、关闭自动裁剪，并给出三档 `receive` 与 SHA-256 对比命令。`docs/USE.md` §5 同步说明。
+
+**③ 验证**：`& .\tools\acceptance-kit.ps1 -Out .tmp\acceptance-kit-module2` exit 0；三档均生成 3 页 PNG + `pack.pdf`；原有纸面、五块码牌、MTF 板全部生成；16 个 `.3mf` 全部通过 G8 子集；生成的 `README.txt` 三个占位符替换完成。真实平板扫描仍未执行，模块档维持「真机待验」。
+
 ### 第 99 轮（**新物理编码 `module`：纸面二进制实心模块阵，保留原有协议主链，P-MX-300-4/5/6 三档落地**）
 
 **① 用户目标**：保留 `profiles -> packLevels -> RS -> frame -> marker/homography/echo -> assemble` 主链，只增加一种物理表示。纸面模块为实心方块或空白，1 module = 1 bit；timing/registration 行帮助定位；解码先单应校正，再做局部自适应二值化；低置信模块标擦除交给 RS；回显头使用独立大模块；先做 6px，再试 5px 与 4px。
