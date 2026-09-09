@@ -531,6 +531,15 @@ test('PNG+TIFF: pillow (ref/verify_raster.py) agrees on every dumped sample', (t
       t.skip(`cannot spawn python here (${run.error ? run.error.code || run.error.message : 'killed'})`);
       return;
     }
+    // ref/verify_raster.py exits 2 when pillow is not installed, with that message on stderr. That
+    // is "this machine cannot run the third-party check", not "our writers disagree with pillow" --
+    // and it is exactly what happens on a CI runner, which has python but not pillow (measured: the
+    // GitHub Pages run failed here with "verify_raster.py exited 2"). Skip loudly; the check still
+    // runs wherever pillow exists, and the workflow installs it so CI does run it.
+    if (run.status === 2) {
+      t.skip('python is present but pillow is not installed (pip install pillow) -- third-party cross-check skipped');
+      return;
+    }
     assert.equal(run.status, 0, `verify_raster.py exited ${run.status}`);
     for (const f of files) assert.ok(fs.existsSync(f), `${f} should have been written`);
   } finally {

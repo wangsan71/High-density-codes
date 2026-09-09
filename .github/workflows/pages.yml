@@ -40,7 +40,9 @@ jobs:
         run: node tools/build-web.mjs
       - name: "Assert the artifacts (zero third-party origins, CSP, SW manifest hashes)"
         run: node tools/check-dist.mjs
-      - name: Unit suite
+      - name: "Install pillow (one unit test cross-checks our PNG/TIFF writers against it)"
+        run: python -m pip install --quiet pillow
+      - name: "Unit suite"
         run: node --test --test-isolation=none "tests/unit/**/*.test.mjs"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
