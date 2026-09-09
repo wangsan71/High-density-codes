@@ -1,4 +1,4 @@
-# 交接文档 · PSKT（第 73 轮末 · HEAD `04a6413` · 树干净 · **无 tag**）
+# 交接文档 · PSKT（第 75 轮末 · 骨架写于第 73 轮末、第 75 轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
@@ -103,6 +103,7 @@ node tools/smoke-sender.mjs                               # 期望 13 PASS / 0 F
 node tools/smoke-capture.mjs                              # 期望 exit 0 + "CAPTURE SMOKE: all assertions pass"
 node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 期望 321/321（≈138 s）
 & .\tools\usability.ps1                                   # 期望 27 PASS / 0 FAIL（≈222 s）
+& .\tools\mtf-probe.ps1                                   # 期望 0 FAIL / "all assertions pass"（≈26 s）
 node cli/pskit.mjs verify --gate all                      # G0 G1 G2 G3 G5 G7 G8 进程内
 node tools/check-docs-tables.mjs                          # 期望 "clean -- N rows in M tables"
 ```
@@ -177,7 +178,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 ## 9. 已知债 / 仍未做（别当成新问题重新发现）
 
 - `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
-- **M7 的 MTF 校准板 → 推荐喷嘴/间距那一半未实现**（PLAN §M7 明写；`calibrate` 的"只量不改"那半第 61 轮已落地）。
+- ~~**M7 的 MTF 校准板 → 推荐喷嘴/间距那一半未实现**~~（**过期记账，第 75 轮更正**：`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1` 第 75 轮已落地，真信道实测四喷嘴里三条点名正确 ✓）⇒ 剩下的半边是 **D67：这块板的 3MF/STL 网格还没写**（现在只有外观光栅）⇒ 用户还拿不到实物板。`calibrate` 的"只量不改"那半第 61 轮已落地。
 - 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`（`USE.md` 已如实写）。
 - 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
 - `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在 `$('log')` 上炸）⇒ 真浏览器那一次归 G9。
@@ -227,7 +228,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 → ④ G10 四喷嘴（需打印机）→ ⑤ G8 用切片软件真打开一次 → ⑥ D43 的 https 半边。
 
 **进程内（若你不能跑硬件，按价值排序）**：
-1. **M7 的 MTF 校准板 → 推荐喷嘴/间距**（PLAN 明写的未完成项，且能替 G10 提供"该用哪一档"的依据）；
+1. ~~M7 的 MTF 校准板 → 推荐喷嘴/间距~~ ⇒ **第 75 轮已完成测量半边**（见 §9）⇒ 下一条是 **D67：给这块板造 3MF/STL 网格**（把"实心块挖孔"分解成互不相交的墨矩形 + 投影对拍 + `check-3mf`），做完用户才拿得到实物板；
 2. G6 ② 若产品负责人选 ③，先做**可行性探针**（降采样/分块粗定位能不能把 600 dpi 的定位成本压到 ~1 s 量级）——不承诺成功；
 3. 网页端分片 UI（价值中、成本高：要多文件写入与跨会话重组，`File System Access API` 还不通用）；
 4. `#outname` 监听器泄漏（价值低，且改 DOM 生命周期在本机无法验证）；
@@ -240,6 +241,8 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
+| （本轮） | 75 | **M7 缺的那一半**：`core/calibrate/mtfplate.js`（喷嘴无关的板：5 档阶梯格 + 8 档孤立孔 + 色样 + 纹理样 + 标尺 + 四角标记）+ `core/calibrate/readmtf.js`（登记/覆盖率/颜色全走解码器自己的代码，判据是物理陈述）+ CLI `calibrate --make-mtf` / `--mtf` + `tools/mtf-probe.ps1`（真信道探针：四喷嘴点名 + 两对照，0 FAIL / 26s）+ 7 个单测 ⇒ 见 STATUS 第 75 轮块；**D67 OPEN**（板的网格没写） |
+| `b292a74` | 74 | 写 `docs/HANDOVER.md` + 更正两处过期记账（USE §5 的 G6 soak 行、STATUS 的总账计数）；**代码零改动**、无 tag |
 | `04a6413` | 73 | **D66**：core 一行（`error='need-passphrase'`）+ 三个接收端各一句可执行诊断 + 手机连拍新增 `#burstpass` + 连拍落盘统一到 `Blob` + usability 4c 腿（三种收法，含措辞判定与阳性对照）+ `USE.md` 首次写清口令（并更正我第 72 轮"要手工改名"的错话） |
 | `8c87f71` | 72 | **D65 尾部闭合**：`core/splitjoin.js` + `pskit split`/`join`（缺/短/错一律 exit 1 且不落盘）+ usability 4b 腿（3 次独立传输 + 阴性对照）+ 6 个单测；**G6 ② 地板实测**（6192 ms）⇒ `ACCEPTANCE` 划线 + ②bis；M9 过期记账更正 |
 | `a0ba8ea` | 71 | **D65**：发送页把"一次最多 255 页 ≈1.52 MB"用数字讲清（`transferBudget`/`pageLimitHint`/`earlySizePlan`，只警告不拒绝），删掉不可能触发的 600 页闸门与那句假的"CLI 页数不限" |

@@ -75,8 +75,20 @@ const HELP = `pskit <command> [options]
                          (blocks * nsym)), and the threshold-free ink-area ratio
                          (a health check only). NOT a gate: the exit code is not a
                          verdict, and no threshold is derived from the measurement.
-                         PLAN's M7 calibrate -- an MTF plate that recommends a
-                         nozzle/pitch -- is still unimplemented.
+
+  calibrate --make-mtf   write the MTF calibration plate (PLAN §3.4) and its spec
+    --out <dir>          where to write mtf-plate.png + mtf-plate.json (default .)
+    --plate-mm/--dpi/--palette   plate side (200), raster dpi (300), palette (INK2)
+    --print-ew <mm>      SIMULATION: emulate a printer whose smallest feature is this
+                         wide, so the plate can be put through sim/channel.py with a
+                         known nozzle. A real print does this by itself; omit it.
+  calibrate <png> --mtf  read a capture of that plate back
+    --spec <file>        plate spec (default mtf-plate.json beside the capture)
+    --json               also write <capture>.mtf.json for tools/mtf-probe.ps1
+    --fast               skip the texture and ruler measurements
+                         It prints the pitch ladder, the feature ladder, colour
+                         separation, white-balance drift and a nozzle/pitch
+                         recommendation. Still not a gate: the exit code is not a verdict.
 
   status                 profile / nozzle capacity table
   verify --gate <G>      run an acceptance gate in-process (G0 G1 G2 G3 G5 G7 G8 all)
@@ -1379,6 +1391,92 @@ async function cmdRoundtrip(args) {
 }
 
 /**
+ * `pskit calibrate --make-mtf` -- write the MTF calibration plate (PLAN §3.4).
+ *
+ * Writes two files: the appearance raster (`mtf-plate.png`) and the spec
+ * (`mtf-plate.json`) that says what is printed where. The reader needs the spec; without it
+ * the picture is just a picture. Both are deterministic from the flags alone.
+ *
+ * `--print-ew` is a **simulation** flag: it makes the renderer emulate a printer whose
+ * smallest feature is that wide, by filling every hole narrower than it (see
+ * core/calibrate/mtfplate.js). A real print does that by itself; the flag exists so the
+ * probe in tools/mtf-probe.ps1 can put a known nozzle through the Python channel.
+ */
+async function cmdMakeMtf(args, mod) {
+  const { mtfPlateSpec, renderMtfPlate, describeMtfPlate } = await import('../core/calibrate/mtfplate.js');
+  const spec = mtfPlateSpec({
+    plateMm: args['plate-mm'] ? Number(args['plate-mm']) : undefined,
+    dpi: args.dpi ? Number(args.dpi) : undefined,
+    palette: args.palette || 'INK2',
+  });
+  const printEwMm = args['print-ew'] ? Number(args['print-ew']) : 0;
+  const img = renderMtfPlate(spec, { printEwMm });
+  const outDir = resolve(args.out || args._[0] || '.');
+  mkdirSync(outDir, { recursive: true });
+  const pngPath = join(outDir, 'mtf-plate.png');
+  const specPath = join(outDir, 'mtf-plate.json');
+  writeFileSync(pngPath, mod.png.encodePNG(img));
+  writeFileSync(specPath, JSON.stringify({ ...spec, renderedPrintEwMm: printEwMm }, null, 1));
+  console.log(`mtf-plate: ${describeMtfPlate(spec)}`);
+  if (printEwMm > 0) console.log(`  emulated printer  smallest feature ${printEwMm}mm (holes narrower than this are filled)`);
+  console.log(`  wrote            ${pngPath} (${img.width}x${img.height}px @ ${spec.dpi}dpi)`);
+  console.log(`  wrote            ${specPath}  <- the reader needs this file`);
+  console.log('  note             this is the plate\'s appearance raster. The 3MF/STL of the same plate is not written yet.');
+}
+
+/**
+ * `pskit calibrate <png> --mtf` -- read a capture of that plate.
+ *
+ * Prints the two ladders cell by cell, the colour/texture/ruler measurements, and one
+ * recommendation. Like the rest of `calibrate`, the exit code is **not** a verdict on the
+ * plate: a capture that registers but resolves nothing is data, not a tool error. `--json`
+ * writes the machine-readable result next to the capture, which is what tools/mtf-probe.ps1
+ * reads.
+ */
+async function cmdReadMtf(args, mod) {
+  const { decodePNG } = await import('../core/decode/png-read.js');
+  const { readMtfPlate, recommendFromMtf, describeMtfMeasurement } = await import('../core/calibrate/readmtf.js');
+  const target = resolve(args._[0] || '.');
+  const st = statSync(target);
+  const files = st.isDirectory()
+    ? readdirSync(target).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort().map((n) => join(target, n))
+    : [target];
+  if (!files.length) throw new Error(`calibrate --mtf: no image found in ${target}`);
+  const specPath = args.spec
+    ? resolve(args.spec)
+    : join(st.isDirectory() ? target : dirname(target), 'mtf-plate.json');
+  if (!existsSync(specPath)) {
+    throw new Error(`calibrate --mtf: no plate spec at ${specPath} (run \`calibrate --make-mtf\` first, or pass --spec)`);
+  }
+  const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+  console.log(`mtf: spec ${specPath}`);
+  let worst = null;
+  for (const file of files) {
+    const bytes = new Uint8Array(readFileSync(file));
+    let bitmap;
+    try {
+      bitmap = decodePNG(bytes);
+    } catch (e) {
+      console.log(`  ${basename(file)}: not a readable PNG (${e.message})`);
+      continue;
+    }
+    const t0 = performance.now();
+    const m = readMtfPlate(bitmap, spec, { texture: !args.fast, ruler: !args.fast });
+    const rec = recommendFromMtf(m, { plateMm: spec.plateMm });
+    const ms = Math.round(performance.now() - t0);
+    console.log(`  ${basename(file)} [${ms}ms]`);
+    for (const line of describeMtfMeasurement(m, rec)) console.log(`  ${line}`);
+    if (args.json) {
+      const outPath = join(dirname(file), `${basename(file).replace(/\.[^.]+$/, '')}.mtf.json`);
+      writeFileSync(outPath, JSON.stringify({ file: basename(file), spec: specPath, measurements: m, recommendation: rec }, null, 1));
+      console.log(`  wrote            ${outPath}`);
+    }
+    worst = rec;
+  }
+  if (!worst) console.log('  nothing measured');
+}
+
+/**
  * `pskit calibrate <dir|file>` -- measure a captured page set. Change no decision.
  *
  * This is the *measurement* half of the calibrate PLAN puts in M7. It exists because
@@ -1413,6 +1511,8 @@ async function cmdRoundtrip(args) {
  */
 async function cmdCalibrate(args) {
   const mod = await load();
+  if (args['make-mtf']) return cmdMakeMtf(args, mod);
+  if (args.mtf) return cmdReadMtf(args, mod);
   const { decodePNG } = await import('../core/decode/png-read.js');
   const { decodePage } = await import('../core/decode/page.js');
   const { advise } = await import('../core/decode/advice.js');
