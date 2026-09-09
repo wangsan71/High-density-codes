@@ -136,7 +136,11 @@
   to send it anyway: node cli/pskit.mjs split <file> --max-bytes 21120 --out parts and send/print/scan each part as its own transfer (then join the received parts).
 ```
 
-**实测**：`split --max-bytes 21120` ⇒ 10 片、exit 0；再 `send part-000.bin --profile PL-G --nozzle 0.4 --format 3mf` ⇒ exit 0（每片真的装得下）。**并如实记下我自己第一版的错**：那段循环从 255 **往下按字节**试、255 B 当然立刻满足 ⇒ 打印出「最多 ~255 B」（荒谬数字）。改成按数据页数求最大 D 后得 ~21120 B ✓。断言加进 `usability.ps1` 的 1b 腿（hint 必须含 `--max-bytes \d+`）。
+**实测**：`split --max-bytes 21120` ⇒ 10 片、exit 0；再 `send part-000.bin --profile PL-G --nozzle 0.4 --format 3mf` ⇒ exit 0（每片真的装得下）。
+**同轮的门限复跑（重要：本轮之前改动过解码路径，G2 语料必须重跑）**：第 79–81 轮动过 `core/decode/fiducial.js`（`no-contrast`）、`core/decode/echo.js`（`echo-no-contrast`）、`core/decode/bootstrap.js`（一致原因提升）、`core/decode/advice.js`，而 `verify --gate all` **不评估 G2**（它要 `--corpus`）⇒ 本轮把盘上那份 200-seed 语料重跑了一遍：
+
+`node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan300-*'` ⇒ **`PASS G2 corpus: 200/200 byte-exact in 1088.7s`**、`exit 0`（门限自己打印 `criterion is 100%; PLAN asks for 200 fixed seeds, this run had 200`）⇒ **三条新诊断没有把任何一页真扫描判死**（如果 `no-contrast` 误伤合法扫描页，这里立刻会掉）。此前最近一次 G2 判决是第 63 轮的同一档 `PASS 200/200`（1245.4 s）。
+**并如实记下我自己第一版的错**：那段循环从 255 **往下按字节**试、255 B 当然立刻满足 ⇒ 打印出「最多 ~255 B」（荒谬数字）。改成按数据页数求最大 D 后得 ~21120 B ✓。断言加进 `usability.ps1` 的 1b 腿（hint 必须含 `--max-bytes \d+`）。
 ### 第 88 轮（**少了一页也能拿回文件，但收端不吭声 —— 现在会点名「第 0 页是从校验页重建的」**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只补一句**输出**。
