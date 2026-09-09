@@ -241,7 +241,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
-| （本轮） | 75 | **M7 缺的那一半**：`core/calibrate/mtfplate.js`（喷嘴无关的板：5 档阶梯格 + 8 档孤立孔 + 色样 + 纹理样 + 标尺 + 四角标记）+ `core/calibrate/readmtf.js`（登记/覆盖率/颜色全走解码器自己的代码，判据是物理陈述）+ CLI `calibrate --make-mtf` / `--mtf` + `tools/mtf-probe.ps1`（真信道探针：四喷嘴点名 + 两对照，0 FAIL / 26s）+ 7 个单测 ⇒ 见 STATUS 第 75 轮块；**D67 OPEN**（板的网格没写） |
+| `34cb5cb` | 75 | **M7 缺的那一半**：`core/calibrate/mtfplate.js`（喷嘴无关的板：5 档阶梯格 + 8 档孤立孔 + 色样 + 纹理样 + 标尺 + 四角标记）+ `core/calibrate/readmtf.js`（登记/覆盖率/颜色全走解码器自己的代码，判据是物理陈述）+ CLI `calibrate --make-mtf` / `--mtf` + `tools/mtf-probe.ps1`（真信道探针：四喷嘴点名 + 两对照，0 FAIL / 26s）+ 7 个单测 ⇒ 见 STATUS 第 75 轮块；**D67 OPEN**（板的网格没写） |
 | `b292a74` | 74 | 写 `docs/HANDOVER.md` + 更正两处过期记账（USE §5 的 G6 soak 行、STATUS 的总账计数）；**代码零改动**、无 tag |
 | `04a6413` | 73 | **D66**：core 一行（`error='need-passphrase'`）+ 三个接收端各一句可执行诊断 + 手机连拍新增 `#burstpass` + 连拍落盘统一到 `Blob` + usability 4c 腿（三种收法，含措辞判定与阳性对照）+ `USE.md` 首次写清口令（并更正我第 72 轮"要手工改名"的错话） |
 | `8c87f71` | 72 | **D65 尾部闭合**：`core/splitjoin.js` + `pskit split`/`join`（缺/短/错一律 exit 1 且不落盘）+ usability 4b 腿（3 次独立传输 + 阴性对照）+ 6 个单测；**G6 ② 地板实测**（6192 ms）⇒ `ACCEPTANCE` 划线 + ②bis；M9 过期记账更正 |
