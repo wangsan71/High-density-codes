@@ -126,6 +126,14 @@
 
 ## 已知风险 / 待办
 
+### 第 104 轮（**模块档 PDF 路径加回归测试：继续用裸 RGB 行、不带 predictor 参数**）
+
+**① 为什么补**：验收包让用户打印的是模块档 `pack.pdf`。D78 的教训正是 PDF 行距参数歧义会剪坏整页；模块档是新的渲染分支，必须单独钉住它没有重新引入 `/DecodeParms`、`/Predictor` 或 `/Columns`。
+
+**② 改动**：`tests/unit/module-matrix.test.mjs` 新增用例，对 `P-MX-300-6` 三页传输渲染后写 PDF，断言完整 `%%EOF`、无 predictor/columns 参数，且 PDF 页数等于传输页数。
+
+**③ 验证**：该测试文件 **5/5 通过**；全量单测 **`tests 377 · pass 376 · fail 0 · skipped 1`、exit 0**；`verify --gate all` 打印 **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`、exit 0**。真平板扫描仍未执行。
+
 ### 第 103 轮（**1 MB 不可压模块模拟：三档页数与逐字节还原全部落地**）
 
 **① 为什么补这一测**：100 KB 验证了多页组装，但还没有验证目标里最直接的 1 MB 密度数字。本轮用同一份不可压 1,048,576 B payload、固定 seed 7、`sim/channel.py --preset scan300 --modifier nocrop`。

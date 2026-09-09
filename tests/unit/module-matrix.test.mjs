@@ -5,6 +5,7 @@ import { planPage } from '../../core/profiles.js';
 import { encodeTransfer, TransferAssembler } from '../../core/protocol.js';
 import { pageLayout } from '../../core/render/layout.js';
 import { renderPageBitmap, echoBitsOf } from '../../core/render/raster.js';
+import { encodePDFDocument } from '../../core/render/pdf.js';
 import { readModuleIdeal } from '../../core/decode/module-read.js';
 import { decodePage } from '../../core/decode/page.js';
 import { moduleTimingLevel } from '../../core/render/modules.js';
@@ -118,4 +119,20 @@ test('module page bootstraps through the same PNG path as the browser', async ()
     cellMissing: boot.page.cellMissing,
   });
   assert.equal(fed.ok, true, fed.reason);
+});
+
+test('module page pack.pdf uses the same no-predictor raster stream as other paper pages', async () => {
+  const payload = bytes(4000, 111);
+  const t = await encodeTransfer(payload, { profile: PROFILE });
+  const layout = pageLayout(t.geom, t.geom.dpi, { sheetMm: t.geom.sheetMm });
+  const pages = t.pages.map((p) =>
+    renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(p.header) }),
+  );
+  const pdf = encodePDFDocument(pages);
+  const text = Buffer.from(pdf).toString('latin1');
+  assert.match(text, /%%EOF\s*$/m, 'module pack must be a complete PDF');
+  assert.doesNotMatch(text, /\/DecodeParms/, 'module PDF must not emit predictor parameters');
+  assert.doesNotMatch(text, /\/Predictor/, 'module PDF must use bare RGB rows');
+  assert.doesNotMatch(text, /\/Columns/, 'module PDF must not carry the ambiguous Columns parameter');
+  assert.equal((text.match(/\/Type \/Page[^s]/g) || []).length, pages.length, 'one PDF page per module transfer page');
 });
