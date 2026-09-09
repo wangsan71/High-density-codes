@@ -2,6 +2,15 @@ import { decodeHeader, HEADER_LEN } from '../frame.js';
 import { otsu } from './fiducial.js';
 
 /**
+ * Below this separation between the echo strip's two levels, the strip had no contrast to read:
+ * (p75 - p25) / max over the per-cell darkness. Measured (round 80) on a P-M1-300 page:
+ * pristine render 1.000, 300 dpi scan 0.790, 3x downscaled 0.705, 4x downscaled 0.530, and a
+ * whole-A4-in-frame phone capture 0.148. The floor sits in that gap, so a strip that merely
+ * decodes wrong keeps its own reason while a strip that was never resolvable says so.
+ */
+export const ECHO_SEPARATION_FLOOR = 0.35;
+
+/**
  * Read the frame header back out of the margin echo strip.
  *
  * The strip is a micro-lattice of 1-bit cells: a printed cell is a 1. Everything
@@ -98,7 +107,26 @@ export function readEcho(bitmap, layout, opts = {}) {
       closest = { reason: dec.reason, headerBytes: bytes, threshold: t };
     }
   }
+  // Before blaming the strip's contents, check whether it had any contrast to read at all.
+  // Measured (round 80): a pristine render separates at 1.000 and a 300 dpi scan at 0.790, while a
+  // whole-A4-in-frame phone capture separates at 0.148 -- the strip's ink and paper are one grey
+  // band, so "the header decoded to the wrong magic" is a true statement about the bytes and a
+  // false statement about the cause. The floor sits in the measured gap (readable >= 0.53).
   const mid = sorted[n >> 1];
+  const p25 = sorted[Math.floor(n * 0.25)];
+  const p75 = sorted[Math.floor(n * 0.75)];
+  const separation = (p75 - p25) / Math.max(1, sorted[n - 1]);
+  if (separation < ECHO_SEPARATION_FLOOR) {
+    return {
+      ok: false,
+      reason: 'no-contrast', // page.js prefixes echo- => 'echo-no-contrast'
+      separation,
+      headerBytes: bytes,
+      confidence,
+      ambiguousAbove: sorted.filter((v) => v > mid * 0.35 && v < mid * 3).length,
+      candidatesTried: tried.size,
+    };
+  }
   return {
     ok: false,
     ...(closest || { reason: 'no-candidate', headerBytes: bytes }),

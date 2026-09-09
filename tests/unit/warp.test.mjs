@@ -5,7 +5,7 @@ import { encodeTransfer, splitCellLevel } from '../../core/protocol.js';
 import { pageLayout } from '../../core/render/layout.js';
 import { renderPageBitmap, renderSheetBitmap, echoBitsOf } from '../../core/render/raster.js';
 import { readPageIdeal } from '../../core/decode/ideal.js';
-import { readEcho } from '../../core/decode/echo.js';
+import { readEcho, ECHO_SEPARATION_FLOOR } from '../../core/decode/echo.js';
 import { findMarkers } from '../../core/decode/fiducial.js';
 import { rectifyPage } from '../../core/decode/warp.js';
 import { mul3, inv3, apply, sampleBilinear } from '../../core/decode/transform.js';
@@ -315,6 +315,54 @@ test('a 90-degree rotated page still decodes (orientation comes from the hollow 
   assert.ok(asm.result.every((v, i) => v === payload[i]), 'rotated payload differs');
 });
 
+
+test('a strip with no contrast is diagnosed as such, not as a damaged header (D71)', async () => {
+  const it = await encodeTransfer(new Uint8Array(256).fill(0x33), { profile: 'P-M1-300' });
+  const layout = pageLayout(it.geom, 300, { sheetMm: it.geom.sheetMm });
+  const bmp = renderPageBitmap({ geom: it.geom, levels: it.pages[0].levels, layout, palette: 'PAPER1', echoBits: echoBitsOf(it.pages[0].header) });
+  const base = { width: bmp.width, height: bmp.height, pixels: Uint8Array.from(bmp.pixels), substrate: [255, 255, 255] };
+  const boxBlur = (src, radius) => {
+    const W = src.width;
+    const H = src.height;
+    const out = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let sr = 0;
+        let sg = 0;
+        let sb = 0;
+        let n = 0;
+        for (let dy = -radius; dy <= radius; dy++) {
+          const yy = Math.min(H - 1, Math.max(0, y + dy));
+          for (let dx = -radius; dx <= radius; dx++) {
+            const xx = Math.min(W - 1, Math.max(0, x + dx));
+            const o = (yy * W + xx) * 4;
+            sr += src.pixels[o];
+            sg += src.pixels[o + 1];
+            sb += src.pixels[o + 2];
+            n++;
+          }
+        }
+        const o = (y * W + x) * 4;
+        out[o] = Math.round(sr / n);
+        out[o + 1] = Math.round(sg / n);
+        out[o + 2] = Math.round(sb / n);
+        out[o + 3] = 255;
+      }
+    }
+    return { width: W, height: H, pixels: out, substrate: [255, 255, 255] };
+  };
+  // Measured separations: radius 0 -> 1.000, 2 -> 0.546 (still reads), 4 -> 0.227 (one grey
+  // band). The floor is 0.35, so the fixture uses 4 and the control uses 2.
+  const smeared = readEcho(boxBlur(base, 4), layout);
+  assert.equal(smeared.ok, false);
+  assert.equal(smeared.reason, 'no-contrast', `expected the contrast diagnosis, got ${smeared.reason} (separation ${smeared.separation})`);
+  assert.ok(smeared.separation < ECHO_SEPARATION_FLOOR);
+  // Control 1: the same page sharp must still read.
+  assert.equal(readEcho(base, layout).ok, true);
+  // Control 2: a mildly soft capture (separation 0.546) must keep its own reason, not this one.
+  const soft = readEcho(boxBlur(base, 2), layout);
+  assert.notEqual(soft.reason, 'no-contrast', `a readable strip must not be called no-contrast (separation ${soft.separation})`);
+});
 test('blank and scrambled photos are refused, never guessed', () => {
   const blank = { width: 400, height: 300, pixels: new Uint8Array(400 * 300 * 4).fill(250), substrate: [250, 250, 246] };
   const r0 = findMarkers(blank);

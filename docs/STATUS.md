@@ -123,6 +123,24 @@
 
 ## 已知风险 / 待办
 
+### 第 80 轮（**同一张照片的第二层误诊：条带没对比度，被说成「头字段损坏/另一套码」⇒ D71 已修**）
+
+**接第 79 轮的线**：那一轮修的是「照片整体没有墨/纸分离」被说成「四角没拍全」（D69）。这一轮查的是**下一层**：`phone40`（较温和的手机档）下角标**找得到**（6.3px）、校正 100%，但页面在 `readEcho` 处失败，报 `echo-bad-magic`，而 `advice.js` 对它的解释是「条带损坏，或这是另一套码」——**字节层面是真的，成因层面是错的**：真实原因是**拍得太远**，条带的 1-bit 微格（数据格的一半宽，是页上最细的特征）糊成一条灰带。用户照这条建议会去**重印**，而正确动作是**拍近/换粗档**。
+
+**实测（同一张 P-M1-300 页，条带两电平的分离度 `(p75−p25)/max`）**：原始渲染 **1.000** · 300 dpi 扫描 **0.790** · 3× 降采样 **0.705** · 4× 降采样 **0.530** · **phone40 只有 0.148**。可读与不可读之间有一整个数量级的空隙，切点 **0.35** 落在里面。
+
+**修法（D71，已闭）**：`core/decode/echo.js` 新增 `ECHO_SEPARATION_FLOOR = 0.35`；`readEcho` 在**所有阈值候选都失败之后**，若分离度低于它，改报 `no-contrast`（页面层自动成为 `echo-no-contrast`）；`advice.js` 给出「拍近/2× 变焦/顶边对焦/换粗档/改用 300 dpi 扫描」。**判据一字未动**：没有任何页面因此被接受。
+
+**实测（端到端）**：`node tools/g2-corpus.mjs .tmp/p40-trial` ⇒ 修前 `readout/echo-bad-magic`，修后 **`readout/echo-no-contrast`**（三页全部）。**阳性对照**（`tests/unit/warp.test.mjs` 新增 1 例）：同一页锐利 ⇒ 仍能读；轻微模糊（分离度 0.546）⇒ **不得**被判 `no-contrast`（否则这条诊断会吞掉真正的「条带受损」）。
+
+**本轮门限复跑（第 80 轮，全部实测；`core/decode/echo.js` 被改过，所以全套重跑）**：
+
+- 单测：**`tests 337 · pass 337 · fail 0 · duration_ms 148296`、exit 0**（+1 例：条带锐利仍能读、轻微模糊不得被判 `no-contrast`）。
+- 进程内门限：`verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**；**G5 的守卫分布逐项未变**（`feed:header:bad-magic=84`、`header-crc=1324`、`accepted-original=9200`、`refused:digest-mismatch=800`、**0 误接受**）⇒ 新诊断没有碰任何接受条件 ✓（合成篡改语料是原始渲染，条带分离度 1.000，本来就不该触发）。
+- 端到端冒烟：`& .\tools\usability.ps1` ⇒ **exit 0**（纸面/板材/加密三条真信道腿都过 `readEcho`）。
+- 真信道探针：`& .\tools\mtf-probe.ps1` ⇒ **0 FAIL / 42s**。
+- 台账：`check-docs-tables` ⇒ `clean -- 308 rows in 53 tables`、exit 0。
+
 ### 第 79 轮（**G4 的第一次实测证据：0/12 不是解码器的错，而是「这张照片没有墨/纸分离」被误诊成「四角没拍全」⇒ D69 已修**）
 
 **这轮先做了一件以前从没做过的事：把 `phone-hard` 档真跑一遍**（`docs/STATUS.md` 里 G4 一直是「零证据」）。新增 `tools/g4-probe.ps1`：两条腿（纸面 `P-M1-300` / 板材 `PL-G@0.4`）× 两种取景（`nocrop` / 让裁切生效）× N 个 seed，过 `sim/channel.py --preset phone-hard`，再用 `tools/g2-corpus.mjs` 判「逐字节还原」，并把**信道自己的报告**（`clipped_frac`、`marker_visible`）一并记下来当 ground truth。

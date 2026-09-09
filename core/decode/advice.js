@@ -70,6 +70,11 @@ const ADVICE = {
     cause: 'the header echo strip failed its CRC -- usually a smudge or glare across the top margin',
     do: 'clean the plate surface / re-scan without the lamp reflection crossing the top strip',
   },
+  'echo-no-contrast': {
+    cause:
+      'the header echo strip had no usable contrast in this capture: its two levels sit only ~15% apart (a readable strip is 50%+). The strip is the finest feature on the page -- 1-bit cells half a data cell wide -- so it is the first thing a coarse or soft capture loses, well before the code area does.',
+    do: 'get closer or use 2x optical zoom, make sure the top margin is inside the frame and in focus, and if the page still will not read use a coarser profile (600 dpi or a plate) or scan at 300 dpi instead of photographing',
+  },
   'echo-short-header': {
     cause: 'not enough echo cells were readable to form a header (too few bits recovered)',
     do: 'move closer: the echo strip is the finest feature on the page and needs the most resolution',
