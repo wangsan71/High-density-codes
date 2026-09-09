@@ -531,6 +531,19 @@ async function cmdSend(args) {
     console.log(`  projection   G8 §6.3: max ${p.maxPct.toFixed(2)}% mean ${p.meanPct.toFixed(2)}% off the raster mask, ${p.cellsOverTolerance}/${p.cells} cells >= ${p.tolerancePct}% -> ${p.ok ? 'PASS' : 'FAIL'}`);
   }
   console.log(`  timings    encode ${Math.round(t1 - t0)}ms  render+write ${Math.round(t2 - t1)}ms`);
+  // The two commands that come next, spelled out with this transfer's own profile. The first-use
+  // path used to end at "wrote N files"; a user then had to re-read the manual to know that the
+  // receive side needs the profile (a fresh scan folder has no manifest.json) -- round 86.
+  if (modelReports.length) {
+    console.log(`  next       slice ${join(outDir, 'page-000.3mf')} (or the .stl), print it, photograph it, then:`);
+  } else {
+    console.log(`  next       print ${wantPdf ? join(outDir, 'pack.pdf') : join(outDir, 'page-000.png')} at 100%, scan the pages to PNG, then:`);
+  }
+  console.log(
+    `             node cli/pskit.mjs receive <scan or photo dir> --photo --profile ${profileId}` +
+      `${nozzle ? ` --nozzle ${nozzle}` : ''}${args.plate ? ` --plate ${args.plate}` : ''}` +
+      `${args.passphrase ? ' --passphrase <the one you used>' : ''} --out <file>`,
+  );
   return { outDir, manifest, t, raw, layout, dpi, paletteId, args };
 }
 

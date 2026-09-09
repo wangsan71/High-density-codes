@@ -123,6 +123,20 @@
 
 ## 已知风险 / 待办
 
+### 第 86 轮（**`send` 结束时把「下一步」直接打出来**：手册之外不用再翻文档）
+
+**用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只补一句**输出**，不加功能。
+
+**观察到的问题**：`pskit send` 的结尾停在 `wrote N file(s) + manifest.json`，用户接下来该敲什么得回手册找 —— 而接收端的 `--profile` 是**必须**的（新扫的目录里没有 `manifest.json`），这一点最容易漏。
+
+**修法**：`send` 收尾打印两条可复制的命令，参数取自本次传输自己（profile / nozzle / plate / 是否加密）：
+
+```
+  next       print <out>\pack.pdf at 100%, scan the pages to PNG, then:
+             node cli/pskit.mjs receive <scan or photo dir> --photo --profile P-M1-300 --out <file>
+```
+
+板材档则打印 `slice <out>\page-000.3mf …` + 带 `--nozzle 0.4` 的 receive 命令。**实测**：纸面与板材两条都实测过（`--profile P-M1-300` / `--profile PL-G --nozzle 0.4`）；断言入库为 `usability.ps1` 的 1 号腿附加检查（日志必须含 `next` + `pskit.mjs receive` + 本次 profile）。**判据未动**。
 ### 第 85 轮（**D8 量到一半答案：缩放本身不致命，「必须 100%」这句手册话可以放宽**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只回答一个用户第一天就会问的问题：**打印时选错缩放会怎样？**

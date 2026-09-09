@@ -158,6 +158,13 @@ $pngs = @(Get-ChildItem -Path $src -Filter 'page-*.png' -ErrorAction SilentlyCon
 $pdf = Get-ChildItem -Path $src -Filter '*.pdf' -ErrorAction SilentlyContinue | Select-Object -First 1
 Write-Host ("          wrote {0} page PNG(s){1}" -f $pngs.Count, $(if ($pdf) { ", " + $pdf.Name + " (" + [int]($pdf.Length / 1KB) + " KB)" } else { ", NO PDF" }))
 if ($pngs.Count -eq 0) { Write-Host ' FAIL  nothing to print -- stopping here'; exit 1 }
+# The output must end with the two commands that come next, spelled with this transfer's own profile
+# (round 86): the first-use path used to stop at "wrote N files", leaving the user to re-read the
+# manual for the fact that the receive side needs --profile when there is no manifest.json.
+$step1Text = Get-Content (Join-Path $tmp 'step1.log') -Raw
+$nextOk = ($step1Text -match 'next') -and ($step1Text -match 'pskit\.mjs receive') -and ($step1Text -match '--profile P-M1-300')
+if (-not $nextOk) { $script:fails++ }
+Write-Host ("{0}  send prints the next command, with this transfer's profile  " -f $(if ($nextOk) { " PASS" } else { " FAIL" }))
 
 
 # 1b. The first command a user actually types: `send FILE` with no --profile. It must produce the
