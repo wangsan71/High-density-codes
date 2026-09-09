@@ -33,10 +33,14 @@ export const ECHO_ROWS = (HEADER_LEN * 8) / ECHO_COLS; // 8 rows of 56 bits
  */
 export function pageLayout(geom, dpi, opts = {}) {
   if (!(dpi > 0)) throw new RangeError('pageLayout: dpi must be positive');
+  const quietCells = geom.quietCells ?? QUIET_CELLS;
+  const latticeCols = geom.moduleCols ?? geom.cols;
+  const latticeRows = geom.moduleRows ?? geom.rows;
   const cellPx = mmToPx(geom.pitchMm, dpi);
-  if (cellPx < MIN_CELL_PX) {
+  const minCellPx = geom.minCellPx ?? MIN_CELL_PX;
+  if (cellPx < minCellPx) {
     throw new RangeError(
-      `pageLayout: ${geom.pitchMm}mm pitch is only ${cellPx}px at ${dpi}dpi (min ${MIN_CELL_PX}). Raise the dpi or coarsen the nozzle profile.`,
+      `pageLayout: ${geom.pitchMm}mm pitch is only ${cellPx}px at ${dpi}dpi (min ${minCellPx}). Raise the dpi or coarsen the nozzle profile.`,
     );
   }
   // The glyph has to be drawable in whole extrusion widths, so the geometry is
@@ -55,11 +59,12 @@ export function pageLayout(geom, dpi, opts = {}) {
   // be wider than the plate, so the strip shrinks -- never below one extrusion
   // width, and never below what fits the canvas.
   const ewPxGuess = geom.nozzle ? ewPx(geom.nozzle, dpi) : 2;
-  const latticeW0 = geom.cols * cellPx;
-  const quietGuess = QUIET_CELLS * cellPx;
+  const latticeW0 = latticeCols * cellPx;
+  const quietGuess = quietCells * cellPx;
+  const echoFloor = Number.isFinite(geom.echoMinPx) ? Math.max(2, geom.echoMinPx) : 0;
   let echoPx = 0;
   for (const div of [2, 3, 4, 5, 6, 8, 10, 12]) {
-    const cand = Math.floor(cellPx / div);
+    const cand = Math.max(echoFloor, Math.floor(cellPx / div));
     if (cand < Math.max(2, ewPxGuess)) break;
     if (ECHO_COLS * cand + 2 * quietGuess <= latticeW0 + 2 * quietGuess) {
       echoPx = cand;
@@ -70,11 +75,11 @@ export function pageLayout(geom, dpi, opts = {}) {
   const echoW = ECHO_COLS * echoPx;
   const echoH = ECHO_ROWS * echoPx;
 
-  // Quiet zone: QUIET_CELLS cells all round; the top band also carries the echo
+  // Quiet zone: quietCells cells all round; the top band also carries the echo
   // strip immediately above the lattice.
-  const quietPx = QUIET_CELLS * cellPx;
-  const latticeW = geom.cols * cellPx;
-  const latticeH = geom.rows * cellPx;
+  const quietPx = quietCells * cellPx;
+  const latticeW = latticeCols * cellPx;
+  const latticeH = latticeRows * cellPx;
   // A coarse profile can have fewer data cells across than the echo strip has
   // bits (56), so the canvas takes the wider of the two and the lattice centres
   // inside it. The plate is bigger than both; there is nothing to gain from
@@ -100,7 +105,10 @@ export function pageLayout(geom, dpi, opts = {}) {
 
   // Fiducials sit at a fixed inset from the *canvas* corners, so the decoder can
   // recover the lattice origin from them alone.
-  const fidHalf = Math.round((FID_CELLS * cellPx) / 2);
+  const fidHalf =
+    geom.physicalEncoding === 'module'
+      ? geom.fidHalfPx ?? Math.max(Math.round((FID_CELLS * cellPx) / 2), 20)
+      : Math.round((FID_CELLS * cellPx) / 2);
   const inset = fidHalf + cellPx;
   const fiducials = [
     { role: 'tl', solid: true, x: inset, y: inset, half: fidHalf },
@@ -108,7 +116,10 @@ export function pageLayout(geom, dpi, opts = {}) {
     { role: 'bl', solid: true, x: inset, y: height - inset, half: fidHalf },
     { role: 'br', solid: false, x: width - inset, y: height - inset, half: fidHalf },
   ];
-  const fidRing = Math.max(1, Math.max(cellPx, Math.ceil(ewPxGuess)));
+  const fidRing =
+    geom.physicalEncoding === 'module' && geom.fidRingPx
+      ? geom.fidRingPx
+      : Math.max(1, Math.max(cellPx, Math.ceil(ewPxGuess)));
   for (const f of fiducials) f.ringPx = fidRing;
   for (const f of fiducials) {
     if (f.x - f.half < 0 || f.y - f.half < 0 || f.x + f.half > width || f.y + f.half > height) {
@@ -140,9 +151,12 @@ export function pageLayout(geom, dpi, opts = {}) {
     cellPx,
     cols: geom.cols,
     rows: geom.rows,
+    moduleCols: geom.moduleCols ?? null,
+    moduleRows: geom.moduleRows ?? null,
     width,
     height,
     pitchMm: geom.pitchMm,
+    quietCells,
     cellEw,
     glyph,
     shapeLevels,
@@ -173,9 +187,12 @@ export function layoutFromFiducials(fid, geom) {
   const tr = fid.find((f) => f.role === 'tr');
   const bl = fid.find((f) => f.role === 'bl');
   if (!tl || !tr || !bl) throw new Error('layoutFromFiducials: need tl, tr, bl');
-  const cellX = (tr.x - tl.x) / geom.cols;
-  const cellY = (bl.y - tl.y) / geom.rows;
-  return { cellX, cellY, originX: tl.x - cellX * QUIET_CELLS - cellX / 2, originY: tl.y - cellY * QUIET_CELLS - cellY / 2 };
+  const latticeCols = geom.moduleCols ?? geom.cols;
+  const latticeRows = geom.moduleRows ?? geom.rows;
+  const cellX = (tr.x - tl.x) / latticeCols;
+  const cellY = (bl.y - tl.y) / latticeRows;
+  const quietCells = geom.quietCells ?? QUIET_CELLS;
+  return { cellX, cellY, originX: tl.x - cellX * quietCells - cellX / 2, originY: tl.y - cellY * quietCells - cellY / 2 };
 }
 
 /** Human-readable one-liner for the print pack. */

@@ -127,7 +127,14 @@ export async function bootstrapDecode(bitmap, opts = {}) {
       }
     };
     const scored = plans.map((c, i) => ({ c, i, s: sizeScore(c) }));
-    scored.sort((a, b) => (a.s - b.s) || (a.i - b.i)); // stable: ties keep candidatePlans' own order
+    const hintRank = (c) =>
+      (!opts.profileHint || c.profileId === opts.profileHint) &&
+      (!opts.dpiHint || c.dpi === opts.dpiHint) &&
+      (!opts.paletteHint || c.paletteId === opts.paletteHint) &&
+      (!opts.nozzleHint || c.nozzle === opts.nozzleHint)
+        ? 0
+        : 1;
+    scored.sort((a, b) => hintRank(a.c) - hintRank(b.c) || a.s - b.s || a.i - b.i);
     plans = scored.map((x) => x.c);
   }
   const attempts = [];

@@ -176,7 +176,10 @@
           "PL-D3": 6,
           "PL-D3S": 7,
           "PL-G": 8,
-          "REL-H1": 9
+          "REL-H1": 9,
+          "P-MX-300-6": 10,
+          "P-MX-300-5": 11,
+          "P-MX-300-4": 12
       },
       "howToVerify": "ref/decode.py reads this file, re-implements the readout, and exits non-zero on the first mismatch."
   },

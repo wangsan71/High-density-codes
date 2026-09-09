@@ -229,14 +229,14 @@ export function recalibrateLevels({ levels, rho, colourLevels, geom, cut }) {
 export async function feedPageWithRecalibration(asm, decoded, opts = {}) {
   const { geom = null, log = null } = opts;
   const channelMissing = decoded.colourAlive ? [] : ['colour'];
-  const first = await asm.feed({ levels: decoded.levels, header: decoded.headerBytes, channelMissing });
+  const first = await asm.feed({ levels: decoded.levels, header: decoded.headerBytes, channelMissing, cellMissing: decoded.cellMissing });
   if (first.ok || first.duplicate || first.reason !== 'intra-fail') return { fed: first, retried: false };
   if (!geom) return { fed: first, retried: false, reason: 'no-geometry' };
   if (!decoded.rho || !decoded.colourLevels) return { fed: first, retried: false, reason: 'no-rho' };
   const est = estimateRhoCut(decoded.rho, { levels: shapeLevelsOf(geom) });
   if (!est.ok) return { fed: first, retried: false, reason: est.reason, estimate: est };
   const re = recalibrateLevels({ levels: decoded.levels, rho: decoded.rho, colourLevels: decoded.colourLevels, geom, cut: est.cut });
-  const second = await asm.feed({ levels: re.levels, header: decoded.headerBytes, channelMissing });
+  const second = await asm.feed({ levels: re.levels, header: decoded.headerBytes, channelMissing, cellMissing: decoded.cellMissing });
   if (log) {
     log(
       `recalibrated re-read: cut ${est.cut.toFixed(4)} (clusters ${est.m0.toFixed(3)}/${est.m1.toFixed(3)}, separation ${est.separation.toFixed(2)}` +

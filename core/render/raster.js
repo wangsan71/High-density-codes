@@ -3,6 +3,7 @@ import { glyphMaskForLevel, idealGeometry, MEASURE } from './glyphs.js';
 import { splitCellLevel } from '../protocol.js';
 import { HEADER_LEN } from '../frame.js';
 import { sheetMarks, MARK_STROKE_MM } from './sheet.js';
+import { moduleTimingLevel } from './modules.js';
 
 /**
  * Raster renderer: cell levels -> a printed-looking RGBA bitmap.
@@ -131,6 +132,31 @@ export function renderPageBitmap({ geom, levels, layout, palette = 'INK2', mono 
       const cy = (i / e.cols) | 0;
       fillRect(pixels, width, height, e.x + cx * e.cellPx, e.y + cy * e.cellPx, e.x + (cx + 1) * e.cellPx, e.y + (cy + 1) * e.cellPx, MACHINE_INK);
     }
+  }
+
+  if (geom.physicalEncoding === 'module') {
+    const moduleRows = geom.moduleRows ?? geom.rows;
+    const moduleCols = geom.moduleCols ?? geom.cols;
+    for (let r = 0; r < moduleRows; r++) {
+      for (let c = 0; c < moduleCols; c++) {
+        const timing = moduleTimingLevel(c, r);
+        const level = timing === null ? levels[(r - 1) * geom.cols + (c - 1)] & 1 : timing;
+        if (!level) continue;
+        const x0 = layout.originPx.x + c * cellPx;
+        const y0 = layout.originPx.y + r * cellPx;
+        fillRect(pixels, width, height, x0, y0, x0 + cellPx, y0 + cellPx, MACHINE_INK);
+      }
+    }
+    return {
+      width,
+      height,
+      pixels,
+      dpi: layout.dpi,
+      layout,
+      substrate,
+      palette: pal.id,
+      sheetMm: layout.sheetMm ? [layout.sheetMm.w, layout.sheetMm.h] : undefined,
+    };
   }
 
   // A mono print has no colour channel, so the shape alphabet widens to carry
@@ -324,6 +350,24 @@ export function echoBitsOf(headerBytes) {
 
 /** Physical ink coverage of a rendered page, for the print-pack estimate. */
 export function coverageStats({ geom, levels, layout, palette = 'INK2', mono = false }) {
+  if (geom.physicalEncoding === 'module') {
+    let sum = 0;
+    const perCell = layout.cellPx * layout.cellPx;
+    const moduleRows = geom.moduleRows ?? geom.rows;
+    const moduleCols = geom.moduleCols ?? geom.cols;
+    for (let r = 0; r < moduleRows; r++) {
+      for (let c = 0; c < moduleCols; c++) {
+        const timing = moduleTimingLevel(c, r);
+        const level = timing === null ? levels[(r - 1) * geom.cols + (c - 1)] & 1 : timing;
+        if (level) sum += perCell;
+      }
+    }
+    return {
+      printedAreaFraction: sum / (geom.totalCells * perCell),
+      cells: geom.totalCells,
+      cellPx: layout.cellPx,
+    };
+  }
   const shapeChannel = geom.channels.find((c) => c.name !== 'colour') || geom.channels[0];
   const shapeLevels = shapeChannel.levels;
   const tiles = buildCoverageTiles(layout.cellPx, shapeLevels, layout.glyph);

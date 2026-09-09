@@ -104,6 +104,9 @@
 | P-M1-600 | — | 0.423 | 443×649 | 31302 | 0.874 |
 | P-M2-600 | — | 0.423 | 443×649 | 62604 | 0.874 |
 | P-C4-600 | — | 0.423 | 443×649 | 35658 | 0.5 (full) |
+| P-MX-300-6 | — | 0.508 | 352×524 | 20111 | 0.874 |
+| P-MX-300-5 | — | 0.423 | 424×630 | 29082 | 0.874 |
+| P-MX-300-4 | — | 0.339 | 523×780 | 44400 | 0.875 |
 | PL-D3 | 0.2 | 2.08 | 80×80 | 2090 | 0.875 (off) |
 | PL-D3 | 0.4 | 3.60 | 42×42 | 576 | 0.873 (off) |
 | PL-D2 | 0.2 | 2.08 | 80×80 | 798 | 0.5 (full) |
@@ -122,6 +125,21 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 99 轮（**新物理编码 `module`：纸面二进制实心模块阵，保留原有协议主链，P-MX-300-4/5/6 三档落地**）
+
+**① 用户目标**：保留 `profiles -> packLevels -> RS -> frame -> marker/homography/echo -> assemble` 主链，只增加一种物理表示。纸面模块为实心方块或空白，1 module = 1 bit；timing/registration 行帮助定位；解码先单应校正，再做局部自适应二值化；低置信模块标擦除交给 RS；回显头使用独立大模块；先做 6px，再试 5px 与 4px。
+
+**② 修法**：新增 `physicalEncoding: 'module'` 与三个纸面档 `P-MX-300-6/5/4`。剖面仍走原 `packLevels/RS/frame`；渲染在 `core/render/raster.js` 分支画满格/空格，`core/decode/module-read.js` 用固定 top/left timing 行校准黑白电平、±3px 配准搜索、局部 Otsu 阈值；边缘用 timing 校准阈值，低置信模块产出 `cellMissing`。回显头 8px（6/5 档）或 10px（4 档），不用数据模块的一半；4/5 档使用更粗的空心角环，避免高密度模块阵淹没朝向标。`bootstrap` 先固定所有用户提示命中的候选再按尺寸排序，防止新档把旧页的显式提示挤到第二次尝试。
+
+**③ 验证**：
+- 模拟扫描 `sim/channel.py --preset scan300 --modifier nocrop`：**P-MX-300-6 / 5 / 4 各自固定 seed 1..16 全部 `16/16` 逐字节还原**。
+- `verify --gate G1 --seeds 3`：三档均 `0 misread`；全量 `verify --gate all` 打印 **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`、exit 0**。
+- 单测新增 `tests/unit/module-matrix.test.mjs`：几何保留 timing 行、纯渲染读回 0 错、真页渲染→单应→RS 组装、PNG bootstrap。
+- 旧档回归：`P-M1-300` 仍为默认，`conformance.json` 仅追加新 profile code；旧 profile code 不改，已打印页面不变。
+- 全量单测 **`tests 376 · pass 375 · fail 0 · skipped 1`、exit 0**；`build-web` + `check-dist` **G9 CHECK: all 13 assertions pass**；`usability.ps1` **289 s、全腿 PASS、exit 0**。
+
+**④ 密度对比（不可压 1MB）**：`P-M1-300` 约 169 页；新档分别约 **64 / 45 / 29 页**。网页标签标「新档·模拟16/16，真机待验」，不冒充真扫描证据。
 
 ### 第 98 轮（**用户指示「阅读交接文档，继续循环工作」⇒ 按 HANDOVER §12 进程内优先级第一项修 D83：空白白页不再被默认 INK2 色板误诊成「擦镜头」**）
 

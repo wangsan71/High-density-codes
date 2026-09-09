@@ -6,6 +6,7 @@ import { pageLayout, QUIET_CELLS } from '../../core/render/layout.js';
 import { renderPageBitmap, echoBitsOf, coverageStats, buildCoverageTiles, measureTargets } from '../../core/render/raster.js';
 import { rhoTable, shapeThresholds, rhoFor, MEASURE, ANNULUS_INNER, dotRadiusForRho, levelFromRho } from '../../core/render/glyphs.js';
 import { readPageIdeal } from '../../core/decode/ideal.js';
+import { readModuleIdeal } from '../../core/decode/module-read.js';
 import { decodeHeader, encodeHeader, HEADER_LEN } from '../../core/frame.js';
 import { PALETTES } from '../../core/palette.js';
 
@@ -267,7 +268,10 @@ async function imageRoundTrip(pid, opts, payload, { dpi = 300, palette = 'INK2',
   for (const p of t.pages) {
     const layout = pageLayout(p.geom ?? t.geom, dpi, opts);
     const bitmap = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette, mono, echoBits: echoBitsOf(p.header) });
-    const read = readPageIdeal(bitmap, layout, t.geom, palette);
+    const read =
+      t.geom.physicalEncoding === 'module'
+        ? readModuleIdeal(bitmap, layout, t.geom)
+        : readPageIdeal(bitmap, layout, t.geom, palette);
     report.push(read);
     const missing = {};
     if (mono && !read.colourAlive) missing.colour = true;
@@ -275,6 +279,7 @@ async function imageRoundTrip(pid, opts, payload, { dpi = 300, palette = 'INK2',
       levels: read.levels,
       header: p.header,
       channelMissing: Object.keys(missing),
+      cellMissing: read.cellMissing,
     });
   }
   return { t, asm, report };
@@ -286,6 +291,9 @@ for (const [pid, opts, size] of [
   ['PL-M1', { nozzle: '0.4' }, 900],
   ['PL-G', { nozzle: '0.8' }, 120],
   ['P-M1-300', {}, 6000],
+  ['P-MX-300-6', {}, 6000],
+  ['P-MX-300-5', {}, 6000],
+  ['P-MX-300-4', {}, 6000],
 ]) {
   test(`G1 seed: ${pid}${opts.nozzle ? '@' + opts.nozzle : ''} bytes -> raster -> ideal read -> bytes`, async () => {
     const payload = rndBytes(size, 17);

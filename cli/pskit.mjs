@@ -21,7 +21,7 @@ const ROOT = resolve(HERE, '..');
 const HELP = `pskit <command> [options]
 
   send <file>            encode a file into printable pages
-    --profile <id>       P-M1-300 P-M1-600 P-M2-600 P-C4-600 PL-M1 PL-D2 PL-D3 PL-D3S PL-G REL-H1
+    --profile <id>       P-M1-300 P-M1-600 P-M2-600 P-C4-600 P-MX-300-4/5/6 PL-M1 PL-D2 PL-D3 PL-D3S PL-G REL-H1
     --nozzle <0.2|0.4|0.6|0.8>   plate profiles only (default 0.4)
     --monoSafe <full|partial|off>  colour-loss protection vs capacity (default per profile)
     --dpi <n>            raster resolution (plate default 300, paper uses the profile dpi)
@@ -965,6 +965,9 @@ async function gateG1(args) {
     ['PL-D3', { nozzle: '0.2' }, 'INK4'],
     ['PL-G', { nozzle: '0.8' }, 'PAPER1'],
     ['P-M1-300', {}, 'PAPER1'],
+    ['P-MX-300-6', {}, 'PAPER1'],
+    ['P-MX-300-5', {}, 'PAPER1'],
+    ['P-MX-300-4', {}, 'PAPER1'],
   ];
   let allOk = true;
   for (const [pid, opts, pal] of cases) {
@@ -987,12 +990,20 @@ async function gateG1(args) {
       const asm = new mod.protocol.TransferAssembler();
       for (const p of t.pages) {
         const bm = mod.raster.renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: pal, echoBits: mod.raster.echoBitsOf(p.header) });
-        const read = (await import('../core/decode/ideal.js')).readPageIdeal(bm, layout, t.geom, pal);
+        const read =
+          t.geom.physicalEncoding === 'module'
+            ? (await import('../core/decode/module-read.js')).readModuleIdeal(bm, layout, t.geom)
+            : (await import('../core/decode/ideal.js')).readPageIdeal(bm, layout, t.geom, pal);
         for (let i = 0; i < read.levels.length; i++) {
           cells++;
           if (read.levels[i] !== p.levels[i]) misread++;
         }
-        await asm.feed({ levels: read.levels, header: p.header, channelMissing: read.colourAlive ? [] : ['colour'] });
+        await asm.feed({
+          levels: read.levels,
+          header: p.header,
+          channelMissing: read.colourAlive ? [] : ['colour'],
+          cellMissing: read.cellMissing,
+        });
       }
       if (!asm.result || asm.result.length !== payload.length || !asm.result.every((v, i) => v === payload[i])) bad++;
     }

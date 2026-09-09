@@ -15,6 +15,7 @@ import { findMarkers } from './fiducial.js';
 import { rectifyPage } from './warp.js';
 import { readEcho } from './echo.js';
 import { readPageIdeal } from './ideal.js';
+import { readModuleIdeal } from './module-read.js';
 
 /**
  * @param {object} bitmap {width,height,pixels,dpi?,substrate?} RGBA
@@ -60,7 +61,7 @@ export function decodePage(bitmap, { geom, layout, paletteId = 'INK2' }, opts = 
 function readFast(bitmap, geom, layout, paletteId) {
   const echo = readEcho(bitmap, layout);
   if (!echo.ok) return { ok: false, reason: `echo-${echo.reason}`, detail: echo };
-  const read = readPageIdeal(bitmap, layout, geom, paletteId);
+  const read = geom.physicalEncoding === 'module' ? readModuleIdeal(bitmap, layout, geom) : readPageIdeal(bitmap, layout, geom, paletteId);
   const levels = read.levels;
   if (!levels || levels.length !== geom.totalCells) {
     return { ok: false, reason: 'levels-length', detail: { have: levels ? levels.length : 0, want: geom.totalCells } };
@@ -71,6 +72,7 @@ function readFast(bitmap, geom, layout, paletteId) {
     headerBytes: echo.headerBytes,
     header: echo.header || null,
     colourAlive: read.colourAlive,
+    cellMissing: read.cellMissing,
     quality: read.quality,
     // Added because a page whose *ink* contradicts its *symbols* is a different failure
     // from a page with a few wrong cells, and only the outer layers can tell them apart.

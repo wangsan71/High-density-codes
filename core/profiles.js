@@ -91,6 +91,29 @@ export const PROFILES = {
     channels: [{ name: 'height', levels: 2 }], intra: { k: 223, nsym: 32 },
     parityPct: 20, note: 'relief only, decoded from shading (M10, optional)',
   },
+  // Appended after REL-H1, never inserted into the historical order: profileCode is the
+  // position in this table and is burned into already-printed pages.
+  'P-MX-300-6': {
+    id: 'P-MX-300-6', medium: MEDIUM.PAPER, dpi: 300, cellPx: 6,
+    physicalEncoding: 'module', quietCells: 12, echoMinPx: 8,
+    channels: [{ name: 'shape', levels: 2 }], intra: { k: 223, nsym: 32 },
+    parityPct: 20, experimental: true,
+    note: 'binary solid-module matrix at 300 dpi; simulation 16/16, real scanner pending',
+  },
+  'P-MX-300-5': {
+    id: 'P-MX-300-5', medium: MEDIUM.PAPER, dpi: 300, cellPx: 5,
+    physicalEncoding: 'module', quietCells: 14, echoMinPx: 8, fidHalfPx: 20, fidRingPx: 10,
+    channels: [{ name: 'shape', levels: 2 }], intra: { k: 223, nsym: 32 },
+    parityPct: 20, experimental: true,
+    note: 'binary solid-module matrix at 300 dpi; simulation 16/16, real scanner pending',
+  },
+  'P-MX-300-4': {
+    id: 'P-MX-300-4', medium: MEDIUM.PAPER, dpi: 300, cellPx: 4,
+    physicalEncoding: 'module', quietCells: 21, echoMinPx: 10, minCellPx: 4, fidHalfPx: 32, fidRingPx: 12,
+    channels: [{ name: 'shape', levels: 2 }], intra: { k: 223, nsym: 32 },
+    parityPct: 20, experimental: true,
+    note: 'binary solid-module matrix at 300 dpi; simulation 16/16, real scanner pending',
+  },
 };
 
 export const PROFILE_IDS = Object.keys(PROFILES);
@@ -124,6 +147,7 @@ export const isUnqualifiedPaper = (p) => !!p && p.medium !== 'plate' && (p.dpi |
 export const profileOptionLabel = (id, p) =>
   `${id} · ${p.medium === 'plate' ? '实体盘' : '纸'}${p.dpi ? ` ${p.dpi}dpi` : ''}` +
   (isUnqualifiedPaper(p) ? ' · ⚠ 实测未达标 (D49)' : '') +
+  (p.experimental ? ' · 新档·模拟16/16，真机待验' : '') +
   // Round 80: the phone40 channel measured PL-G at 8/8 byte-exact with a whole plate in one phone
   // frame, against 0/8 for the paper profile in the same framing. The hint repeats the profile's
   // own declared purpose (PLAN §2/§3) at the point where the choice is made.
@@ -184,17 +208,28 @@ export function planPage(profileId, opts = {}) {
   const region = { w: sheet.w - 2 * marginMm, h: sheet.h - 2 * marginMm };
   if (region.w <= 0 || region.h <= 0) throw new RangeError('margin leaves no printable region');
 
+  const quietCells = Number.isInteger(p.quietCells) && p.quietCells > 0 ? p.quietCells : QUIET_CELLS;
+
   // The quiet zone and corner markers are printed *inside* the printable region, so
   // they come out of the cell budget. Fitting the lattice alone (as an earlier
   // revision did) produced pages that silently overflowed the plate.
-  const cols = Math.floor(region.w / pitchMm) - 2 * QUIET_CELLS;
-  const rows = Math.floor(region.h / pitchMm) - 2 * QUIET_CELLS;
+  let cols = Math.floor(region.w / pitchMm) - 2 * quietCells;
+  let rows = Math.floor(region.h / pitchMm) - 2 * quietCells;
   if (cols < 4 || rows < 4) {
     throw new RangeError(
       cols < 0 || rows < 0
-        ? `profile ${p.id}: no room for a lattice in ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch (the ${QUIET_CELLS}-cell quiet zone alone fills it)`
-        : `profile ${p.id}: only ${cols}x${rows} cells fit ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch once the ${QUIET_CELLS}-cell quiet zone is paid for`,
+        ? `profile ${p.id}: no room for a lattice in ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch (the ${quietCells}-cell quiet zone alone fills it)`
+        : `profile ${p.id}: only ${cols}x${rows} cells fit ${sheet.w}x${sheet.h}mm at ${pitchMm}mm pitch once the ${quietCells}-cell quiet zone is paid for`,
     );
+  }
+  const physicalCols = cols;
+  const physicalRows = rows;
+  if (p.physicalEncoding === 'module') {
+    cols -= 1; // left timing column
+    rows -= 1; // top timing row
+    if (cols < 4 || rows < 4) {
+      throw new RangeError(`profile ${p.id}: timing rows leave only ${cols}x${rows} data modules`);
+    }
   }
   const totalCells = cols * rows;
 
@@ -217,12 +252,20 @@ export function planPage(profileId, opts = {}) {
     medium: p.medium,
     nozzle: nozzleId,
     dpi: p.dpi || null,
+    physicalEncoding: p.physicalEncoding ?? 'glyph',
+    quietCells,
     sheetMm: sheet,
     marginMm,
     pitchMm,
     pitchRaisedFrom,
+    echoMinPx: p.echoMinPx ?? null,
+    minCellPx: p.minCellPx ?? null,
+    fidHalfPx: p.fidHalfPx ?? null,
+    fidRingPx: p.fidRingPx ?? null,
     cols,
     rows,
+    moduleCols: p.physicalEncoding === 'module' ? physicalCols : null,
+    moduleRows: p.physicalEncoding === 'module' ? physicalRows : null,
     totalCells,
     bitsPerCell,
     channels,
@@ -230,7 +273,10 @@ export function planPage(profileId, opts = {}) {
     ecc,
     regionCells: { cols, rows },
     // region top-left in mm (the data lattice origin), used by renderer + decoder
-    originMm: { x: marginMm + round4((region.w - cols * pitchMm) / 2), y: marginMm + round4((region.h - rows * pitchMm) / 2) },
+    originMm: {
+      x: marginMm + round4((region.w - physicalCols * pitchMm) / 2),
+      y: marginMm + round4((region.h - physicalRows * pitchMm) / 2),
+    },
     notes: p.note,
   };
 }

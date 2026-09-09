@@ -1,12 +1,12 @@
-# 交接文档 · PSKT（第 98 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
+# 交接文档 · PSKT（第 99 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
 > 判据原文与逐轮证据仍在 `docs/PLAN.md` / `docs/ACCEPTANCE.md` / `docs/STATUS.md`。
 >
-> **第 98 轮状态**：用户指示「**阅读交接文档，继续循环工作**」⇒ 已按 §12 进程内优先级完成第一项 **D83**。
-> ① D83 已修并验过（§9 第一条，不再阻塞）；② 下一项是补回两条 CLI 小改进（§9 第二条）；③ 后台没有任务；
-> ④ 本地领先 `origin/master` 10 个提交、尚未推送（线上站点仍是修前版本，见 §14）。
+> **第 99 轮状态**：已加入 **`module` 物理编码**与 `P-MX-300-4/5/6` 三个纸面档。
+> ① 三档都在模拟扫描 16/16 通过，但仍标「真机待验」；② 默认档仍是 `P-M1-300`；③ 下一项是真平板扫描；
+> ④ 代码与台账尚未提交（见 §14）。
 
 ---
 
@@ -14,7 +14,7 @@
 
 **在本机能自动证明的范围内，它是能跑、能用的**：一条命令 `& .\tools\usability.ps1`
 就把「文件 → 可打印产物（2D 纸面 + 3D 码牌）→ 模拟打印扫描 → 接收落盘 → 字节逐位相同」跑通
-（第 98 轮实测 **247 s、全腿 PASS、exit 0**），其中包含多片传输（split/join）、加密传输（三种收法）、
+（第 99 轮实测 **289 s、全腿 PASS、exit 0**），其中包含多片传输（split/join）、加密传输（三种收法）、
 网页发送端与接收端的真实数据路径、局域网服务与"手机视角"的资源逐字节核对，以及
 **扫描仪格式普查**（PNG 的黑白/灰度/彩色/调色板/16-bit + TIFF 的未压缩/LZW/Deflate/PackBits/多页）。
 
@@ -85,14 +85,16 @@ G8/G10 需要切片软件/真打印机，G6 ② 需要产品负责人定判据�
 
 - **`core/`** —— 协议与算法，**纯 ESM、Node 与浏览器同一份、禁用 node 内建**、零运行时依赖。
   - `protocol.js`（编解码 + `TransferAssembler`）、`frame.js`（页头，`totalPages` 是 **u8** ⇒ 一次传输 ≤255 页）、
-    `profiles.js`（10 个档）、`naming.js`（下载名策略 D62）、`splitjoin.js`（分片/重组，第 72 轮）。
+    `profiles.js`（13 个档，其中 `P-MX-300-4/5/6` 是 `physicalEncoding: 'module'`）、
+    `naming.js`（下载名策略 D62）、`splitjoin.js`（分片/重组，第 72 轮）。
   - `decode/`：`bootstrap.js`（候选搜索）、`page.js`（快路 + 标记几何路）、`fiducial.js`（标记检测/墨度）、
     `warp.js`（单应矫正）、`ideal.js`（逐格匹配滤波读电平）、`recalibrate.js`（按页实测 ρ 重读，D51）、
-    `echo.js`（回显条）、`advice.js`（**每个 reason 必须有 advice，机器强制**）、
+    `echo.js`（回显条）、**`module-read.js`（模块阵 timing 校准 + 局部自适应阈值 + 低置信擦除）**、
+    `advice.js`（**每个 reason 必须有 advice，机器强制**）、
     **`png-read.js`（PNG：位深 1/2/4/8/16、调色板、灰度/RGB/带 alpha，第 95 轮）**、
     **`tiff-read.js`（TIFF 基线：II/MM、多页、条带、1/4/8/16 位、光度 0/1/2/3、自写 LZW 与 PackBits、FillOrder、Predictor 2，第 96 轮）**。
   - 自研底层：`hash.js`、`chacha20.js`、`deflate.js`（含 `inflateRaw`）、`crc.js`。
-  - `render/`：`layout.js`、`raster.js`、`png.js`、`tiff.js`、**`pdf.js`（D78 后图像流为裸 RGB 行、无 predictor 参数）**、`stl.js`、`threeMF.js`、`sheet.js`、`glyphs.js`。
+  - `render/`：`layout.js`、`raster.js`、`png.js`、`tiff.js`、**`pdf.js`（D78 后图像流为裸 RGB 行、无 predictor 参数）**、`stl.js`、`threeMF.js`、`sheet.js`、`glyphs.js`、**`modules.js`（模块 timing 图案）**。
   - `calibrate/`：`mtfplate.js`（板规格 + 外观光栅）、`readmtf.js`（读者 + 推荐）。
   - `mesh/`：`solids.js`、`stl.js`、`rectilinear.js`、`mtfplate.js`、`plate.js`。
 - **`cli/pskit.mjs`** —— 只做 IO 与参数：`send` / `receive` / `split` / `join` / `calibrate` / `status` /
@@ -222,20 +224,22 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 1. **D83（CLOSED，第 98 轮）**：纯白/空白扫描图不再因默认 INK2 的纸色底色被误判成 `no-square-candidates`。
    `findMarkers` 现在在阈值阶梯前用 `inkRangeRatio()` 的 p1/p99 动态范围与峰值尾部比例判 `blank-image`。
    阳性对照（D69 仍 `no-contrast`、正常页仍可读、默认 INK2 与 PAPER1 都报 blank）已入单测与 CLI 实跑。
-2. **两处本轮做过、又按"不留未提交工作"的纪律还原的 CLI 改进**（已验证可用，但**没有**单测/腿/门限 ⇒ 未提交）：
+2. **`P-MX-300-4/5/6` 真机待验**：三档均通过固定 16 seed 的 `sim/channel.py --preset scan300 --modifier nocrop`，
+   G1 理想往返 0 错；但没有真实平板扫描证据，网页标签与手册都标了「真机待验」。默认档没有切换。
+3. **两处第 97 轮还原的 CLI 改进**（已验证可用，但**没有**单测/腿/门限 ⇒ 未提交）：
    - `send <目录>` 现在会抛裸 Node 错误 `EISDIR: illegal operation on a directory, read`。改法：`statSync(file).isDirectory()` 时抛一句人话（"一次传输只装一个文件；先把目录打包成一个文件再发"）。
    - `receive` 一次失败的批量只逐张打印原因（40 张照片 = 120 行）。改法：按 `stage/reason` 计数，末尾打一行
      `note: N image/page(s) failed: 30 x markers/no-contrast, ...` 并附**主导类**的一句 `do`。
    两处都应配 usability 腿（`send <dir>` 的具名拒绝；空白目录的汇总行）。
-3. `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
-4. 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`。
-5. 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
-6. `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在取日志元素的表达式上炸）⇒ 真浏览器那一次归 G9。
-7. RSS 长跑：60 min 内 Q1..Q4 中位数**未收敛**；判据在 30 与 60 min 都过，**3 h 跑故意没做**（过度设计）。
-8. 255 页上限本身没动（协议字段宽度，改它要动帧格式与**已经印出去的纸**）。
-9. **第 94 轮启动的 600 dpi G2 重跑被"暂停"中止**（150/200 已处理，数据见 §6）；要判决就重跑：
+4. `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
+5. 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`。
+6. 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
+7. `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在取日志元素的表达式上炸）⇒ 真浏览器那一次归 G9。
+8. RSS 长跑：60 min 内 Q1..Q4 中位数**未收敛**；判据在 30 与 60 min 都过，**3 h 跑故意没做**（过度设计）。
+9. 255 页上限本身没动（协议字段宽度，改它要动帧格式与**已经印出去的纸**）。
+10. **第 94 轮启动的 600 dpi G2 重跑被"暂停"中止**（150/200 已处理，数据见 §6）；要判决就重跑：
    `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan600-*'`（后台，约 1–2 h）。
-10. **本地领先 `origin/master` 7 个提交未推送**（见 §14）⇒ 线上站点仍是修前版本。
+11. **第 99 轮模块档尚需真机判定**（见 §7）。
 
 ---
 
@@ -290,8 +294,8 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 → D8 打印缩放 → G10 四喷嘴 → G8 切片软件打开一次。
 
 **进程内（若你不能跑硬件，按价值排序）**：
-1. **（第 98 轮已完成）D83**：空白页判 blank、D69 平光照片仍判 no-contrast、正常页照旧可读；
-2. **补回 §9 第 2 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿；
+1. **真平板扫描验证 `P-MX-300-6/5/4`**：16/16 模拟已完成，但不能替代真实打印/扫描；先打 6px 一页。
+2. **补回 §9 第 3 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿；
 3. **G10 的照片侧读数**已经就绪（`tools/mtf-matrix.mjs`）；若想再往前，可写 **G4 的照片侧同款读数脚本**
    （把一批手机照片按"缺墨/缺角/太远"自动分类成一张表）；
 4. **G6 ② 的可行性探针**（降采样/分块粗定位能不能把 600 dpi 定位成本压到 ~1 s 量级）—— **只在产品负责人选了 §8(a)③ 时做**，不承诺成功；

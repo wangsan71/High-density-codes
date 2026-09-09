@@ -325,6 +325,9 @@ const PROFILES_TO_TEST = [
   ['P-M1-600', {}],
   ['P-M2-600', {}],
   ['P-C4-600', {}],
+  ['P-MX-300-6', {}],
+  ['P-MX-300-5', {}],
+  ['P-MX-300-4', {}],
 ];
 
 for (const [pid, opts] of PROFILES_TO_TEST) {

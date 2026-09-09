@@ -160,7 +160,12 @@ export async function runSelfTests(ctx = {}) {
       const bmp = decodePNG(bytes);
       const boot = await bootstrapDecode(bmp, { profileHint: profile, dpiHint: prof.dpi || 300, paletteHint: paletteId });
       if (!boot.ok) throw new Error(`bootstrap failed: ${boot.reason} after ${boot.attempts.length} attempts (${boot.attempts.map((a) => `${a.profileId}@${a.dpi}/${a.paletteId}:${a.stage}/${a.reason}`).slice(0, 3).join(' | ')})`);
-      if (boot.attemptCount !== 1) throw new Error(`hinted bootstrap took ${boot.attemptCount} attempts, expected the first to match`);
+      if (boot.attemptCount !== 1) {
+        throw new Error(
+          `hinted bootstrap took ${boot.attemptCount} attempts, expected the first to match: ` +
+            boot.attempts.map((a) => `${a.profileId}@${a.dpi}/${a.paletteId}:${a.stage}/${a.reason}`).join(' | '),
+        );
+      }
       results.push({ boot, bmp });
     }
     for (const { boot } of results) {
