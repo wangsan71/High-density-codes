@@ -131,7 +131,18 @@
 
 **修法（D71，已闭）**：`core/decode/echo.js` 新增 `ECHO_SEPARATION_FLOOR = 0.35`；`readEcho` 在**所有阈值候选都失败之后**，若分离度低于它，改报 `no-contrast`（页面层自动成为 `echo-no-contrast`）；`advice.js` 给出「拍近/2× 变焦/顶边对焦/换粗档/改用 300 dpi 扫描」。**判据一字未动**：没有任何页面因此被接受。
 
-**实测（端到端）**：`node tools/g2-corpus.mjs .tmp/p40-trial` ⇒ 修前 `readout/echo-bad-magic`，修后 **`readout/echo-no-contrast`**（三页全部）。**阳性对照**（`tests/unit/warp.test.mjs` 新增 1 例）：同一页锐利 ⇒ 仍能读；轻微模糊（分离度 0.546）⇒ **不得**被判 `no-contrast`（否则这条诊断会吞掉真正的「条带受损」）。
+**实测（端到端）**：`node tools/g2-corpus.mjs .tmp/p40-trial` ⇒ 修前 `readout/echo-bad-magic`，修后 **`readout/echo-no-contrast`**（三页全部）。
+**同一轮的第二组实测（`phone40`，即「整页在画面里、光线正常」的现实手机档）—— 第一次拿到正面的 G4 证据**：
+
+| 腿 | 取景 | 结果 |
+|---|---|---|
+| 纸面 `P-M1-300` | `nocrop` | **0/8**（失败类：`echo-no-contrast` ×17、`no-contrast` ×7 —— **正是本轮与上轮新加的两条诊断**）|
+| 纸面 `P-M1-300` | `crop` | **0/8**（同上）|
+| **板材 `PL-G@0.4`** | `nocrop` | **8/8 = 100%（逐字节还原、摘要核对）** |
+| 板材 `PL-G@0.4` | `crop` | **6/8 = 75%** |
+
+⇒ **产品结论（第一次由实测给出，而不是推断）**：手机拍整页时，**纸面档读不出来、粗档板材读得出来** —— 3.6mm 的格子在一张 1600×1200 的手机照片里还有 ~15px，而 0.85mm 的纸面格子只剩 ~2.7px。失败时两条新诊断会**分别**指向正确动作（`no-contrast` = 曝光/反光/太远；`echo-no-contrast` = 拍近/换粗档），不再让用户去重印。**仍然是仿真信道，不是真手机** ⇒ G4 判决不变。
+**阳性对照**（`tests/unit/warp.test.mjs` 新增 1 例）：同一页锐利 ⇒ 仍能读；轻微模糊（分离度 0.546）⇒ **不得**被判 `no-contrast`（否则这条诊断会吞掉真正的「条带受损」）。
 
 **本轮门限复跑（第 80 轮，全部实测；`core/decode/echo.js` 被改过，所以全套重跑）**：
 
