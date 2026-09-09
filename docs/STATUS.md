@@ -123,6 +123,20 @@
 
 ## 已知风险 / 待办
 
+### 第 89 轮（**页数上限的 hint 说了「用 split」，却没说「每片多大」⇒ 第二句仍然撞墙**）
+
+**用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只把第 84 轮那句 hint 补成**能直接照抄**的。
+
+**问题**：`send` 撞到 255 页上限时，hint 让用户「用 `pskit split` 切开」—— 但 `split` 默认每片 1.4 MB（纸面档的尺度），而板材档一次传输只装得下约 **21 KB**（`PL-G@0.4`：192 数据页 × 110 B）。用户照 hint 切完再发，**第二次仍然撞同一面墙**。
+
+**修法**：hint 现在算出**这个档一次传输能装多少**（从 253 个数据页往下找满足 `D + parity(D) ≤ 255` 的最大 D，再乘每页净字节），并打印一条可照抄的命令：
+
+```
+  hint: this transfer is 204800 B; PL-G carries ~110 B per page, so ONE transfer of this profile holds at most ~21120 B (uncompressed), while P-M1-300 (paper) carries ~7514 B per page -- about 28 page(s) for this file before compression.
+  to send it anyway: node cli/pskit.mjs split <file> --max-bytes 21120 --out parts and send/print/scan each part as its own transfer (then join the received parts).
+```
+
+**实测**：`split --max-bytes 21120` ⇒ 10 片、exit 0；再 `send part-000.bin --profile PL-G --nozzle 0.4 --format 3mf` ⇒ exit 0（每片真的装得下）。**并如实记下我自己第一版的错**：那段循环从 255 **往下按字节**试、255 B 当然立刻满足 ⇒ 打印出「最多 ~255 B」（荒谬数字）。改成按数据页数求最大 D 后得 ~21120 B ✓。断言加进 `usability.ps1` 的 1b 腿（hint 必须含 `--max-bytes \d+`）。
 ### 第 88 轮（**少了一页也能拿回文件，但收端不吭声 —— 现在会点名「第 0 页是从校验页重建的」**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只补一句**输出**。

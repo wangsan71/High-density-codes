@@ -185,7 +185,9 @@ $hintLog = Join-Path $tmp "step1b-hint.log"
 & node cli/pskit.mjs send $payload --profile PL-D2 --format png --out (Join-Path $tmp "bare-plate") *> $hintLog
 $hintCode = $LASTEXITCODE
 $hintText = Get-Content $hintLog -Raw
-$hintOk = ($hintCode -ne 0) -and ($hintText -match "P-M1-300") -and ($hintText -match "split")
+# The hint must also say how big a part may be: for a plate profile that is ~21 kB, not the 1.4 MB
+# split default, so a hint without a number sends the user into a second refusal (round 89).
+$hintOk = ($hintCode -ne 0) -and ($hintText -match "P-M1-300") -and ($hintText -match "split") -and ($hintText -match "--max-bytes \d+")
 if (-not $hintOk) { $script:fails++ }
 Write-Host ("{0}  forcing a plate profile on a big payload refuses and names the way out  (exit {1})" -f $(if ($hintOk) { " PASS" } else { " FAIL" }), $hintCode)
 if (-not $hintOk) { Get-Content $hintLog -Tail 3 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }

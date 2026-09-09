@@ -192,14 +192,36 @@ async function cmdSend(args) {
     // page carries ~180 B against a paper page's ~7.5 kB, two orders of magnitude apart. Measured
     // (round 84): a bare `send file` used to hit this with the plate default and name no way out.
     if (/inter-page RS limit/.test(String(e && e.message))) {
+      const geomOpts = { nozzle, plateMm: args.plate ? Number(args.plate) : undefined, sheet: args.sheet, parityPct: args.parity ? Number(args.parity) : undefined };
       const per = mod.profiles.planPage('P-M1-300', {}).ecc.netBytesPerPage;
-      const here = mod.profiles.planPage(profileId, { nozzle, plateMm: args.plate ? Number(args.plate) : undefined }).ecc.netBytesPerPage;
+      const here = mod.profiles.planPage(profileId, geomOpts).ecc.netBytesPerPage;
+      // What this profile can actually carry in ONE transfer: 255 pages minus the parity pages, times
+      // the net bytes per page. A split that ignores it produces parts that are themselves too big --
+      // the round-84 hint said "use pskit split" without saying how big a part may be, which for a
+      // plate profile is ~46 kB, not the 1.4 MB default (measured, round 89).
+      // Largest payload this profile can carry in ONE transfer: find the biggest data-page count D
+      // whose D + parity(D) still fits the 255-page ceiling, then multiply by the net bytes per page.
+      // (The first version of this loop walked bytes downward from 255 and stopped immediately --
+      // 255 B always fits -- and printed "at most ~255 B" for a profile that really holds ~28 kB.)
+      const geomHere = mod.profiles.planPage(profileId, geomOpts);
+      const interRatio = geomHere.ecc.inter.nsym / geomHere.ecc.inter.k;
+      let ceiling = null;
+      for (let d = 253; d >= 1; d--) {
+        const parity = Math.max(2, Math.ceil(d * interRatio));
+        if (d + parity <= 255) { ceiling = d * geomHere.ecc.netBytesPerPage; break; }
+      }
       console.log(`pskit send: ${e.message}`);
       console.log(
-        `  hint: this transfer is ${raw.length} B; ${profileId} carries ~${here} B per page, while P-M1-300 (paper) carries ~${per} B per page ` +
-          `and allows up to 255 pages -- about ${Math.ceil(raw.length / per)} page(s) for this file before compression. ` +
-          'Or cut the file into parts with `pskit split` and send each part as its own transfer.',
+        `  hint: this transfer is ${raw.length} B; ${profileId} carries ~${here} B per page` +
+          (ceiling ? `, so ONE transfer of this profile holds at most ~${ceiling} B (uncompressed)` : '') +
+          `, while P-M1-300 (paper) carries ~${per} B per page -- about ${Math.ceil(raw.length / per)} page(s) for this file before compression.`,
       );
+      if (ceiling) {
+        console.log(
+          `  to send it anyway: ` + `node cli/pskit.mjs split <file> --max-bytes ${ceiling} --out parts` +
+            ' and send/print/scan each part as its own transfer (then join the received parts).',
+        );
+      }
       process.exitCode = 2;
       return;
     }
