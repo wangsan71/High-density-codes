@@ -126,6 +126,14 @@
 
 ## 已知风险 / 待办
 
+### 第 102 轮（**模块真机扫描一键检查器：`tools/check-module-scans.mjs` 落地**）
+
+**① 为什么做**：验收包虽然给了三条 `receive` 命令，但用户扫描完三档后仍要逐个跑 CLI、逐个比对摘要，容易漏掉其中一档或把输出目录放错。
+
+**② 改动**：新增 `tools/check-module-scans.mjs`。它从验收包读 `payload-module.bin` 自己重算 SHA-256，逐档读取 `module-6/5/4` 目录中的 PNG/TIFF，走同一套 `decodePage + feedPageWithRecalibration + TransferAssembler`，打印三档 PASS/FAIL，三档全部逐字节相同才 exit 0。
+
+**③ 验证**：用第 100 轮生成的验收包原图运行 ⇒ `3/3 profiles byte-exact`、exit 0；把扫描根目录指向不存在路径 ⇒ `0/3`、exit 1。阳性对照成立。真平板扫描仍未执行。
+
 ### 第 101 轮（**模块档 100 KB 多页模拟传输：三档全部逐字节还原**）
 
 **① 为什么补这一测**：第 99 轮的 16 seed 是 10,240 B 小载荷，每档只有 1 个数据页 + 2 个校验页。它证明了单页模块读出，但没有证明模块档在多数据页、页间 RS、连续扫描页序下的组装路径。

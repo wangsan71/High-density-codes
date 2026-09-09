@@ -96,6 +96,7 @@ node tools/check-lan.mjs   --port 8137    # 验它交出去的资源与构建清
   ```powershell
   node cli/pskit.mjs send FILE --profile P-MX-300-6 --format png,pdf --out DIR
   node cli/pskit.mjs receive DIR --photo --profile P-MX-300-6 --out OUT.bin
+  node tools/check-module-scans.mjs --kit 验收包目录 --scans scans-module-6/5/4 的父目录
   ```
 
   仍然打印 100%、扫描 300 dpi、彩色、关闭自动裁剪。4px 档对打印机/扫描仪要求最高，先在 6px 或 5px 上验证自己的链路。

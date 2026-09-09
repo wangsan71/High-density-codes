@@ -1,12 +1,12 @@
-# 交接文档 · PSKT（第 101 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
+# 交接文档 · PSKT（第 102 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
 > 判据原文与逐轮证据仍在 `docs/PLAN.md` / `docs/ACCEPTANCE.md` / `docs/STATUS.md`。
 >
-> **第 101 轮状态**：`module` 物理编码、三档多页模拟和硬件验收包均已完成。
-> ① 小载荷 16/16；② 100 KB 多页传输三档逐字节还原；③ 验收包已含三份 pack.pdf；④ 默认档仍 `P-M1-300`；
-> ⑤ 真平板扫描是最后缺口；⑥ 代码与台账尚未提交（见 §14）。
+> **第 102 轮状态**：`module` 物理编码、多页模拟、硬件验收包与一键扫描检查器均已完成。
+> ① 小载荷 16/16；② 100 KB 多页三档逐字节还原；③ 验收包生成三份 pack.pdf；④ `check-module-scans.mjs` 批量核对真扫描；
+> ⑤ 默认档仍 `P-M1-300`；⑥ 真平板扫描是最后缺口；⑦ 代码与台账尚未提交（见 §14）。
 
 ---
 
@@ -106,6 +106,7 @@ G8/G10 需要切片软件/真打印机，G6 ② 需要产品负责人定判据�
   `check-serve.mjs` / `check-lan.mjs`、`smoke-sender.mjs` / `smoke-capture.mjs`、`soak.mjs`（= `verify --gate G6`）、
   `usability.ps1`（**一条命令的端到端冒烟**，含 4g 扫描仪 PNG 变体腿与 4h TIFF 变体腿）、
   `acceptance-kit.ps1` + `acceptance-readme.txt`（用户硬件验收包，**含 P-MX-300-4/5/6 纸面腿**）、
+  **`check-module-scans.mjs`（三档真扫描目录的一键摘要核对）**、
   **`mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数，第 92 轮）**、`mtf-probe.ps1`（仿真打印机探针）、
   `g4-probe.ps1`、`check-3mf.mjs`、`level-diff.mjs`、`g6-perf-probe.mjs`、`rho-report.mjs`、`check-docs-tables.mjs`。
 - **`sim/channel.py`** —— 确定性"打印+扫描/拍照"替身（Python + numpy + cv2）；**宿主 shell 跑得通**。
@@ -225,7 +226,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
    `findMarkers` 现在在阈值阶梯前用 `inkRangeRatio()` 的 p1/p99 动态范围与峰值尾部比例判 `blank-image`。
    阳性对照（D69 仍 `no-contrast`、正常页仍可读、默认 INK2 与 PAPER1 都报 blank）已入单测与 CLI 实跑。
 2. **`P-MX-300-4/5/6` 真机待验**：三档小载荷 16/16，且 100 KB 多页模拟逐字节还原；
-   `acceptance-kit.ps1` 已给出逐档打印/扫描/接收命令，但真实平板扫描仍未执行。
+   `acceptance-kit.ps1` 与 `check-module-scans.mjs` 已把真扫描流程降到一条命令，但真实平板扫描仍未执行。
 3. **两处第 97 轮还原的 CLI 改进**（已验证可用，但**没有**单测/腿/门限 ⇒ 未提交）：
    - `send <目录>` 现在会抛裸 Node 错误 `EISDIR: illegal operation on a directory, read`。改法：`statSync(file).isDirectory()` 时抛一句人话（"一次传输只装一个文件；先把目录打包成一个文件再发"）。
    - `receive` 一次失败的批量只逐张打印原因（40 张照片 = 120 行）。改法：按 `stage/reason` 计数，末尾打一行
@@ -294,7 +295,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 → D8 打印缩放 → G10 四喷嘴 → G8 切片软件打开一次。
 
 **进程内（若你不能跑硬件，按价值排序）**：
-1. **真平板扫描验证 `P-MX-300-6/5/4`**：小载荷与 100 KB 模拟均已完成；`acceptance-kit.ps1` 已把三份页与命令打包，先打 6px 一页。
+1. **真平板扫描验证 `P-MX-300-6/5/4`**：小载荷与 100 KB 模拟均已完成；`acceptance-kit.ps1` 已打包，`check-module-scans.mjs` 可批量核对，先打 6px 一页。
 2. **补回 §9 第 3 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿；
 3. **G10 的照片侧读数**已经就绪（`tools/mtf-matrix.mjs`）；若想再往前，可写 **G4 的照片侧同款读数脚本**
    （把一批手机照片按"缺墨/缺角/太远"自动分类成一张表）；
