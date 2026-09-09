@@ -123,6 +123,22 @@
 
 ## 已知风险 / 待办
 
+### 第 94 轮（**D51 的账目收口：修法第 63 轮就落地了，状态列头上却还写着"未修"；用 D51 自己点名的命令复验 —— 首读仍塌陷（设计如此）、整条传输被救回且逐字节相同；并启动 600 dpi 的 G2 重跑去取 D49 的最终判决**）
+
+**① 先修账（这一轮最大的收获是一条过期记账）**：`docs/DEFECTS.md` 里 **D51 的状态列开头**仍写 `OPEN ✗（第 61 轮量到根因，未修）`，而**同一格**里第 63 轮的修法记录（①..⑦）与 **D49 那一行**都写着 `D51 = FIXED ✓` ⇒ 头上那句从第 63 轮起就是过期记账，接手人只看状态列会被带错方向。本轮把它改成 CLOSED，并把复验证据补在该格末尾（⑧）。
+
+**② 复验（用 D51 自己点名的两条命令，判据一字未改）**
+
+- `node tools/level-diff.mjs .tmp/g2src-a4-600 .tmp/sc-scan600-11 0,1` ⇒ **首次直读仍然塌陷**：page 1 `mismatch 256118/283155 = 90.452%`、`COLLAPSE`、混淆只有 `0->1`；page 0 `0.000%`（`LEVELDIFF_EXIT=0`，它只表示比对跑成了）。**这不是回归**：修法是"页内码拒绝后按**本页实测**切点重读一次"，首读那一步一行未改。
+- `node cli/pskit.mjs receive .tmp/sc-scan600-11 --photo --profile P-M1-600 --dpi 600 --out .tmp/d51/got.bin` ⇒ page-001/002 各打印 `RESCUED -- shape levels re-decided against a cut measured on this page`（切点 1.4725 / 1.2862、改判 259796 / 250222 格）⇒ **`received 204800 bytes`、sha256 `91ab3f7310da452b…` 与 manifest 逐位相同、`RECEIVE_EXIT=0`**。
+- ⇒ **D51 的用户可见后果（整页丢 ⇒ `assemble/intra-fail` ⇒ `short`）已不存在**，而**首读塌陷按设计保留**（它是救回的触发条件）⇒ 台账当时写的验收形态（"修好后 `level-diff` 必须接近 0"）**是写错的形态**，实际形态是"整条传输逐字节还原"（本轮实测）。常驻守卫：`tests/unit/recalibrate.test.mjs` 的两条（塌陷页被救回且逐字节相同 / ρ 无信息的页**不被**救回）。
+
+**③ 600 dpi 的最终判决：本轮启动重跑**（后台：`verify --gate G2 --root .tmp --match 'sc-scan600-*'`，200 份语料齐备、日志 `.tmp/d49-600-r94.log`）—— 上一轮跑到 52/200 被用户中止 ⇒ **结果未出之前不改任何判决**；跑完按 `docs/ACCEPTANCE.md` 的口径如实记账。
+
+**④ 门限与产物**：本轮**只改文档**（`docs/DEFECTS.md`、`docs/STATUS.md`），**代码一行未动** ⇒ 不重跑门限；上一轮（第 93 轮）的门限状态仍然有效：单测 **348/348**、`verify --gate all` **ALL GATES PASS exit 0**、`USABILITY_EXIT=0`（211 s 全腿）、`check-docs-tables` 干净。**总账不变**：✅5 · 🟡5 · ⬜1。
+
+**用户指示**：本轮是持久目标的自动续跑（用户上一条直接指示是「好了可以继续」）。
+
 ### 第 93 轮（**"扫描成 PDF"这条最常见的路，被说成"没有页"⇒ D79 已闭；顺带去掉每条错误上重复的命令前缀**）
 
 **① 根因**：`cli/pskit.mjs` 的输入过滤只收 `.png`，并把"读不了的格式"列进 `UNREADABLE`（D74 加的 `.tif/.jpg/.webp/...`）——**`pdf` 不在名单里**。而本 build **写得出一份 PDF（那是打印路径）却光栅化不了一份** ⇒ 目录里只有 `scan.pdf` 时落到兜底那句 `receive: no pages found in <dir>`：把"格式读不了"说成"没有页"，用户会去重扫、去查文件名。扫描仪"扫描成 PDF"是最常见的默认输出 ⇒ 这条会撞。
