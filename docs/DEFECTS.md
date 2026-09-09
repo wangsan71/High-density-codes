@@ -20,6 +20,13 @@
 | ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
+### 第 95 轮新增（D80 / D81 ⇒ **两条都已闭** ✓）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~D80~~ | **扫描仪的默认档是"黑白 / 线稿"，而我们的 PNG 读者只吃 8-bit ⇒ 用户被自己扫描仪最干净的一种输出挡在门外**：`core/decode/png-read.js` 里 `if (depth !== 8) throw` 与 `palette PNG unsupported` 把 **1-bit / 2-bit / 4-bit / 16-bit 与调色板 PNG 全部拒绝**。实测（PIL 从我们自己的页转出、单页单目录、`receive --photo`）：`bw1`（1-bit 无抖动）与 `pal8`（16 色调色板）**exit 2、不写盘**，用户看到的是 `page-000.png: not a readable PNG (decodePNG: bit depth 1 unsupported (need 8))` —— 一句工具内部的话，而且**把最干净的输入当成坏文件**（1-bit 扫描没有半色调，墨点边界比彩色扫描更锐利） | **一条命令**（已入库为 `tools/usability.ps1` 的 **4g 腿**）：用 PIL 把一页转成 8-bit 灰度 / 1-bit / 16 色调色板 / 16-bit 灰度四种，各跑一次 `receive --photo` ⇒ 修前 **1-bit 与调色板 exit 2、不写盘**；修后**四种全部 exit 0 且 sha256 与载荷逐位相同**。单测 **`tests/unit/png-read-depths.test.mjs`（8 例）**自己按字节造 PNG（不依赖第三方编码器，CI 里也跑）：1/2/4-bit 灰度的 MSB 解包与 `0/85/170/255` 定标 · 调色板 + `tRNS`（越界条目保持不透明）· 16-bit 取高字节（灰与 RGB）· 灰+alpha · **亚字节行上滤波的像素偏移 bpp=1**（`Sub`/`Up` 各一例）· 五条"坏头必须具名拒绝"（隔行、palette 16-bit、RGB 4-bit、无 PLTE、调色板下标越界） | **FIXED ✓（第 95 轮）** 读者按规范支持 **colour type 0/2/3/4/6 × 允许的位深**：行字节数 = `ceil(width × depth × channels / 8)`、滤波偏移 `bpp = max(1, ceil(depth × channels / 8))`、亚字节按 MSB 优先解包、低于 8 位的灰度按 `255/(2^depth−1)` 定标、16-bit 取高字节、`PLTE`+`tRNS` 展开（缺 PLTE、下标越界、位深与 colour type 不匹配一律具名抛错）。仍然拒绝：隔行 PNG、非 0 压缩/滤波方法 |
+| ~~D81~~ | **`decodePNG` 从来没有读出过 dpi**：pHYs 的布局是"4 字节 X 密度 + 4 字节 Y 密度 + **1 字节单位**"，而代码写的是 `u32(phy, 8) === 1` —— 从第 8 字节起读了**四个**字节（其中三个越过 9 字节的块 ⇒ 读到 0），这个条件**永远不成立** ⇒ `dpi` 恒为 `null`。后果不止"少一个字段"：`core/decode/page.js` 的 `Math.abs((bitmap.dpi \|\| layout.dpi) - layout.dpi) < 0.5` 是"这张位图真的是标称画布吗"的**第二道守卫**，`bitmap.dpi` 恒 null ⇒ 它退化成 `0 < 0.5` ⇒ **守卫永远通过**（第一道守卫"宽高相等"仍然有效，所以没有因此误收过页） | 复现：读我们写出的 PNG 的 pHYs（实测 `11811 11811 1` = 300 dpi）再 `decodePNG` ⇒ 修前 `dpi null`、修后 `300`；新单测最后一条把这个断言钉住（`assert.equal(back.dpi, 300)`）。**它是写这组深度测试时被抓出来的**（我原本只想验证自己的读取器）⇒ 回归：`node cli/pskit.mjs receive .tmp/sc-scan300-10 --photo --profile P-M1-300 --dpi 300` ⇒ **exit 0、摘要与 manifest 相符**（语料 pHYs 实测 11811 = 300 dpi ⇒ 守卫现在真的在比 300 对 300，而不是空过） | **FIXED ✓（第 95 轮）** 改成 `phy.length >= 9 && phy[8] === 1`。修复方向是**更保守**：dpi 与版面不符时跳过快路、改走标记几何路 ⇒ 不会因为这次修复而误收一页 |
+
 ### 第 93 轮新增（D79 ⇒ **本轮已闭** ✓）
 
 | # | 缺陷 | 复现 | 状态 |

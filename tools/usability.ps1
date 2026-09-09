@@ -443,6 +443,35 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $pdfDir "pack.pdf"))) {
   Write-Host ("{0}  the same pages as PNG still decode from the PDF directory  (exit {1})" -f $(if ($pdfMixedOk) { " PASS" } else { " FAIL" }), $LASTEXITCODE)
 }
 
+# 4g. Scanner output variants. "Black and white" / "line art" are the default scan modes on most
+#     flatbeds (1-bit gray, or a palette PNG), and film scanners write 16-bit gray; all of them must
+#     decode byte-identically, because refusing the cleanest input a scanner can give is not a user
+#     error (DEFECTS D80). PIL makes the fixtures; 8-bit gray is the positive control (it always worked).
+$varRoot = Join-Path $tmp "fmt-variants"
+if (Test-Path $varRoot) { Remove-Item -Recurse -Force $varRoot }
+New-Item -ItemType Directory -Force -Path $varRoot | Out-Null
+& python -c "from PIL import Image; import numpy as np; im=Image.open(r'$encSrc\page-000.png').convert('RGB'); vs={'gray8':lambda:im.convert('L'),'bw1':lambda:im.convert('L').convert('1',dither=Image.NONE),'pal8':lambda:im.convert('P',palette=Image.ADAPTIVE,colors=16),'gray16':lambda:Image.fromarray((np.asarray(im.convert('L')).astype('uint16')*257),mode='I;16')}; [vs[k]().save(r'$varRoot\\'+k+'.png') for k in vs]" *> (Join-Path $tmp "step4g-make.log")
+if ($LASTEXITCODE -ne 0) {
+  Write-Host " SKIP  scanner-variant leg: PIL could not write the fixtures"
+} else {
+  $variantFails = @()
+  foreach ($name in 'gray8', 'bw1', 'pal8', 'gray16') {
+    $vd = Join-Path $varRoot $name
+    New-Item -ItemType Directory -Force -Path $vd | Out-Null
+    Move-Item (Join-Path $varRoot "$name.png") (Join-Path $vd "page-000.png") -Force
+    $vOut = Join-Path $tmp "fmt-$name.bin"
+    & node cli/pskit.mjs receive $vd --photo --profile P-M1-300 --passphrase $encPw --out $vOut *> (Join-Path $tmp "step4g-$name.log")
+    $vOk = ($LASTEXITCODE -eq 0) -and (Test-Path $vOut)
+    if ($vOk) { $vOk = ((Get-FileHash -Algorithm SHA256 -Path $vOut).Hash.ToLower() -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower()) }
+    if (-not $vOk) {
+      $variantFails += $name
+      Get-Content (Join-Path $tmp "step4g-$name.log") -Tail 2 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) }
+    }
+  }
+  if ($variantFails.Count) { $script:fails++ }
+  Write-Host ("{0}  scanner variants decode byte-identically: 8-bit gray, 1-bit black-and-white, palette, 16-bit gray  (failed: {1})" -f $(if ($variantFails.Count -eq 0) { " PASS" } else { " FAIL" }), $(if ($variantFails.Count) { $variantFails -join ',' } else { 'none' }))
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
