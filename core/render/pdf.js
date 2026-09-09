@@ -22,8 +22,8 @@
  *   2  Pages            -> Kids [3 0 R, 6 0 R, ...], /Count N
  *   per page i (0-based):
  *     3+3i   Page       -> /MediaBox [0 0 w_pt h_pt], /Resources /XObject /Im0
- *     4+3i   Image      -> /DeviceRGB, /BitsPerComponent 8, /FlateDecode with
- *                          /DecodeParms /Predictor 15 /Colors 3 /Columns width*3
+ *     4+3i   Image      -> /DeviceRGB, /BitsPerComponent 8, /FlateDecode of
+ *                          raw RGB rows -- no /DecodeParms at all (DEFECTS D78)
  *     5+3i   Contents   -> substrate background fill + `cm` scaling /Im0 onto the
  *                          whole MediaBox
  *   xref table (classic, one 20-byte entry per object) + trailer + startxref
@@ -31,11 +31,21 @@
  * That numbering is not incidental: for N=1 it reproduces the object layout this
  * module has always emitted, so single-page fixtures stay byte-identical.
  *
- * The image data is *exactly* the PNG scanline stream: one filter-type byte 0
- * (None) in front of each RGB row, then `78 01` + core/deflate.js deflateRaw +
- * adler32 BE. Predictor 15 means "PNG row filters", so the same bytes are valid
- * in a PNG IDAT and in a PDF FlateDecode image -- that is the whole trick, and
- * why tests can inflate one stream and compare it against the other encoder.
+ * The image data is `78 01` + core/deflate.js deflateRaw + adler32 BE over raw
+ * RGB rows, top row first, `width*3` bytes each: the plainest thing a PDF image
+ * stream can be, so there is nothing for a reader to interpret.
+ *
+ * It used to be the PNG scanline stream (a filter-type byte 0 in front of each
+ * row) declared as `/DecodeParms << /Predictor 15 /Colors 3 /Columns width*3 >>`.
+ * That is D78: every mainstream reader (pdf.js, PDFium, mupdf, poppler,
+ * Ghostscript) derives the row stride from `Columns * Colors * BitsPerComponent
+ * / 8`, so `Columns = width*3` made it read 20340-byte rows out of a 6780-byte
+ * stream. Measured on a real 2260x3290 page: the image came out sheared by
+ * exactly 2 bytes per 3 rows (0.222 px/row at 300 dpi), which pushes the lower
+ * registration marks off the sheet -- the page is then undecodable. A predictor
+ * whose filter type is 0 on every row buys nothing, so it is gone rather than
+ * merely corrected: with no /DecodeParms there is no Columns for a reader to
+ * misread, whichever convention it follows.
  *
  * No DCTDecode, no JBIG2, no alpha, no colour management: a scanned page has no
  * use for transparency and a lossy codec would move ink edges, which is the
@@ -193,18 +203,16 @@ function cat(chunks) {
 }
 
 /**
- * RGBA (row-major, top row first) -> filtered RGB scanlines with a filter-type
- * byte 0 (None) in front of each row. Byte-identical to what a PNG IDAT carries,
- * which is what PDF predictor 15 expects.
+ * RGBA (row-major, top row first) -> raw RGB rows, `width*3` bytes each, no
+ * per-row filter byte. See the D78 note at the top of this file for why this is
+ * deliberately *not* the PNG scanline stream any more.
  */
-function filteredScanlines(width, height, pixels) {
+function rawScanlines(width, height, pixels) {
   const stride = width * 3;
-  const raw = new Uint8Array(height * (stride + 1));
+  const raw = new Uint8Array(height * stride);
   let s = 0;
   for (let y = 0; y < height; y++) {
-    const o = y * (stride + 1);
-    raw[o] = 0; // filter type: None
-    let d = o + 1;
+    let d = y * stride;
     for (let x = 0; x < width; x++) {
       raw[d++] = pixels[s];
       raw[d++] = pixels[s + 1];
@@ -318,7 +326,7 @@ export function encodePDFDocument(images) {
       tyPt = numPt(tyNum);
     }
 
-    const imageData = zlibWrap(filteredScanlines(width, height, pixels));
+    const imageData = zlibWrap(rawScanlines(width, height, pixels));
     const pageObj = ascii(
       `${pageNo} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${boxWPt} ${boxHPt}]\n` +
         `   /Resources << /XObject << /Im0 ${imageNo} 0 R >> /ProcSet [/PDF /ImageC] >>\n` +
@@ -331,8 +339,8 @@ export function encodePDFDocument(images) {
           // Interpolate false: a viewer that resamples the bitmap blurs the ink
           // edges, and edge position is exactly what the decoder measures.
           `   /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false\n` +
+          // No /DecodeParms: raw rows, nothing a reader can misinterpret (D78).
           `   /Filter /FlateDecode\n` +
-          `   /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${width * 3} >>\n` +
           `   /Length ${imageData.length} >>\nstream\n`,
       ),
       imageData,

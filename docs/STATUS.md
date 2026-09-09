@@ -123,6 +123,30 @@
 
 ## 已知风险 / 待办
 
+### 第 91 轮（**用户报的「PDF 斜」是真的，而且是我们自己写出去的参数：`/Columns` 让每个主流阅读器按 3 倍行距取图 ⇒ D78 已闭；PDF 图像流从此不带任何 predictor 参数**）
+
+**① 根因（量出来的，不是猜的）**
+
+- 我们的图像字典写的是 `/DecodeParms << /Predictor 15 /Colors 3 /Columns ${width * 3} >>`，而流里每行**只有 `width*3 = 6780` 字节**（实测：解压后 `22309490 = 3290 × 6781`，每行滤波类型字节全是 0）。阅读器**只**按 `rowBytes = Columns × Colors × BitsPerComponent / 8` 解释 `/Columns`（pdf.js `PredictorStream`、PDFium `CPDF_Predictor`、mupdf `fz_open_predict`、poppler `StreamPredictor`、Ghostscript `zpredict` 同一条）⇒ 它按 `20340` 字节取行 ⇒ **每 3 行漂移 2 字节 = 0.222 px/行（300 dpi）**，整页被剪成平行四边形，下半页的套准十字与角标被挤出纸边 ⇒ 印出来的纸页解不了。PNG 产物一直是好的（PNG 的 IHDR 没有这个歧义）⇒ 用户看到的「PDF 斜、PNG 直」正是这一条。
+- **指纹对上了**：对 `scans/pack.pdf` 的 obj 4 按阅读器公式重排后，局部周期向量由 `(dy,dx)=(10,0)` 变成 `(10,2)`（子像素法：每 10 行右移 2.15 px、水平/垂直周期本身不变 ⇒ **是剪切不是旋转**），与用户那三张 `pack_pages-to-jpg-000{1,2,3}.png` 实测**逐位一致**。用户图上的三个硬伤因此同一个解释：底部两个角标出现在 `x≈794/873`（= 135 + 0.21×3238）、右下角标被推出纸面、左侧那条斜向墨区边界 = 每行 0.2 px 的漂移。
+- 顺带排除掉两个假设（都是数字）：那三张图**不是扫描/拍照**（空白边距 `min=253..255`、无 JPEG 8×8 块指纹 `ratio 1.00`、249 个灰阶 ⇒ 干净的数字渲染），所以形变只能来自**渲染**而不是纸/相机。
+- **第 90 轮那条「两个产物逐像素相同」没有错**（本轮复算仍是 `0/7435400`、最差通道差 0），但它量的是**我们自己写出去时用的行距**，等于拿自己的尺子量自己 ⇒ 不能据此推出「转换工具的锅」。那条结论本轮作废（round-90 块里已加更正指针，原文保留）。
+
+**② 修法**：图像流改**裸 RGB 行**（`width*3` 字节/行，无每行滤波字节），字典里**不再写 `/DecodeParms`**（`/Predictor`、`/Columns` 一并消失）⇒ 行距只剩 `Width × Colors × bpc / 8` 这一个无歧义算法。**为什么不只是把 `/Columns` 改成像素宽**：两种读者约定（`Columns` = 像素宽 vs = 采样数）必有一方算错，只要留着这个参数就仍有读者会错；而每行滤波类型恒为 0 ⇒ predictor 一分钱不省，删掉最干净。
+
+**③ 验证（三层，都有阳性对照）**
+
+- **单测（新增 1 例，自带阳性对照）**：`PDF: the image stream carries no /Columns, and the legacy one is provably broken (D78)` —— 断言 `/DecodeParms|/Predictor|/Columns` **不存在**、流长度恰为 `height*width*3`、按阅读器公式解码后与输入像素**逐字节相等**；**并重建旧格式字节断言同一公式下第 1 行即错**（否则这条测试不会红）⇒ 全套 **`tests 342 · pass 342 · fail 0`、`SUITE_EXIT=0`**（此前 341）。
+- **独立复算（不共用我们的代码，Python）**：修后 `FIXED writer … no /DecodeParms: rowBytes = Width*Colors*bpc/8 = 6780 ⇒ pixels differing from our PNG code area: 0/7435400`；旧产物 `OLD writer … /Columns 6780 ⇒ rowBytes 20340 (true row is 6780) ⇒ 5682462/7435400`（76%）。
+- **产物**：重新 `send` 出来的 `.tmp/d78/pack.pdf` = **805662 B**（修前 820853 B，**小 15 KB**），三张 PNG 与修前**逐字节相同**（292843 / 302532 / 302243）⇒ 只动 PDF 这一条路径。
+- **门限与构建**：`verify --gate all` ⇒ **`ALL GATES PASS`（6/7 evaluated）`VERIFY_EXIT=0`**（未评估 G4 G6 G9 G10，与每轮一致）· `build-web` `BUILD_EXIT=0`（61 文件、bundle 326.6 KiB / 30 模块、precache 59）· `check-dist` **`G9 CHECK: all 13 assertions pass`、`CHECKDIST_EXIT=0`**（**bundle 里已含修复**）· `check-docs-tables` ⇒ **323 行 / 54 张表干净**、`DOCS_EXIT=0`。**门限总账不变**：✅5（G0 G1 G3 G5 G7）· 🟡5（G2 G6 G8 G9 G10）· ⬜1（G4）。
+
+**④ 对用户的影响（如实）**：`scans/pack.pdf` 与那三张 `pack_pages-to-jpg-000*.png` 都是**修前 writer 写出来的坏产物** ⇒ 请**重新导出**（`node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 目录`），修后任一主流阅读器按 **100% 缩放**印即可；PNG 路径一直是对的。
+
+**⑤ 部署状态（如实）**：修复已提交到本地 `2f36ec4`；`git push origin master` 在受限沙箱里被拒（MSYS 传输助手要建 signal pipe ⇒ `Win32 error 5`，与第 90 轮同因），按规则用一次 `danger-full-access` 重试，**授权提示在本次运行里没有等到答复（10 分钟超时）** ⇒ **线上站点仍是修前版本**（`web/dist/` 不入库，由 CI 从源码构建；本地 `build-web` 产出的 bundle 已含修复、grep 无 `DecodeParms|Predictor`）⇒ 推上去后 Pages 会自动重建。
+
+**用户指示**：「好了可以继续」（上一轮末用户报了 PDF/PNG 不一致并要求修复或继续暂停目标）。
+
 ### 第 90 轮（**部署到 GitHub Pages（D43 https 半边闭合）；修掉一个我自己引入的崩溃（D77）；用户实测的 PDF/PNG 差异已用数字定位到「不是我们两个产物的差异」**）
 
 **① 部署（已完成）**：仓库推到 `https://github.com/wangsan71/High-density-codes.git`；新增 `.github/workflows/pages.yml`；Pages 启用（`build_type=workflow`）⇒ 站点 **https://wangsan71.github.io/High-density-codes/** 上线，run `34375362063` **success**，`index.html` 与本地 `web/dist/index.html` **逐字节相同**（sha256 `1759ccb1…`）⇒ **D43 的 https 半边闭合**（浏览器里点一次安装仍归 G9）。过程中修掉两个「本地绿、CI 红」的问题：工作流 step 名里未加引号的 `": "` 让整个文件无效（跑 0 个 job）、单测依赖 pillow（现在缺则明确 skip、CI 里装上）。
@@ -134,6 +158,8 @@
 - **两个产物本身逐像素相同**：`send --format png,pdf` 后把 PDF 里嵌的图像流解开、反掉 PNG 行滤波，与 `page-000.png` 的码区**逐像素比对 ⇒ 0/7435400 不同、最差通道差 0**（偏移 ±1px 则 8 万多点不同 ⇒ 对齐是精确的，不是巧合）；PDF `/MediaBox` = **210×297mm**、`cm` 是纯缩放+平移（**无旋转**）。
 - **我们自己的图经得起转换**：把 `page-000.png` 过 JPEG q95/85/75/60、以及「降到一半再最近邻放大」⇒ 四种都能 `receive` 成功（exit 0、逐字节还原）。
 - **用户那三张图里有硬伤**（`scans/pack_pages-to-jpg-000{1,2,3}.png`，2481×3508）：第 1 张里**上面两个角标在 (141,135)/(2351,135) 正常**，但**下面两个角标整个不见了**（(135,3373)/(2345,3373) 处是空白），而在底部中间 (811,3375)/(861,3375) 多出**两个实心方块**；同时逐行扫描显示**左侧有一条从 (top,≈760) 到 (bottom,≈130) 的斜向墨区边界**（≈10° 的剪切感），而角标却仍水平对齐 —— **这三张图不是我们的产物的忠实渲染**（更像是某个 PDF→JPG 工具/扫描流程把页内容剪切了）。
+
+**【第 91 轮更正 ✗】**：下面三条测量都成立（本轮复算「两个产物逐像素相同」仍是 `0/7435400`、最差通道差 0 ✓），但**由此得出的「不是我们两个产物的差异」是错的** —— 那次比对用的行距正是**我们写出去时用的那一个**（每行 `1 + width*3` 字节），等于拿自己的尺子量自己。按**阅读器**的公式（`rowBytes = Columns × Colors × BitsPerComponent / 8`）解同一个流，得到的是**被剪切成平行四边形**的页（`5682462/7435400` 像素不同 = 76%），而这正是用户看到的「斜」⇒ 真凶是 **D78**（`/Columns` 写成了 `width*3`），第 91 轮已修（PDF 图像流不再带任何 predictor 参数）。原文保留不改写。
 
 **下一步（重启 DSH 后继续）**：把用户那三张图与我们的 `page-000.png` 做**逐行墨区边界对拍**（左/右/上/下四个方向各取几十行），确定是「旋转」「剪切」还是「平移+裁剪」，并据此判断**解码器该不该容忍这种形变**（若是扫描/打印常见形变 ⇒ 值得修；若是那个转换工具的锅 ⇒ 在手册里点名换工具）。**当前结论只到「我们的 PDF 与 PNG 一致」这一步，没有把责任推给用户**。
 

@@ -202,7 +202,7 @@ function verifyPdf(file, img, label) {
   assert.match(info.dicts.get(3).dict, new RegExp(`/Parent\\s+${pagesM[1]} 0 R`), `${label}: page must name its parent`);
   assert.match(info.dicts.get(3).dict, /\/Contents\s+5 0 R/, `${label}: page must reference its content stream`);
 
-  // --- the image xobject: DeviceRGB + predictor 15, nothing lossy ---
+  // --- the image xobject: DeviceRGB, lossless, nothing for a reader to misread ---
   const xo = info.dicts.get(4).dict;
   assert.match(xo, /\/Subtype\s*\/Image/, `${label}: object 4 must be an Image XObject`);
   assert.match(xo, /\/Type\s*\/XObject/, `${label}: object 4 must be an XObject`);
@@ -211,9 +211,13 @@ function verifyPdf(file, img, label) {
   assert.match(xo, /\/ColorSpace\s*\/DeviceRGB/, `${label}: colour space must be /DeviceRGB`);
   assert.match(xo, /\/BitsPerComponent\s+8/, `${label}: 8 bits per component`);
   assert.match(xo, /\/Filter\s*\/FlateDecode/, `${label}: /Filter must be /FlateDecode`);
-  assert.match(xo, /\/DecodeParms\s*<<[^>]*\/Predictor\s+15/, `${label}: PNG predictor 15 required`);
-  assert.match(xo, /\/DecodeParms\s*<<[^>]*\/Colors\s+3/, `${label}: /Colors 3`);
-  assert.equal(Number(/\/Columns\s+(\d+)/.exec(xo)[1]), img.width * 3, `${label}: /Columns is samples per row = width*3`);
+  // D78: /DecodeParms /Predictor 15 with /Columns = width*3 made every mainstream reader
+  // derive a 9x-too-long row stride (stride = Columns*Colors*bpc/8) and shear the page.
+  // Raw rows have no stride parameter at all, so no reader convention can get it wrong.
+  assert.ok(
+    !/\/DecodeParms|\/Predictor|\/Columns/.test(xo),
+    `${label}: no predictor parameters -- a reader must not have a row stride to derive (D78)`,
+  );
   assert.match(
     info.dicts.get(3).dict,
     /\/XObject\s*<<\s*\/Im0\s+4 0 R\s*>>/,
@@ -242,14 +246,13 @@ function verifyPdf(file, img, label) {
   assert.equal(stream[0], 0x78, `${label}: zlib CMF (deflate, 32 KiB window)`);
   assert.equal((stream[0] * 256 + stream[1]) % 31, 0, `${label}: CMF/FLG must be a multiple of 31`);
   const inflated = new Uint8Array(zlib.inflateSync(stream)); // verifies adler32 or throws
-  assert.equal(inflated.length, img.height * (1 + img.width * 3), `${label}: inflated predictor stream length`);
   const stride = img.width * 3;
-  const rgb = new Uint8Array(img.height * stride);
-  for (let y = 0; y < img.height; y++) {
-    assert.equal(inflated[y * (stride + 1)], 0, `${label}: row ${y} filter byte must be 0 (None)`);
-    rgb.set(inflated.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride), y * stride);
-  }
-  eqBytes(rgb, expectedRGB(img), `${label}: decoded RGB vs input pixels (alpha dropped)`);
+  assert.equal(
+    inflated.length,
+    img.height * stride,
+    `${label}: the stream must be exactly height*width*3 raw RGB bytes (no filter bytes)`,
+  );
+  eqBytes(inflated, expectedRGB(img), `${label}: decoded RGB vs input pixels (alpha dropped)`);
 
   // --- determinism hygiene: no clock, no random ids ---
   assert.ok(
@@ -276,10 +279,67 @@ test('PDF: 40x23 page -- header, exact xref, every object found where it claims'
   // the two ink blocks must survive: spot-check a dark and a coloured pixel
   const s = readStream(info, 4, 'synth').data;
   const px = new Uint8Array(zlib.inflateSync(s));
-  const at = (x, y) => y * (1 + img.width * 3) + 1 + x * 3;
+  const at = (x, y) => y * (img.width * 3) + x * 3;
   assert.deepEqual([...px.subarray(at(5, 5), at(5, 5) + 3)], INK_A, 'ink block A');
   assert.deepEqual([...px.subarray(at(30, 15), at(30, 15) + 3)], INK_B, 'ink block B');
   assert.deepEqual([...px.subarray(at(15, 2), at(15, 2) + 3)], SUBSTRATE, 'substrate');
+});
+
+/* ------------------------------------------------------------------ */
+/* D78: the image stream must survive the reader's own arithmetic      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The row stride every mainstream reader derives from an image stream's
+ * /DecodeParms: pdf.js PredictorStream, PDFium CPDF_Predictor, mupdf
+ * fz_open_predict, poppler StreamPredictor and Ghostscript zpredict all compute
+ * `rowBytes = Columns * Colors * BitsPerComponent / 8`. That formula is the whole
+ * of what /Columns means to a reader, so D78 is tested by driving it directly.
+ */
+function readerStride(columns, colors, bits) {
+  return (columns * colors * bits) / 8;
+}
+
+test('PDF: the image stream carries no /Columns, and the legacy one is provably broken (D78)', () => {
+  const img = synthBitmap({ width: 40, height: 23 });
+  const info = parsePdf(encodePDFPage(img), 'D78');
+  const stride = img.width * 3;
+  const rgb = expectedRGB(img);
+  const xo = info.dicts.get(4).dict;
+  assert.ok(!/\/DecodeParms|\/Predictor|\/Columns/.test(xo), 'the written image has no stride parameter');
+
+  // What we write now: raw rows, so every reader's stride is width*3 whatever
+  // convention it follows -- there is no Columns left to multiply.
+  const raw = new Uint8Array(zlib.inflateSync(readStream(info, 4, 'D78').data));
+  assert.equal(raw.length, img.height * stride, 'raw stream length is height*width*3');
+  eqBytes(raw, rgb, 'raw stream is the bitmap');
+
+  // Positive control: rebuild the *legacy* stream (filter byte per row, declared
+  // /Columns = width*3) and show the same reader formula corrupts it. Without
+  // this, the assertions above would pass even if the test never looked at the
+  // arithmetic that actually broke the user's PDF.
+  const filtered = new Uint8Array(img.height * (stride + 1));
+  for (let y = 0; y < img.height; y++) {
+    filtered[y * (stride + 1)] = 0; // filter type None, as the writer emitted
+    filtered.set(rgb.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const legacyStride = readerStride(img.width * 3, 3, 8);
+  assert.equal(legacyStride, stride * 3, 'legacy /Columns asked for a 3x-too-long row');
+  const decoded = new Uint8Array(img.height * stride);
+  let pos = 0;
+  let o = 0;
+  while (pos + 1 + legacyStride <= filtered.length && o < decoded.length) {
+    pos += 1; // the filter byte the reader consumes (None: no unfiltering)
+    const take = Math.min(legacyStride, decoded.length - o);
+    decoded.set(filtered.subarray(pos, pos + take), o);
+    o += take;
+    pos += legacyStride;
+  }
+  assert.notDeepEqual(
+    [...decoded.subarray(stride, 2 * stride)],
+    [...rgb.subarray(stride, 2 * stride)],
+    'positive control: the legacy stream shifts row 1 under the reader formula',
+  );
 });
 
 test('PDF: MediaBox is the bitmap true physical size in points', () => {
@@ -408,7 +468,16 @@ test('PDF: a real PL-M1 page at 300 dpi encodes and passes the xref reader', () 
   const wantH = (bitmap.height / bitmap.dpi) * 72;
   assert.ok(Math.abs(Number(mb[1]) - wantW) <= 0.01, `MediaBox width ${mb[1]} vs ${wantW.toFixed(2)}`);
   assert.ok(Math.abs(Number(mb[2]) - wantH) <= 0.01, `MediaBox height ${mb[2]} vs ${wantH.toFixed(2)}`);
-  assert.equal(Number(/\/Columns\s+(\d+)/.exec(info.dicts.get(4).dict)[1]), bitmap.width * 3, 'predictor Columns');
+  // D78 guard on a real page: raw rows, so the inflated stream is the bitmap itself.
+  assert.ok(
+    !/\/DecodeParms|\/Predictor|\/Columns/.test(info.dicts.get(4).dict),
+    'a real page must carry no predictor parameters either',
+  );
+  assert.equal(
+    new Uint8Array(zlib.inflateSync(readStream(info, 4, 'PL-M1 300dpi').data)).length,
+    bitmap.height * bitmap.width * 3,
+    'a real page inflates to exactly height*width*3 raw RGB bytes',
+  );
   eqBytes(encodePDFPage(bitmap), file, 'a full page must be reproducible byte for byte');
 });
 
@@ -470,10 +539,9 @@ test('PDF: a 3-page pack keeps page order, per-page MediaBox and valid xref', ()
     const raw = new Uint8Array(zlib.inflateSync(Buffer.from(z)));
     const stride = img.width * 3;
     const want = expectedRGB(img);
-    assert.equal(raw.length, (stride + 1) * img.height, `page ${i}: filtered scanline length`);
+    assert.equal(raw.length, stride * img.height, `page ${i}: raw RGB stream length (D78: no filter bytes)`);
     for (let y = 0; y < img.height; y++) {
-      assert.equal(raw[y * (stride + 1)], 0, `page ${i} row ${y} filter byte`);
-      for (let x = 0; x < stride; x++) assert.equal(raw[y * (stride + 1) + 1 + x], want[y * stride + x], `page ${i} byte ${x}`);
+      for (let x = 0; x < stride; x++) assert.equal(raw[y * stride + x], want[y * stride + x], `page ${i} byte ${x}`);
     }
   }
   assert.ok(s.trimEnd().endsWith('%%EOF'), 'must end at %%EOF');

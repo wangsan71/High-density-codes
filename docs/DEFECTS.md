@@ -20,6 +20,12 @@
 | ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
+### 第 91 轮新增（D78 ⇒ **本轮已闭** ✓）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~D78~~ | **我们写出的 PDF 在任何主流阅读器里都是「斜的」**：图像字典写的是 `/DecodeParms << /Predictor 15 /Colors 3 /Columns ${width * 3} >>`，而流里每行只有 `width*3 = 6780` 字节。阅读器**只**按 `rowBytes = Columns × Colors × BitsPerComponent / 8` 解释 `/Columns`（pdf.js `PredictorStream`、PDFium `CPDF_Predictor`、mupdf `fz_open_predict`、poppler `StreamPredictor`、Ghostscript `zpredict` 都是这一条）⇒ 它按 `20340` 字节取行 ⇒ **每 3 行漂移 2 字节 = 0.222 px/行（300 dpi）**，整页被剪成平行四边形：下半页的套准十字与角标被挤出纸边，**印出来的纸页解不了**。PNG 产物一直是好的（PNG 的 IHDR 没有这个歧义）⇒ 用户看到的「PDF 斜、PNG 直」正是这一条。**不是用户转换工具的锅**：第 90 轮只证到「两个产物在**我们自己的行距**下逐像素相同」（等于拿自己的尺子量自己），据此推出的「转换工具剪切了页内容」本轮作废 | **一条命令**（已入库：`tests/unit/render-pdf.test.mjs` 的 D78 用例，自带阳性对照）：把写出的图像流按阅读器公式解一遍、与输入像素逐字节比 —— 修前 **5682462/7435400 像素不同（76%）**、修后 **0/7435400**。本机另做过一次不共用我们代码的独立复算（一次性探针 `.tmp/pdfcheck/reader_check.py`）：`FIXED writer … no /DecodeParms: rowBytes = Width*Colors*bpc/8 = 6780 ⇒ 0/7435400`；`OLD writer … /Columns 6780 ⇒ rowBytes 20340 (true row is 6780) ⇒ 5682462/7435400`。**形变指纹**：对 `scans/pack.pdf` 的 obj 4 按阅读器公式重排后，局部周期向量由 `(dy,dx)=(10,0)` 变成 `(10,2)`，与用户那三张 `pack_pages-to-jpg-000{1,2,3}.png` 实测**逐位一致**（它们的底部角标因此出现在 `x≈794`、右下角标被推出纸面，左侧斜边即每行 0.2 px 的漂移） | **FIXED ✓（第 91 轮）** ① 图像流改为**裸 RGB 行**（`width*3` 字节/行、无每行滤波字节），字典里**不再写 `/DecodeParms`** ⇒ 行距只剩 `Width × Colors × bpc / 8` 这一个无歧义算法。**为什么不只是把 `/Columns` 改成像素宽**：两种读者约定（`Columns` = 像素宽 vs = 采样数）必有一方算错，只要留着这个参数就仍有读者会错；而每行滤波类型恒为 0（`filter type bytes: {0: 3290}`）⇒ predictor 一分钱不省，删掉最干净 ② 单测把 `/DecodeParms`、`/Predictor`、`/Columns` 三个参数名断言为**不存在**、流长度恰为 `height*width*3`、按阅读器公式解码后与输入像素逐字节相等，**并重建旧格式字节断言同一公式下第 1 行即错**（阳性对照 ⇒ 这条测试真的会红）③ 修后 `pack.pdf` 反而**小 15 KB**（820853 → 805662 B），三张 PNG 与修前**逐字节相同** ⇒ 只有 PDF 这一条路径变了 |
+
 ### 第 24 轮新增
 
 | # | 缺陷 | 复现 | 性质 |
