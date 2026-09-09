@@ -670,6 +670,17 @@ async function cmdReceive(args) {
   }
   const dupes = [...seen.entries()].filter(([, n]) => n > 1).length;
   if (dupes) console.log(`  ${dupes} page(s) were supplied more than once (deduplicated)`);
+  // A page the receiver had to rebuild from the parity pages is worth saying out loud: the user
+  // printed N pages, fewer were accepted, and the file still came back -- without this line that
+  // looks like the receiver silently skipped something (round 88). The assembler marks each
+  // rebuilt page with stats.recovered (core/protocol.js:545).
+  const rebuilt = [...asm.pages.entries()].filter(([, p]) => p && p.stats && p.stats.recovered).map(([i]) => i).sort((a, b) => a - b);
+  if (rebuilt.length) {
+    console.log(
+      `  note: ${rebuilt.map((i) => `page ${i} (page-${String(i).padStart(3, '0')}.png)`).join(', ')} rebuilt from the parity pages (that is what they are for) -- ` +
+        'the images for those pages were missing or unreadable, so nothing needs reprinting unless the digest below fails',
+    );
+  }
 
   const out = args.out ? resolve(args.out) : join(base, 'pskt-received.out');
   if (!asm.result) {

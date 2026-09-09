@@ -123,6 +123,19 @@
 
 ## 已知风险 / 待办
 
+### 第 88 轮（**少了一页也能拿回文件，但收端不吭声 —— 现在会点名「第 0 页是从校验页重建的」**）
+
+**用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只补一句**输出**。
+
+**观察**：用户很可能有一页没扫好/没拍好。实测两种情况：① 缺的是**校验页** ⇒ 数据页在，直接成功（正确）；② **数据页缺、只剩校验页** ⇒ 页间 RS 把数据页重建出来，**逐字节还原**（正确，这正是校验页的用途）。但 CLI 对第二种只打印 `received N bytes`，看起来像「印了 3 页、只收了 2 页，却还是成功了」—— 用户会以为收端悄悄跳过了什么。
+
+**修法**：`receive` 在成功后点名被重建的页（`core/protocol.js:545` 早就在 `stats.recovered` 里记着这件事）：
+
+```
+  note: page 0 (page-000.png) rebuilt from the parity pages (that is what they are for) -- the images for those pages were missing or unreadable, so nothing needs reprinting unless the digest below fails
+```
+
+**实测**：只放校验页的目录 ⇒ exit 0、`received 204800 bytes`、摘要与 manifest 相同、上面那行点名 `page 0 (page-000.png)`。已入库为 `usability.ps1` 的 **4e 腿**（判据含 exit code、文件存在、逐字节摘要、以及那行必须点名 `page-000`）。**判据未动**。
 ### 第 87 轮（**「拍近一点」是个把人指向更坏结果的建议 —— D76 已闭**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只改**用户会照做的一句话**。

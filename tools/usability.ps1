@@ -390,6 +390,24 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host ("{0}  the same page as PNG still decodes from that directory  (exit {1})" -f $(if ($mixedOk) { " PASS" } else { " FAIL" }), $LASTEXITCODE)
 }
 
+# 4e. Only the PARITY pages on disk: the inter-page RS must rebuild the data page, deliver the same
+#     bytes, and SAY which page it rebuilt (round 88). Before this line the run looked like it had
+#     silently skipped a page the user printed.
+$parityDir = Join-Path $tmp "parity-only"
+$parityOut = Join-Path $tmp "parity-only.bin"
+if (Test-Path $parityDir) { Remove-Item -Recurse -Force $parityDir }
+New-Item -ItemType Directory -Force -Path $parityDir | Out-Null
+Get-ChildItem -Path $src -Filter "page-*.png" | Where-Object { $_.Name -ne "page-000.png" } | Copy-Item -Destination $parityDir
+$parityLog = Join-Path $tmp "step4e-parity.log"
+& node cli/pskit.mjs receive $parityDir --photo --profile P-M1-300 --out $parityOut *> $parityLog
+$parityCode = $LASTEXITCODE
+$parityText = Get-Content $parityLog -Raw
+$parityOk = ($parityCode -eq 0) -and (Test-Path $parityOut) -and ($parityText -match "rebuilt from the parity pages") -and ($parityText -match "page-000")
+if ($parityOk) { $parityOk = ((Get-FileHash -Algorithm SHA256 -Path $parityOut).Hash.ToLower() -eq $wantHash) }
+if (-not $parityOk) { $script:fails++ }
+Write-Host ("{0}  only the parity pages: the data page is rebuilt and named  (exit {1})" -f $(if ($parityOk) { " PASS" } else { " FAIL" }), $parityCode)
+if (-not $parityOk) { Get-Content $parityLog -Tail 4 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
