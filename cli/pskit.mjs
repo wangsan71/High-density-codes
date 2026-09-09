@@ -77,7 +77,11 @@ const HELP = `pskit <command> [options]
                          verdict, and no threshold is derived from the measurement.
 
   calibrate --make-mtf   write the MTF calibration plate (PLAN §3.4) and its spec
-    --out <dir>          where to write mtf-plate.png + mtf-plate.json (default .)
+    --out <dir>          where to write (default .)
+    --format <list>      png (appearance raster, default), 3mf, stl, or a comma list; 3mf/stl
+                         write the printable plate (base + raised ink, watertight per object,
+                         projection-checked against the spec before anything is written)
+                         mtf-plate.json is always written -- the reader needs it
     --plate-mm/--dpi/--palette   plate side (200), raster dpi (300), palette (INK2)
     --print-ew <mm>      SIMULATION: emulate a printer whose smallest feature is this
                          wide, so the plate can be put through sim/channel.py with a
@@ -1410,18 +1414,61 @@ async function cmdMakeMtf(args, mod) {
     palette: args.palette || 'INK2',
   });
   const printEwMm = args['print-ew'] ? Number(args['print-ew']) : 0;
-  const img = renderMtfPlate(spec, { printEwMm });
   const outDir = resolve(args.out || args._[0] || '.');
   mkdirSync(outDir, { recursive: true });
-  const pngPath = join(outDir, 'mtf-plate.png');
+  const formats = String(args.format || 'png,pdf-free')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const wantPng = formats.includes('png') || formats.includes('all');
+  const wantModel = formats.includes('3mf') || formats.includes('stl') || formats.includes('all');
   const specPath = join(outDir, 'mtf-plate.json');
-  writeFileSync(pngPath, mod.png.encodePNG(img));
   writeFileSync(specPath, JSON.stringify({ ...spec, renderedPrintEwMm: printEwMm }, null, 1));
   console.log(`mtf-plate: ${describeMtfPlate(spec)}`);
   if (printEwMm > 0) console.log(`  emulated printer  smallest feature ${printEwMm}mm (holes narrower than this are filled)`);
-  console.log(`  wrote            ${pngPath} (${img.width}x${img.height}px @ ${spec.dpi}dpi)`);
+  if (wantPng) {
+    const img = renderMtfPlate(spec, { printEwMm });
+    const pngPath = join(outDir, 'mtf-plate.png');
+    writeFileSync(pngPath, mod.png.encodePNG(img));
+    console.log(`  wrote            ${pngPath} (${img.width}x${img.height}px @ ${spec.dpi}dpi) -- what a camera/scanner sees`);
+  }
+  if (wantModel) {
+    const { buildMtfPlateModel, projectionReport } = await import('../core/mesh/mtfplate.js');
+    const model = buildMtfPlateModel(spec, { printEwMm });
+    const proj = projectionReport(model, spec);
+    if (!proj.ok) {
+      throw new Error(
+        `calibrate --make-mtf: the mesh does not reproduce the plate spec -- worst region ${proj.maxPct * 100}% off ` +
+          `(${proj.regions.filter((r) => !r.ok).map((r) => r.id).join(', ') || 'total'}); refusing to write the model`,
+      );
+    }
+    const three = await import('../core/mesh/threeMF.js');
+    const stlMod = await import('../core/mesh/stl.js');
+    for (const o of model.objects) {
+      const mr = three.manifoldReport(o.triangles);
+      if (!mr.ok) throw new Error(`calibrate --make-mtf: ${o.name} is not watertight: ${mr.issues.join('; ')}`);
+    }
+    if (formats.includes('stl') || formats.includes('all')) {
+      const bytes = stlMod.encodeSTLSolid(model.triangles, { name: 'PSKT-MTF' });
+      writeFileSync(join(outDir, 'mtf-plate.stl'), bytes);
+      console.log(`  wrote            ${join(outDir, 'mtf-plate.stl')} (${model.facts.trianglesTotal} triangles, ${Math.round(bytes.length / 1024)} KB)`);
+    }
+    if (formats.includes('3mf') || formats.includes('all')) {
+      const bytes = three.encode3MF({
+        objects: model.objects,
+        metadata: { 'pskt:plate': 'mtf', 'pskt:dpi': String(spec.dpi), 'pskt:palette': spec.palette },
+      });
+      const chk = three.selfCheck3MF(bytes, { expectTriangles: model.facts.trianglesTotal });
+      if (!chk.ok) throw new Error(`calibrate --make-mtf: selfCheck3MF refused: ${chk.issues.join('; ')}`);
+      writeFileSync(join(outDir, 'mtf-plate.3mf'), bytes);
+      console.log(`  wrote            ${join(outDir, 'mtf-plate.3mf')} (${model.objects.length} objects, ${Math.round(bytes.length / 1024)} KB)`);
+    }
+    console.log(
+      `  model            base ${model.facts.baseMm}mm + relief ${model.facts.reliefMm}mm; ink ${proj.declaredMm2}mm^2 projected ${proj.projectedMm2}mm^2 ` +
+        `(worst region ${proj.maxPct * 100}% off, tolerance ${proj.tolerancePct}%); every object watertight`,
+    );
+  }
   console.log(`  wrote            ${specPath}  <- the reader needs this file`);
-  console.log('  note             this is the plate\'s appearance raster. The 3MF/STL of the same plate is not written yet.');
 }
 
 /**

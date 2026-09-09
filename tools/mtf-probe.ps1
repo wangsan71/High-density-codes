@@ -88,6 +88,22 @@ if ($plainAll -and $plainFloor -eq 0.26) {
   Fail "pristine render did not resolve every rung (floor=$plainFloor allResolved=$plainAll) -- the reader is broken, not the channel"
 }
 
+# --- control 0b: the printable half (D67) must come out of the same spec ------------------
+# The CLI refuses to write a model whose projection disagrees with the spec or whose objects are
+# not watertight, so exit 0 plus the two files is the assertion; the 3MF is then put through the
+# G8 subset checker independently.
+$meshDir = Join-Path $tmp 'mesh'
+$null = node cli/pskit.mjs calibrate --make-mtf --out $meshDir --format 3mf,stl *> (Join-Path $tmp 'make-mesh.log')
+if ($LASTEXITCODE -ne 0) {
+  Fail "could not write the printable plate (exit $LASTEXITCODE)"
+} elseif (-not (Test-Path (Join-Path $meshDir 'mtf-plate.3mf')) -or -not (Test-Path (Join-Path $meshDir 'mtf-plate.stl'))) {
+  Fail 'the printable plate is missing a file'
+} else {
+  $null = node cli/pskit.mjs verify --gate G8 --file (Join-Path $meshDir 'mtf-plate.3mf') *> (Join-Path $tmp 'mesh-g8.log')
+  if ($LASTEXITCODE -ne 0) { Fail "the plate's 3MF failed the G8 subset check (exit $LASTEXITCODE)" }
+  else { Write-Host ' PASS  printable plate: 3mf + stl written from the same spec, 3MF passes the G8 subset check' }
+}
+
 # --- control 1: a printer coarser than any nozzle must recommend nothing ----------------
 $over = Join-Path $tmp 'over'
 $null = node cli/pskit.mjs calibrate --make-mtf --out $over --print-ew 1.4 --dpi $Dpi *> (Join-Path $tmp 'make-over.log')

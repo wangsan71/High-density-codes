@@ -178,7 +178,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 ## 9. 已知债 / 仍未做（别当成新问题重新发现）
 
 - `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
-- ~~**M7 的 MTF 校准板 → 推荐喷嘴/间距那一半未实现**~~（**过期记账，第 75 轮更正**：`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1` 第 75 轮已落地，真信道实测四喷嘴里三条点名正确 ✓）⇒ 剩下的半边是 **D67：这块板的 3MF/STL 网格还没写**（现在只有外观光栅）⇒ 用户还拿不到实物板。`calibrate` 的"只量不改"那半第 61 轮已落地。
+- ~~**M7 的 MTF 校准板 → 推荐喷嘴/间距那一半未实现**~~（**过期记账，第 75 轮更正**：`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1` 第 75 轮已落地，真信道实测四喷嘴里三条点名正确 ✓）⇒ **D67 第 76 轮已闭**（`core/mesh/rectilinear.js` + `core/mesh/mtfplate.js` + CLI `--format 3mf,stl`：每 object 水密、投影对拍 `maxPct 0`、3MF 过 G8 子集）⇒ 板子现在**印得出来**。剩下的同根缺陷是 **D68：数据板（`pskit send --format 3mf`）的网格没有角标** ⇒ 打印出来的码牌照片登记不了 ⇒ G10 的实机那一半仍走不通。`calibrate` 的"只量不改"那半第 61 轮已落地。
 - 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`（`USE.md` 已如实写）。
 - 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
 - `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在 `$('log')` 上炸）⇒ 真浏览器那一次归 G9。
@@ -228,7 +228,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 → ④ G10 四喷嘴（需打印机）→ ⑤ G8 用切片软件真打开一次 → ⑥ D43 的 https 半边。
 
 **进程内（若你不能跑硬件，按价值排序）**：
-1. ~~M7 的 MTF 校准板 → 推荐喷嘴/间距~~ ⇒ **第 75 轮已完成测量半边**（见 §9）⇒ 下一条是 **D67：给这块板造 3MF/STL 网格**（把"实心块挖孔"分解成互不相交的墨矩形 + 投影对拍 + `check-3mf`），做完用户才拿得到实物板；
+1. ~~M7 的 MTF 校准板~~（第 75 轮测量半边 + 第 76 轮可打印半边）⇒ 下一条是 **D68：给数据板网格补角标**（同一根因；改它要同时动 `MESH-CONTRACT.md` §2/§3、`ref/verify_model.py` 与 `check-3mf`，规则照 MTF 板那条：角标几何从 `layout.fiducials` 像素换算、环宽 = 1 个 cell），做完**用户才可能真跑 G10**；
 2. G6 ② 若产品负责人选 ③，先做**可行性探针**（降采样/分块粗定位能不能把 600 dpi 的定位成本压到 ~1 s 量级）——不承诺成功；
 3. 网页端分片 UI（价值中、成本高：要多文件写入与跨会话重组，`File System Access API` 还不通用）；
 4. `#outname` 监听器泄漏（价值低，且改 DOM 生命周期在本机无法验证）；

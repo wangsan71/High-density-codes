@@ -18,7 +18,7 @@
 | M4 | Python 仿真信道 + verify 套件 | G2,G3,G4,G5 | **进行中（只剩 G4，且只有用户能跑）**：`sim/channel.py` 与 `ref/decode.py` **早已落地并在用**（G2 的 600 份语料就是它生成的、G0 靠 `ref/decode.py` 判绿）⇒ 原记的"由子代理在写"是**过期记账，第 64 轮更正** ✗ | G2 **300 dpi ✅ `PASS 200/200`**（第 63 轮修法后重跑 1245.4 s、exit 0）· 600 dpi **无判决**（用户第 63 轮判定非必要 ⇒ 重跑中止在 52/200）· G3 ✅ · G5 ✅（第 63 轮起含**接缝试验 2000 次、0 误接受**）· **G4 ⬜ 零证据**（手机 500×8 需真机 ⇒ 见 `USE.md` §5） | — |
 | M5 | STL + 3MF 双色产物 | G8 | **完成（进程内等价）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ 产物每轮由 usability 冒烟实际写出并用 G8 校验 | `PL-D2@0.4`：3 objects / 377964 triangles / 4.1 MB · `verify --gate G8` ✅ · `tests/unit/threeMF-xsd-parity.test.mjs` 把规则表与 vendored 权威 XSD **自动对拍**（D41 第 39 轮已闭）· 差的只是**切片软件真人打开一次**（本机无 XSD 引擎 ⇒ "过 schema"仍未证） | — |
 | M6 | 双色优先·单色兜底 | G7 | **完成（图像层）** | `--gate G7`：PL-D2@0.2/0.4 单色渲染判死色道 → 完整复原；PL-D3(off) 干净拒绝 | — |
-| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | **部分**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `pskit calibrate`（逐页 readout + 页内纠错预算 + 墨量健康度，只量不改）**第 61 轮已落地**、第 63 轮起还报救回；ρ 自标定在理想层跑通 | **G10 喷嘴矩阵需真打印机 ⇒ 未跑**（只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点）· **MTF 板 → 推荐喷嘴/间距那一半第 75 轮已落地**（`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1`；真信道实测四喷嘴三条点名正确、0.2 那一档有实测原因 ⇒ 见第 75 轮块）✓ 差**真打印机印一次**（G10）与**板的 3MF/STL 网格**（D67） | — |
+| M7 | 喷嘴矩阵 + PL-G + calibrate | G10 | **部分**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `pskit calibrate`（逐页 readout + 页内纠错预算 + 墨量健康度，只量不改）**第 61 轮已落地**、第 63 轮起还报救回；ρ 自标定在理想层跑通 | **G10 喷嘴矩阵需真打印机 ⇒ 未跑**（只测到 `PL-G` 在 0.6/0.8 被 `glyphGeometry` 正确拒绝这一个边界点）· **MTF 板 → 推荐喷嘴/间距那一半第 75 轮已落地**（`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1`；真信道实测四喷嘴三条点名正确、0.2 那一档有实测原因 ⇒ 见第 75 轮块）· **第 76 轮：可打印半边也落地**（`core/mesh/rectilinear.js` + `core/mesh/mtfplate.js` + CLI `--format 3mf,stl`，每 object 水密 + 投影对拍 `maxPct 0`，3MF 过 G8 子集 ⇒ D67 CLOSED）⇒ 只差**真打印机印一次**（G10）与**数据板网格的角标**（D68，OPEN） | — |
 | M8 | Web 扫描端 PWA + Pages | G9 | **部分（产物级全绿，浏览器内未验证）**：原记"未开始"是**过期记账，第 64 轮更正** ✗ `web/dist` PWA（manifest + `sw.js` + 三张图标）与两个单文件页每轮构建 | `build-web` exit 0（55 文件、29 模块、precache 53）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 12 assertions pass`（第 64 轮起夹具自带 ⇒ **全新检出也绿**，D53）· 差**真浏览器点一次（G9）**与 **https 托管（D43，只有用户能解）** | — |
 | M9 | soak/性能/文档 | G6 + 复跑全部 | **进行中**（原记"未开始"是**过期记账，第 72 轮更正** ✗：G6 三部分第 65–70 轮已按判据实测并落判决，`docs/USE.md`/`ACCEPTANCE.md`/`DEFECTS.md` 每轮维护） | G6 ① 编码 **199.4 ms ≤5 s ✅** · ③ soak **30 min 与 60 min 双过 ✅**（60.02 min、281 cycles、2782 页解码、误接受 0、RSS `+3.16% ≤10%`；但"无泄漏"**不主张**，Q1..Q4 未收敛，见 ACCEPTANCE ③bis）· ② 解码 **300 dpi ✅ 1373 ms / 600 dpi ✗ 地板 6192 ms**（第 72 轮实测：完美排序也超预算 3.1 倍 ⇒ 只能由产品负责人改判据）⇒ **G6 整条 🟡** · "复跑全部"这条腿每轮在跑：build-web / check-dist / smoke-sender / smoke-capture / 单测 / usability 全绿 | — |
 | M10 | 可选 `REL` 光影档 / `P-C4` 纸面4色 | — | 未开始 | — | — |
@@ -122,6 +122,41 @@
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
 ## 已知风险 / 待办
+
+### 第 76 轮（**D67 闭合：校准板有了可打印的 3MF/STL —— 而且"水密"是构造出来的，不是希望**）
+
+**这轮补的是第 75 轮自己留下的窟窿**：上一轮交付了"能量喷嘴的板"，但用户**印不出来**（只有外观光栅）。本轮把它变成实物，顺带做掉一个只有做这件事才会暴露的几何问题。
+
+**新增/改动**：
+
+- `core/mesh/rectilinear.js`（新）—— **共形网格挤出**：把"轴对齐矩形的并集"挤成**逐对象水密**的实体。做法：先按所有矩形的 x/y 边界切出网格，格子作为四边形，**只有"邻居在外面"的边**才生成墙 ⇒ **没有任何内部面**，水密是构造出来的。`subtractRects()` 负责"外框减孔"的矩形分解（并集恰好等于外框−孔，且相邻矩形贴边）。
+- `core/mesh/mtfplate.js`（新）—— 板子的网格装配：底板（`PLATE_MM`=2mm，直接 import `plate.js` 的常量，不另写数字）+ 每墨一个浮雕 object（`RELIEF_MM`=0.3mm）；几何**全部**来自 `spec.inkRegions`（第 75 轮那份"墨在哪里"的单一来源）⇒ 光栅与网格不可能各自漂移。`projectionReport()` 把顶面三角形投影面积与**规格的矩形算术**对拍。
+- `core/calibrate/mtfplate.js`（改）—— 规格重构为 **`inkRegions`**（每个墨区：外框 + 挖掉的孔，像素坐标），`renderMtfPlate` 与 `buildMtfPlateModel` **同一份列表**驱动；`applyPrintEw()` 成为共享的"打印机仿真"（光栅与网格走同一套），并**带上角标**。
+- CLI `calibrate --make-mtf --format png,3mf,stl`：写模型前先判**每 object 水密**与**投影对拍**，不合格**拒绝写文件**（与 `send` 的板材路径同一纪律）。
+- `tests/unit/mesh-mtfplate.test.mjs`（新，6 例）+ `tools/mtf-probe.ps1` 加一条 mesh 腿。
+
+**实测（真命令）**：
+
+- `node cli/pskit.mjs calibrate --make-mtf --out .tmp/mtf76 --format 3mf,stl,png` ⇒ exit 0：`mtf-plate.stl` **561180 三角形 / 27.4 MB**、`mtf-plate.3mf` **3 objects / 6.1 MB**、自报 `base 2mm + relief 0.3mm; ink 6122.346178mm² projected 6122.346109mm² (worst region 0% off, tolerance 8%); every object watertight`。
+- `node cli/pskit.mjs verify --gate G8 --file .tmp/mtf76/mtf-plate.3mf` ⇒ **PASS**（3 objects / 561180 三角形 / unit millimeter；Core 1.4 子集，规则抄自 vendored XSD）。
+- `& .\tools\mtf-probe.ps1` ⇒ **0 FAIL / 39s**（新增的 mesh 腿 PASS：同一份规格写出 3mf+stl，3MF 过 G8 子集；四喷嘴点名那三条仍 PASS，0.2 那条仍是 NOTE）。
+- 单测 6/6（含**重叠矩形必须被拒**的阴性对照、**贴边矩形必须并成一个水密体**、每 object 水密、投影 `maxPct < 1e-4`、确定性、`mono` 合并）。
+
+**本轮踩到并修掉的两个真坑（都是实测，不是推测）**：
+
+1. **贴边矩形逐矩形挤出 ⇒ T 形接缝**：第一版按"y 横带"合并成长条，`manifoldReport` 立刻报 `12 edge(s) used more than twice` + `24 pinch vertices` —— 顶面的长边会**越过**孔的墙起点。改成共形网格（每个矩形边界都成为网格线）后全绿；测试里留着这个反例的等价物（重叠矩形必须被拒）。
+2. **孔与 EW 的比较必须用设计尺寸（mm），不能用像素取整后的尺寸**：0.26mm 在 300dpi 画出来是 3px = 0.254mm ⇒ 用像素比较会把 **0.2 喷嘴自己那一档**填死，那个喷嘴就变得不可测。修法是给孔带上 `nominalMm` 并比它。**这条是第 75 轮那套"EW 0.26 读不回来"的解释的一部分**：读者那一侧的原因（渗墨）没变，但仿真侧也曾有一处把 0.26mm 孔误填 —— 两个原因分开记，免得下一次把责任归错。
+
+
+**本轮门限复跑（第 76 轮，全部实测）**：
+
+- 单测：`node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ **`tests 335 · pass 335 · fail 0 · duration_ms 143162`、exit 0**（第 75 轮末是 329/329；本轮新增 `tests/unit/mesh-mtfplate.test.mjs` **6 例**）。
+- 进程内门限：`node cli/pskit.mjs verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（它自己列出未评估 G4 G6 G9 G10 ⇒ 不得引用成"全部门限通过"）；G8 侧 `PL-D2@0.4 -> 3 objects, 377964 triangles, 4145883 bytes; selfCheck3MF ok`。
+- 产物级：`build-web` exit 0、`check-dist` exit 0、`node tools/check-docs-tables.mjs` ⇒ `clean -- 304 rows in 52 tables`、exit 0。
+- 真信道探针 + mesh 腿：`& .\tools\mtf-probe.ps1` ⇒ **0 FAIL / 39s / `all assertions pass`**。
+- G8 子集校验校准板 3MF：`verify --gate G8 --file .tmp/mtf76/mtf-plate.3mf` ⇒ PASS。
+
+**仍未做（如实）**：**数据板的网格仍然没有角标（D68，OPEN）** —— 同一根因（`MESH-CONTRACT` §3 不许发明半径）⇒ 真机打印的数据码牌照片**登记不了**，G10 的实机那一半因此还走不通；本轮只给校准板建了角标（几何取自 `spec.fiducials` 像素换算、环宽 = 1 个 frame cell，规则写在 `core/mesh/mtfplate.js` 头部）。真打印机印一次、真手机拍一次仍是硬件项。
 
 ### 第 75 轮（**M7 缺的那一半：MTF 校准板 + 读者 + 一条真信道的探针 ⇒ 该用哪一档第一次是量出来的**）
 

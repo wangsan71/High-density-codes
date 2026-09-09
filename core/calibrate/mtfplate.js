@@ -12,9 +12,8 @@
  * parameter**. Every patch is a fraction of its own pitch or a fixed size in millimetres,
  * so the same plate file is printed by a 0.2 mm hot end and by a 0.8 mm hot end, and the
  * measurement says which of the two the result actually supports. The printer's own
- * quantisation happens in the printer (or, for simulation only, through the optional
- * `printEwMm` argument of `renderMtfPlate`, which is labelled as an emulation and never
- * used by the reader).
+ * quantisation happens in the printer (or, for simulation only, through `applyPrintEw`,
+ * which is labelled as an emulation and never used by the reader).
  *
  * What each part measures, and why it is shaped the way it is:
  *
@@ -27,12 +26,14 @@
  *                   would then register the plate against its own data (the same failure
  *                   mode D37 records); (b) the hole has a *local* reference all around it,
  *                   so the reading of one cell cannot be moved by vignetting or glare.
- *   feature ladder  holes of 0.3/0.45/0.6/0.9/1.2 mm, each alone in a 3 mm cell of a solid
- *                   block. This is the one measurement that isolates **feature** size from
- *                   **pitch**: with a 3 mm pitch the ink gap is >= 1.8 mm for every rung, so
- *                   nothing about the rung is near the print or capture limit except the
- *                   hole itself. The smallest hole that still reads as open is the resolution
- *                   floor F of this print+capture chain.
+ *   feature ladder  holes of 0.26/0.3/0.45/0.6/0.7/0.9/0.95/1.2 mm, each alone in a 3 mm cell
+ *                   of a solid block. This is the one measurement that isolates **feature**
+ *                   size from **pitch**: with a 3 mm pitch the ink gap is >= 1.8 mm for every
+ *                   rung, so nothing about the rung is near the print or capture limit except
+ *                   the hole itself. The smallest hole that still reads as open is the
+ *                   resolution floor F of this print+capture chain. The four nozzles'
+ *                   extrusion widths are rungs **by construction** (see MTF_FEATURE_MM), so
+ *                   "which nozzle can this chain resolve?" is a direct read, not an inference.
  *   colour samples  one solid patch per ink of the palette, on the same substrate. The reader
  *                   compares them with the palette it was told was printed, using the decoder's
  *                   own `nearestLevel` descriptor — so "separation" means the separation this
@@ -50,19 +51,22 @@
  *                   the coarsest capture, so the reader can register the plate with the
  *                   decoder's own `findMarkers` + `rectifyPage`.
  *
+ * **One geometry, two writers.** Every ink region is recorded once, in `spec.inkRegions`
+ * (pixel rects + the holes punched out of them), and both the appearance raster
+ * (`renderMtfPlate`, which the channel simulator and every plate-profile test consume) and
+ * the mesh (`core/mesh/mtfplate.js`, which is what a printer actually prints) are driven by
+ * that one list. Two independent descriptions of "where the ink is" would be free to drift,
+ * and a plate whose mesh and raster disagree is worse than either alone.
+ *
  * Honest limits, so nobody reads more into this than it does:
  *
  *   - F is a **joint** print+capture floor. A hole that never printed (hole < 1 EW) and a hole
  *     that printed but is optically filled both read as closed. Separating the two needs a
  *     second capture at a different distance, which this plate does not ask for.
- *   - The plate is **not** the 3MF/STL artifact. `renderMtfPlate` produces the *appearance*
- *     raster (what a camera or scanner sees from above), which is what the channel simulator
- *     and every other plate-profile test in this repo consume. The mesh half (a printable
- *     STL/3MF of the same plate) is not written yet — see docs/DEFECTS.md.
  *   - No threshold in this file is fitted to a sample: the reader's cuts are stated as physical
  *     statements ("the hole is at least 75% open") and the ladder's monotonicity is checked
  *     against an injected blur (tests/unit/mtfplate.test.mjs) and against the Python channel
- *     (tools/mtf-probe.mjs).
+ *     (tools/mtf-probe.ps1).
  *
  * Pure ESM, zero dependencies, no `node:` imports: Node and the browser run this same file.
  */
@@ -109,8 +113,7 @@ export const MTF_PLATE_MM = 200;
 export const MTF_DPI = 300;
 
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
-
-function rectPxOf(rectMm, dpi) {
+const rectPxOf = (rectMm, dpi) => {
   const x = mmToPx(rectMm.x, dpi);
   const y = mmToPx(rectMm.y, dpi);
   return {
@@ -119,7 +122,7 @@ function rectPxOf(rectMm, dpi) {
     w: Math.max(1, mmToPx(rectMm.x + rectMm.w, dpi) - x),
     h: Math.max(1, mmToPx(rectMm.y + rectMm.h, dpi) - y),
   };
-}
+};
 
 /**
  * Build the plate specification.
@@ -159,6 +162,10 @@ export function mtfPlateSpec(opts = {}) {
   const ringPx = Math.max(1, frameCellPx);
   for (const f of fiducials) f.ringPx = ringPx;
 
+  /** @type {{id:string,kind:string,inkLevel:number,outersPx:object[],holesPx:object[]}[]} */
+  const inkRegions = [];
+  const pushRegion = (id, kind, inkLevel, outersPx, holesPx = []) => inkRegions.push({ id, kind, inkLevel, outersPx, holesPx });
+
   // --- pitch ladder: five 24 mm blocks, centred ----------------------------------------
   const patchMm = 24;
   const gapMm = 6;
@@ -175,6 +182,15 @@ export function mtfPlateSpec(opts = {}) {
     const originY = mmToPx(rowAy, dpi);
     const holeSideMm = round4(MTF_HOLE_FRACTION * pitchMm);
     const holeSidePx = Math.max(1, Math.min(cellPx - 2, mmToPx(holeSideMm, dpi)));
+    const off = Math.floor((cellPx - holeSidePx) / 2);
+    const holesPx = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        holesPx.push({ x: originX + c * cellPx + off, y: originY + r * cellPx + off, w: holeSidePx, h: holeSidePx, nominalMm: holeSideMm });
+      }
+    }
+    const block = { x: originX, y: originY, w: cols * cellPx, h: rows * cellPx };
+    pushRegion(`pitch-${String(pitchMmNominal).replace('.', 'p')}`, 'pitch', 0, [block], holesPx);
     return {
       id: `pitch-${String(pitchMmNominal).replace('.', 'p')}`,
       kind: 'pitch',
@@ -196,6 +212,7 @@ export function mtfPlateSpec(opts = {}) {
   const rowBy = 52;
   const featurePitchPx = mmToPx(MTF_FEATURE_PITCH_MM, dpi);
   const featureBlockMm = { x: 28, y: rowBy, w: 10 * features.length, h: 16 };
+  const featureBlockPx = rectPxOf(featureBlockMm, dpi);
   const featureCells = features.map((sizeMm, i) => {
     const cxMm = featureBlockMm.x + 5 + i * 10;
     const cyMm = rowBy + featureBlockMm.h / 2;
@@ -213,6 +230,17 @@ export function mtfPlateSpec(opts = {}) {
       centreMm: { x: cxMm, y: cyMm },
     };
   });
+  pushRegion(
+    'feature-ladder',
+    'feature',
+    0,
+    [featureBlockPx],
+    // `nominalMm` is the design size; `w/h` are the pixel-rounded ones. They differ by up to
+    // half a pixel (0.26mm at 300dpi draws as 3px = 0.254mm), and the print emulation must ask
+    // "is the *design* at least one feature width?" -- asking the pixel size filled the 0.2mm
+    // nozzle's own rung and made that nozzle untestable (measured, round 76).
+    featureCells.map((c) => ({ x: c.centrePx.x - c.sizePx / 2, y: c.centrePx.y - c.sizePx / 2, w: c.sizePx, h: c.sizePx, nominalMm: c.sizeMm })),
+  );
 
   // --- colour samples: one solid patch per ink -----------------------------------------
   const colourSlots = 4;
@@ -224,7 +252,9 @@ export function mtfPlateSpec(opts = {}) {
   for (let i = 0; i < Math.min(colourSlots, pal.inks.length); i++) {
     const xMm = colourX0 + i * (colourSizeMm + colourGapMm);
     const rectMm = { x: xMm, y: rowBy, w: colourSizeMm, h: colourSizeMm };
-    colourSamples.push({ id: `ink${i}`, kind: 'ink', inkLevel: i, rectMm, rectPx: rectPxOf(rectMm, dpi) });
+    const rectPx = rectPxOf(rectMm, dpi);
+    colourSamples.push({ id: `ink${i}`, kind: 'ink', inkLevel: i, rectMm, rectPx });
+    pushRegion(`ink${i}`, 'ink', i, [rectPx], []);
   }
 
   // --- texture samples: solid vs ribbed, both directions --------------------------------
@@ -235,11 +265,29 @@ export function mtfPlateSpec(opts = {}) {
     { id: 'tex-ribbed-h', kind: 'ribbed-h' },
   ].map((t, i) => {
     const rectMm = { x: 28 + i * (patchMm + gapMm), y: rowCy, w: patchMm, h: patchMm };
-    return { ...t, periodMm: MTF_TEXTURE_PERIOD_MM, rectMm, rectPx: rectPxOf(rectMm, dpi) };
+    const rectPx = rectPxOf(rectMm, dpi);
+    const periodPx = Math.max(2, Math.round((MTF_TEXTURE_PERIOD_MM * dpi) / MM_PER_INCH));
+    const barPx = Math.max(1, Math.round(periodPx / 2));
+    const outers = [];
+    if (t.kind === 'solid') outers.push(rectPx);
+    else {
+      const span = t.kind === 'ribbed-h' ? rectPx.h : rectPx.w;
+      for (let k = 0; k * periodPx < span; k++) {
+        outers.push(
+          t.kind === 'ribbed-h'
+            ? { x: rectPx.x, y: rectPx.y + k * periodPx, w: rectPx.w, h: Math.min(barPx, rectPx.h - k * periodPx) }
+            : { x: rectPx.x + k * periodPx, y: rectPx.y, w: Math.min(barPx, rectPx.w - k * periodPx), h: rectPx.h },
+        );
+      }
+    }
+    pushRegion(t.id, 'texture', 0, outers, []);
+    return { ...t, periodMm: MTF_TEXTURE_PERIOD_MM, periodPx, barPx, rectMm, rectPx };
   });
 
   // --- 10 mm scale square, centred in its own 24 mm slot --------------------------------
   const scaleRectMm = { x: 118 + (patchMm - 10) / 2, y: rowCy + (patchMm - 10) / 2, w: 10, h: 10 };
+  const scaleSquare = { sizeMm: 10, rectMm: scaleRectMm, rectPx: rectPxOf(scaleRectMm, dpi) };
+  pushRegion('scale-square', 'scale', 0, [scaleSquare.rectPx], []);
 
   // --- ruler: 150 mm bar, 1 mm ticks, 10 mm majors --------------------------------------
   const ruler = {
@@ -263,8 +311,21 @@ export function mtfPlateSpec(opts = {}) {
       k,
       xMm: round4(xMm),
       major,
-      rectMm: { x: round4(xMm - ruler.tickWidthMm / 2), y: major ? ruler.majorTopMm : ruler.tickTopMm, w: ruler.tickWidthMm, h: major ? ruler.majorHeightMm : ruler.tickHeightMm },
+      rectMm: {
+        x: round4(xMm - ruler.tickWidthMm / 2),
+        y: major ? ruler.majorTopMm : ruler.tickTopMm,
+        w: ruler.tickWidthMm,
+        h: major ? ruler.majorHeightMm : ruler.tickHeightMm,
+      },
     });
+  }
+  pushRegion('ruler', 'ruler', 0, [ruler.barPx, ...ruler.ticks.map((t) => rectPxOf(t.rectMm, dpi))], []);
+
+  // --- corner markers -------------------------------------------------------------------
+  for (const f of fiducials) {
+    const outer = { x: f.x - f.half, y: f.y - f.half, w: 2 * f.half, h: 2 * f.half };
+    const holes = f.solid ? [] : [{ x: outer.x + f.ringPx, y: outer.y + f.ringPx, w: outer.w - 2 * f.ringPx, h: outer.h - 2 * f.ringPx }];
+    pushRegion(`marker-${f.role}`, 'marker', 0, [outer], holes);
   }
 
   return {
@@ -281,18 +342,18 @@ export function mtfPlateSpec(opts = {}) {
     fiducials,
     pitchLadder,
     featureBlockMm,
-    featureBlockPx: rectPxOf(featureBlockMm, dpi),
+    featureBlockPx,
     featureLadder: featureCells,
     featurePitchMm: MTF_FEATURE_PITCH_MM,
     colourSamples,
     textureSamples,
-    scaleSquare: { sizeMm: 10, rectMm: scaleRectMm, rectPx: rectPxOf(scaleRectMm, dpi) },
+    scaleSquare,
     ruler,
+    inkRegions,
     /** Ground truth the reader compares against. Recorded, never assumed. */
     nominal: {
       background: pal.background.slice(),
       inks: pal.inks.map((c) => c.slice()),
-      minStablePitchPredictedMm: null, // filled by the reader, not by the spec
     },
   };
 }
@@ -316,24 +377,52 @@ export function mtfPlateLayout(spec) {
 }
 
 /**
+ * Emulate a printer whose smallest feature is `ewMm` wide: every hole narrower than that is
+ * filled (a printer cannot compensate by *widening* a hole), and the surviving holes are
+ * snapped to whole feature widths about their own centre. Returns a new region list; the
+ * caller's spec is untouched.
+ *
+ * This is a **simulation** helper. A real print does this in the printer, and the reader never
+ * calls it — the point is that the appearance raster and the mesh can both be put through the
+ * *same* emulation, so a comparison between them is a comparison of the geometry, not of two
+ * different notions of "what the printer would do".
+ */
+export function applyPrintEw(inkRegions, ewMm, dpi) {
+  if (!(ewMm > 0)) return inkRegions.map((r) => ({ ...r, outersPx: r.outersPx.map((o) => ({ ...o })), holesPx: r.holesPx.map((h) => ({ ...h })) }));
+  const ewPx = (ewMm * dpi) / MM_PER_INCH;
+  const pxToMm = MM_PER_INCH / dpi;
+  return inkRegions.map((r) => {
+    const holesPx = [];
+    for (const h of r.holesPx) {
+      const sizePx = Math.min(h.w, h.h);
+      const sizeMm = h.nominalMm ?? sizePx * pxToMm;
+      if (sizeMm < ewMm - 1e-9) continue; // below one feature width: filled, not rounded up
+      const snapped = Math.round(Math.max(1, Math.round(sizePx / ewPx)) * ewPx);
+      const cx = h.x + h.w / 2;
+      const cy = h.y + h.h / 2;
+      // `nominalMm` is carried through: it is the design size, and re-applying the emulation
+      // (or a caller asking "which rungs survived?") must still see it.
+      holesPx.push({ x: cx - snapped / 2, y: cy - snapped / 2, w: snapped, h: snapped, nominalMm: sizeMm });
+    }
+    return { ...r, outersPx: r.outersPx.map((o) => ({ ...o })), holesPx };
+  });
+}
+
+/**
  * Render the plate's appearance.
  *
  * @param {object} spec  from mtfPlateSpec
  * @param {object} [opts]
- * @param {number} [opts.printEwMm=0]  SIMULATION ONLY: emulate a printer whose smallest
- *   printable feature is this wide, by snapping every hole to a whole number of them and
- *   filling a hole that cannot be printed with at least one feature width of ink on each
- *   side. 0 (the default) draws the design as specified — no printer, no quantisation.
+ * @param {number} [opts.printEwMm=0]  SIMULATION ONLY (see applyPrintEw). 0 draws the design.
  * @returns {{width:number,height:number,pixels:Uint8Array,dpi:number,substrate:number[],printEwMm:number}}
  */
 export function renderMtfPlate(spec, opts = {}) {
-  const { width, height, dpi } = spec;
+  const { width, height } = spec;
   const pal = getPalette(spec.palette);
   const substrate = pal.background;
-  const ink = pal.inks[0];
   const ewMm = Number(opts.printEwMm || 0);
   if (ewMm < 0 || !Number.isFinite(ewMm)) throw new RangeError(`renderMtfPlate: printEwMm ${opts.printEwMm}`);
-  const ewPx = ewMm > 0 ? (ewMm * dpi) / MM_PER_INCH : 0;
+  const regions = ewMm > 0 ? applyPrintEw(spec.inkRegions, ewMm, spec.dpi) : spec.inkRegions;
 
   const pixels = new Uint8Array(width * height * 4);
   for (let i = 0; i < width * height; i++) {
@@ -358,85 +447,12 @@ export function renderMtfPlate(spec, opts = {}) {
       }
     }
   };
-
-  // pitch ladder: solid block, then punch the hole grid
-  for (const rung of spec.pitchLadder) {
-    const { originPx, cellPx, cols, rows } = rung;
-    fill({ x: originPx.x, y: originPx.y, w: cols * cellPx, h: rows * cellPx }, ink);
-    let holePx = rung.holeSidePx;
-    if (ewPx > 0) {
-      // A hole narrower than one feature width is not printed at all -- the solid fill closes
-      // over it -- and a printer cannot compensate by making it wider, which is why this is a
-      // *fill*, not a round-up. A hole whose ink rim is thinner than one feature width merges
-      // with its neighbours and closes for the same reason.
-      if (rung.holeSideMm < ewMm - 1e-9) continue;
-      const holeEw = Math.max(1, Math.round(holePx / ewPx));
-      const gapMm = rung.pitchMm - (holeEw * ewPx * MM_PER_INCH) / dpi;
-      if (gapMm < ewMm - 1e-9) continue;
-      holePx = Math.round(holeEw * ewPx);
-    }
-    if (holePx < 1 || holePx > cellPx - 2) continue;
-    const off = Math.floor((cellPx - holePx) / 2);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        fill({ x: originPx.x + c * cellPx + off, y: originPx.y + r * cellPx + off, w: holePx, h: holePx }, substrate);
-      }
-    }
+  for (const r of regions) {
+    const ink = pal.inks[r.inkLevel % pal.inks.length];
+    for (const o of r.outersPx) fill(o, ink);
+    for (const h of r.holesPx) fill(h, substrate);
   }
-
-  // feature ladder: solid block, one hole per cell
-  {
-    const b = spec.featureBlockPx;
-    fill({ x: b.x, y: b.y, w: b.w, h: b.h }, ink);
-    for (const cell of spec.featureLadder) {
-      let sizePx = cell.sizePx;
-      if (ewPx > 0) {
-        // Same rule as the pitch ladder: below one feature width the hole is filled, not
-        // rounded up to the feature width.
-        if (cell.sizeMm < ewMm - 1e-9) continue;
-        sizePx = Math.round(Math.max(1, Math.round(sizePx / ewPx)) * ewPx);
-      }
-      const cx = cell.centrePx.x;
-      const cy = cell.centrePx.y;
-      fill({ x: cx - sizePx / 2, y: cy - sizePx / 2, w: sizePx, h: sizePx }, substrate);
-    }
-  }
-
-  // colour samples
-  for (const s of spec.colourSamples) {
-    fill(s.rectPx, pal.inks[s.inkLevel % pal.inks.length]);
-  }
-
-  // texture samples
-  for (const t of spec.textureSamples) {
-    const r = t.rectPx;
-    if (t.kind === 'solid') {
-      fill(r, ink);
-      continue;
-    }
-    const periodPx = Math.max(2, Math.round((t.periodMm * dpi) / MM_PER_INCH));
-    const barPx = Math.max(1, Math.round(periodPx / 2));
-    for (let k = 0; k * periodPx < (t.kind === 'ribbed-h' ? r.h : r.w); k++) {
-      if (t.kind === 'ribbed-h') fill({ x: r.x, y: r.y + k * periodPx, w: r.w, h: barPx }, ink);
-      else fill({ x: r.x + k * periodPx, y: r.y, w: barPx, h: r.h }, ink);
-    }
-  }
-
-  // 10 mm scale square
-  fill(spec.scaleSquare.rectPx, ink);
-
-  // ruler bar + ticks
-  fill(spec.ruler.barPx, ink);
-  for (const t of spec.ruler.ticks) fill(rectPxOf(t.rectMm, dpi), ink);
-
-  // corner markers, same convention as a data page
-  for (const f of spec.fiducials) {
-    const rect = { x: f.x - f.half, y: f.y - f.half, w: 2 * f.half, h: 2 * f.half };
-    fill(rect, ink);
-    if (!f.solid) fill({ x: rect.x + f.ringPx, y: rect.y + f.ringPx, w: rect.w - 2 * f.ringPx, h: rect.h - 2 * f.ringPx }, substrate);
-  }
-
-  return { width, height, pixels, dpi, substrate: substrate.slice(), printEwMm: ewMm };
+  return { width, height, pixels, dpi: spec.dpi, substrate: substrate.slice(), printEwMm: ewMm };
 }
 
 /** One-line human summary, for the CLI. */
