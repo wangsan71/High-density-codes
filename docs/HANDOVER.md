@@ -309,6 +309,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
+| `a0003de` | 102 | **一键真扫描检查器**：`tools/check-module-scans.mjs` 逐档读 PNG/TIFF、走同一条解码路径并重算摘要 |
 | `c298499` | 101 | **100 KB 多页模拟**：`P-MX-300-6/5/4` 分别 8/6/5 页，逐字节还原 |
 | `d44f98e` | 100 | **硬件验收包接入模块档**：`acceptance-kit.ps1` 生成 P-MX-300-6/5/4 三份 pack.pdf 与真平板扫描命令；README 第 1b 步给逐档 receive/hash 对比 |
 | `79c401b` | 99 | **module 物理编码**：`P-MX-300-4/5/6` 二进制实心模块阵；timing 行校准与局部自适应阈值；三档模拟扫描 16/16；旧 `P-M1-300` 默认与旧 profile code 不变 |
@@ -326,12 +327,13 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 
 ---
 
-## 14. 本次会话（第 90–101 轮）：改了什么、怎么复验、怎么推上去
+## 14. 本次会话（第 90–102 轮）：改了什么、怎么复验、怎么推上去
 
-**7 个提交未推送**（`git status -sb` 会显示 `ahead 7`；含模块代码、模拟证据、验收包、AGENTS 重写与交接同步）：
+**9 个提交未推送**（`git status -sb` 会显示 `ahead 9`；含模块代码、模拟证据、验收包、一键检查器、AGENTS 重写与交接同步）：
 
 | 提交 | 一句话 |
 |---|---|
+| `a0003de` | 一键真扫描检查器 |
 | `c298499` | 100 KB 多页模块模拟证据 |
 | `d44f98e` | 硬件验收包生成三个模块纸面 leg |
 | `79c401b` | 高密度二进制模块档 P-MX-300-4/5/6 |
@@ -354,6 +356,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 node tools/mtf-matrix.mjs --selftest                 # 矩阵读数器自证（四喷嘴点名 + 两条对照）
 & .\tools\usability.ps1                              # 含 4g（PNG 变体）与 4h（TIFF 变体）两条新腿
 & .\tools\acceptance-kit.ps1                         # 含 P-MX-300-6/5/4 三个真平板扫描 leg
+node tools/check-module-scans.mjs --kit 验收包目录 --scans 扫描父目录   # 三档一次核对
 node --test --test-isolation=none "tests/unit/module-matrix.test.mjs"       # P-MX 三档的渲染/读回/组装/bootstrap
 node --test --test-isolation=none "tests/unit/fiducial-corner-damage.test.mjs"   # D83 + D69 + 正常页对照
 node --test --test-isolation=none "tests/unit/png-read-depths.test.mjs"   # 8 例
