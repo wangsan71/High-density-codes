@@ -323,6 +323,42 @@ if ($SkipCrypto) {
   }
 }
 
+# 4d. A directory whose images are in a format this build cannot read. A phone camera writes JPEG and a
+#     flatbed defaults to TIFF, so the receiver must SAY that instead of "no pages found" -- which sends
+#     the user looking for a problem that is not there (DEFECTS D74, round 83). Judged by exit code, by
+#     nothing-was-written, and by the message naming the format and a workaround; the positive control
+#     is the same page as PNG, which must decode from the same directory.
+$jpgDir = Join-Path $tmp "fmt-jpg"
+$jpgOut = Join-Path $tmp "fmt-jpg-must-not-exist.bin"
+if (Test-Path $jpgDir) { Remove-Item -Recurse -Force $jpgDir }
+New-Item -ItemType Directory -Force -Path $jpgDir | Out-Null
+& python -c "from PIL import Image; Image.open(r'$encSrc\page-000.png').convert('RGB').save(r'$jpgDir\page-000.jpg', quality=92)" *> (Join-Path $tmp "step4d-jpeg.log")
+if ($LASTEXITCODE -ne 0) {
+  Write-Host " SKIP  format leg: PIL could not write a JPEG to test with"
+} else {
+  $fmtLog = Join-Path $tmp "step4d-receive.log"
+  & node cli/pskit.mjs receive $jpgDir --photo --profile P-M1-300 --out $jpgOut *> $fmtLog
+  $fmtCode = $LASTEXITCODE
+  $fmtText = Get-Content $fmtLog -Raw
+  $fmtWrote = Test-Path $jpgOut
+  $fmtOk = ($fmtCode -ne 0) -and (-not $fmtWrote) -and ($fmtText -match "\.jpg") -and ($fmtText -match "PNG") -and ($fmtText -match "convert")
+  if (-not $fmtOk) { $script:fails++ }
+  Write-Host ("{0}  a JPEG-only directory is refused with the format named, not a blank no-pages error  (exit {1}, wrote: {2})" -f $(if ($fmtOk) { " PASS" } else { " FAIL" }), $fmtCode, $fmtWrote)
+  if (-not $fmtOk) { Get-Content $fmtLog -Tail 3 | ForEach-Object { Write-Host ("          " + ([string]$_).Trim()) } }
+  # Positive control: the same page in a format we DO read must still decode from a directory that
+  # also holds the unreadable file.
+  Copy-Item (Join-Path $encSrc "page-000.png") (Join-Path $jpgDir "page-000.png") -Force
+  $mixedOut = Join-Path $tmp "fmt-mixed.bin"
+  & node cli/pskit.mjs receive $jpgDir --photo --profile P-M1-300 --passphrase $encPw --out $mixedOut *> (Join-Path $tmp "step4d-mixed.log")
+  $mixedOk = ($LASTEXITCODE -eq 0) -and (Test-Path $mixedOut)
+  if ($mixedOk) {
+    $mixedHash = (Get-FileHash -Algorithm SHA256 -Path $mixedOut).Hash.ToLower()
+    $mixedOk = $mixedHash -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower()
+  }
+  if (-not $mixedOk) { $script:fails++ }
+  Write-Host ("{0}  the same page as PNG still decodes from that directory  (exit {1})" -f $(if ($mixedOk) { " PASS" } else { " FAIL" }), $LASTEXITCODE)
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload

@@ -487,11 +487,26 @@ async function cmdReceive(args) {
   const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
   const dir = resolve(args._[0] || '.');
   const stat = statSync(dir);
-  const names = stat.isDirectory()
-    ? readdirSync(dir).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort()
-    : [basename(dir)];
+  const all = stat.isDirectory() ? readdirSync(dir).sort() : [basename(dir)];
   const base = stat.isDirectory() ? dir : dirname(dir);
-  if (!names.length) throw new Error(`receive: no pages found in ${dir}`);
+  const names = all.filter((n) => /\.png$/i.test(n));
+  // Formats this build cannot read yet, named rather than silently skipped. A phone camera writes
+  // JPEG and a flatbed defaults to TIFF, so "no pages found" about a directory full of .jpg is a
+  // diagnosis that sends the user looking for a problem that is not there (round 83, DEFECTS D74).
+  const UNREADABLE = /\.(tiff?|jpe?g|webp|gif|bmp|heic|heif)$/i;
+  const unreadable = all.filter((n) => UNREADABLE.test(n));
+  const fmtList = [...new Set(unreadable.map((n) => extname(n).toLowerCase()))].sort().join(' ');
+  if (!names.length) {
+    if (unreadable.length) {
+      throw new Error(
+        `receive: found ${unreadable.length} image(s) in ${dir}, but none in a format this build reads (${fmtList}). ` +
+          'Only PNG is supported for decoding today (TIFF read-back is not wired). Convert them first, e.g. ' +
+          "magick convert '*.jpg' -png out/page-%03d.png  (ImageMagick) or python -c \"from PIL import Image; ...\" -- " +
+          'or open the browser receiver, which decodes JPEG natively.',
+      );
+    }
+    throw new Error(`receive: no pages found in ${dir}`);
+  }
   const manifestPath = join(base, 'manifest.json');
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
   const profileId = manifest?.profile || args.profile;
@@ -522,12 +537,7 @@ async function cmdReceive(args) {
     log: args.verbose ? (m) => console.log(`    ${m}`) : null,
   };
   const seen = new Map();
-  let skippedTiff = 0;
   for (const name of names) {
-    if (/\.tiff?$/i.test(name)) {
-      skippedTiff++;
-      continue;
-    }
     const bytes = new Uint8Array(readFileSync(join(base, name)));
     let bitmap;
     try {
@@ -578,7 +588,12 @@ async function cmdReceive(args) {
         `${r.colourAlive ? '' : ' [colour channel dead -> erasure]'} [${ms}ms]${fed.duplicate ? ' (duplicate)' : ''}`,
     );
   }
-  if (skippedTiff) console.log(`  note: ${skippedTiff} TIFF input(s) ignored -- TIFF read-back is not wired yet, convert to PNG for now`);
+  if (unreadable.length) {
+    console.log(
+      `  note: ${unreadable.length} image(s) in ${fmtList} were NOT read -- only PNG is decoded today. Convert them (e.g. ` +
+        "magick convert '*.jpg' -png out/page-%03d.png) or use the browser receiver, which decodes JPEG natively.",
+    );
+  }
   const dupes = [...seen.entries()].filter(([, n]) => n > 1).length;
   if (dupes) console.log(`  ${dupes} page(s) were supplied more than once (deduplicated)`);
 
@@ -1570,7 +1585,7 @@ async function cmdCalibrate(args) {
   const dir = resolve(args._[0] || '.');
   const dst = statSync(dir);
   const names = dst.isDirectory()
-    ? readdirSync(dir).filter((n) => /\.(png|tif|tiff)$/i.test(n)).sort()
+    ? readdirSync(dir).filter((n) => /\.(png|tif|tiff|jpe?g|webp)$/i.test(n)).sort()
     : [basename(dir)];
   const base = dst.isDirectory() ? dir : dirname(dir);
   if (!names.length) throw new Error(`calibrate: no page images found in ${dir}`);
@@ -1606,8 +1621,8 @@ async function cmdCalibrate(args) {
   const opts = { allowFastPath: !args.photo, requireFastPath: false, log: null };
   const rows = [];
   for (const name of names) {
-    if (/\.tiff?$/i.test(name)) {
-      console.log(`  ${name}: skipped (TIFF read-back is not wired yet)`);
+    if (!/\.png$/i.test(name)) {
+      console.log(`  ${name}: skipped (only PNG is decoded today; see receive's note on converting)`);
       continue;
     }
     const bytes = new Uint8Array(readFileSync(join(base, name)));
