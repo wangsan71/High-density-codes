@@ -134,7 +134,14 @@
 2. 新增 **`.github/workflows/pages.yml`**：`push` 到 `master` 时用**用户本地同一条命令**构建（`node tools/build-web.mjs`）→ `node tools/check-dist.mjs` 把关（零第三方 origin / CSP / SW 清单哈希）→ 单元套件 → `upload-pages-artifact` + `deploy-pages`。**零运行时依赖**（`dependencies` 仍是 `{}`，不需要 `npm install`）。
 3. 用 GitHub API 确认状态：仓库 **public**、`default_branch=master`；首次 run **失败**（当时 `has_pages=false`）；用 `POST /repos/.../pages {build_type:workflow}` **启用 Pages** ⇒ `201`，站点 **https://wangsan71.github.io/High-density-codes/**、`https_enforced: true`。
 
-**如实说明**：启用 Pages 之后的重跑/触发被 GitHub 拒（`rerun → 403`、`dispatch → 422`：凭据是 GCM 里存的那一个，作用域不足以写 Actions）⇒ 改为**再推一次提交**触发 `on: push`（本文件所在的那次提交即触发）。**最终是否绿、以及站点是否真的能打开，以那次 run 的结论为准**（下面附上结论）。
+**如实说明**：启用 Pages 之后的重跑/触发被 GitHub 拒（`rerun → 403`、`dispatch → 422`：凭据是 GCM 里存的那一个，作用域不足以写 Actions）⇒ 改为**再推一次提交**触发 `on: push`。
+
+**部署过程中查到的两个真问题（都已修，都是「本地绿、CI 红」型）**：
+
+1. **工作流文件本身无效** ⇒ GitHub 报 `Invalid workflow file: .github/workflows/pages.yml#L36`、**跑了 0 个 job**（`total_count: 0`，所以连日志都没有）。原因：某个 step 的 `name` 里写了**未加引号的 `": "`**（`no npm install: dependencies are {}`）——YAML 的 plain scalar 不允许 `: `。修法：给 step 名加引号（并在文件里留注释说明为什么必须加）。
+2. **单测在 CI 上红：`verify_raster.py exited 2`** —— 那是 `ref/verify_raster.py` 在**没装 pillow** 时的退出码（脚本自己在 stderr 说明 `pip install pillow`）。本地有 pillow、CI 没有 ⇒ 这条「第三方对拍」在 CI 里必然失败。修法两件：① 测试在 `status === 2` 时**明确 skip**（"python 在、pillow 不在"，不是"我们和 pillow 不一致"）；② 工作流里 `python -m pip install --quiet pillow` ⇒ **CI 真的会跑这条对拍**（Linux + 另一版 pillow，比本地更强）。
+
+**最终结论（run 34375362063，head `53c33dd`）**：**`success`**，build 9 步全绿（含 `check-dist` 与 **Linux 上的 341 例单测**）+ deploy 绿 ⇒ 站点 **https://wangsan71.github.io/High-density-codes/** 上线。**站点侧实测**：`index.html` 与本地 `web/dist/index.html` **逐字节相同**（sha256 `1759ccb13e8dddc8`）、`manifest.webmanifest`(761 B) / `sw.js`(8711 B) / `pskt-file.html`(342 KB) / `pskt-send-file.html`(369 KB) / `icon-192.png` 全部 **200** ⇒ **D43 的 https 半边闭合**（"浏览器里点一次安装"仍归 G9 的用户验收）。
 ### 第 89 轮（**页数上限的 hint 说了「用 split」，却没说「每片多大」⇒ 第二句仍然撞墙**）
 
 **用户口径仍然有效**（「先用上，没必要过度设计」）⇒ 本轮只把第 84 轮那句 hint 补成**能直接照抄**的。
