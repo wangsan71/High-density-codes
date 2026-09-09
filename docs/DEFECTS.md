@@ -20,6 +20,12 @@
 | ~~D5~~ | 发送端未进 `pskt-file.html` 单文件变体 ⇒ `file://` 下只能"收"不能"发" | `Select-String web/dist/pskt-file.html -Pattern sender` ⇒ 无 | PLAN 只要求接收端 file:// 可用，故列为待办非违约 |
 | ~~D7~~ | ~~手机摄像头连拍取页未接线~~ → 第 24 轮接线、第 25 轮结案，见下方"闭掉的"；实机部分另立 D18 | `node tools/smoke-capture.mjs` ⇒ 12/12 ✓ | CLOSED |
 
+### 第 97 轮新增（D83 ⇒ **OPEN，未修** ✗）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| D83 | **一张纯白/空白扫描图，在默认调色板下被诊断成"失焦、擦镜头"，而它其实是空白页**：`findMarkers` 的 `blank-image` 判据是 `base.inkCount < 32`，而 `inkCount` 来自**相对底色的墨度**；`receive` 在没有 manifest 时默认 `--palette INK2`，INK2 的底色是**纸色 `[246,242,234]`**（不是纯白）⇒ 一张 255 的空白页在每一格上都"比纸亮" ⇒ 墨度处处非零 ⇒ `inkCount` 很大 ⇒ 空白判据不触发，最后落到 `no-square-candidates` 的文案（"靠近、2× 变焦、擦镜头"）。**这是 D69/D71/D76 同一族**：不交出错误数据（照旧拒绝 ✓），但**把用户指向错误的补救动作**（去擦镜头，而真正的事实是"这张图没有墨"） | **两条命令**（不需要任何探针文件）：`python -c "from PIL import Image; Image.new('RGB',(2480,3508),(255,255,255)).save('.tmp/blank/page-000.png')"` ⇒ `node cli/pskit.mjs receive .tmp/blank --photo --profile P-M1-300 --out .tmp/a.bin` 打印 **`FAIL markers/no-square-candidates`** + `do: move closer or use 2x optical zoom, hold still, and wipe the lens`；**阳性对照**同一条命令加 `--palette PAPER1`（底色纯白）⇒ 打印 **`FAIL markers/blank-image`** + `cause: the image is (almost) uniform -- nothing was printed, the lens was covered, or the scan was empty`（47 ms vs 1100 ms）| **OPEN ✗（第 97 轮发现，未修）** **修法方向（未实施、未验证）**：`blank-image` 不能依赖底色假设，应判"**图内自身的墨度动态范围**"——例如 `p99 − p1` 与 `max` 的比值接近 0（或 `max` 低于一个小绝对下限）时判 `blank-image`，**与 substrate 无关**；注意别撞上第 79 轮 D69 的 `no-contrast`（那张是**有动态范围但中位数很高**，两者要能分开）。改动只应在失败路径上换 reason（同 D69 的做法），**不得让任何页变成可接受** ⇒ 必须带阳性对照（空白页判 blank、D69 的平光照片仍判 no-contrast、正常页仍照旧读得出） |
+
 ### 第 96 轮新增（D82 ⇒ **本轮已闭** ✓）
 
 | # | 缺陷 | 复现 | 状态 |

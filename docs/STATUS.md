@@ -123,6 +123,28 @@
 
 ## 已知风险 / 待办
 
+### 第 97 轮（**用户指示「暂停所有的动作，编写交接文档」⇒ 本轮只做交接：D83 登记为 OPEN、600 dpi 重跑中止、两处未完成的 CLI 改动按纪律还原；`docs/HANDOVER.md` 全量重写**）
+
+**① 用户指示**：「暂停所有的动作，编写交接文档，详细的」⇒ 持久目标转为 **paused**；本轮**不再新增代码**。
+
+**② 交接文档全量重写**（`docs/HANDOVER.md`，14 节 + 开头状态块）：新增/更新的关键内容 ——
+- 开头写明本次交接的特殊状态（目标已暂停、后台无任务、树干净在 `d69d709`、**7 个提交未推送**）；
+- §0/§1 现状与"卡在验收权"的诚实回答 + **恢复目标的技术动作**（`get_goal` 取 id/revision → `update_goal action=resume`）；
+- §4 仓库地图补上 `core/decode/png-read.js`、`core/decode/tiff-read.js`、`tools/mtf-matrix.mjs`；
+- §6 门限现状：**600 dpi 侧这次重跑的部分数据**（150/200 已处理 = 149 OK + 1 FAIL；页级失败分类 42 echo-bad-magic / 31 no-hollow-corner / 14 echo-no-contrast / 9 echo-header-crc / 7 intra-fail）——**明写这不是判决**；
+- §7 **新增"⓿ 先重新导出产物"**（`scans/pack.pdf` 是 D78 之前的坏产物）；
+- §9 已知债新增 **D83**、两处被还原的 CLI 改进、600 dpi 重跑被中止、7 个未推送提交；
+- §10 环境陷阱新增：`Select-Object -First N` 会让上游 exit code 变 -1、`git push` 需要一次 `danger-full-access` 且提示可能超时、`edit` 前必须重读被改过的文件、`run_code` 生成代码时的转义陷阱；
+- §14 本次会话（第 90–97 轮）的 7 个提交逐条 + 推送方法与可复验入口。
+
+**③ 本轮发现的缺陷（登记为 OPEN，未修）**：**D83** —— 纯白/空白扫描图在**默认调色板 `INK2`**（底色是纸色 `[246,242,234]`）下被判成 `markers/no-square-candidates` 并给出"擦镜头"的建议，而它其实是空白页；同一张图加 `--palette PAPER1` 就正确报 `markers/blank-image`（阳性对照）。根因是 `blank-image` 判据依赖"相对底色的墨度"。
+
+**④ 按纪律还原的两处未完成改动（已验证可用，但无腿/无门限 ⇒ 不留未提交工作）**：`send <目录>` 抛裸 `EISDIR` 的具名拒绝；`receive` 批量失败的分类汇总行。两处的改法与应配的 usability 腿都写进了 `docs/HANDOVER.md` §9 第 2 条。
+
+**⑤ 后台任务**：第 94 轮启动的 600 dpi G2 重跑**按用户"暂停"指令中止**（日志 `.tmp/d49-600-r94.log` 保留）；**没有**在跑的任务。
+
+**⑥ 门限**：本轮**只改文档**（`docs/HANDOVER.md`、`docs/DEFECTS.md`、本块），**代码零改动** ⇒ 不重跑门限；第 96 轮的门限状态仍然有效（单测 365/365、`verify --gate all` ALL GATES PASS、usability 231 s 全腿、`check-docs-tables` 干净 ⇒ 本轮复核 **343 行 / 60 张表**）。**总账不变**：✅5 · 🟡5 · ⬜1。
+
 ### 第 96 轮（**扫描仪的另一个默认输出 TIFF，我们只会说"读不了"⇒ D82 已闭：自写基线 TIFF 读取器，十种变体 + 多页文件全部逐字节还原**）
 
 **① 为什么做这一条**：第 95 轮补上了 PNG 的各种位深/调色板，剩下的大洞是**容器**：`receive` 只收 `.png`，TIFF 被点名 `TIFF read-back is not wired` 并让用户去装 ImageMagick/PIL —— **在气隙环境里"先装个工具"不是答案**，而这个仓库连 PNG 编解码都是自己写的（`core/render/tiff.js` 一直写得出一份 TIFF，只是读不回来）。平板扫描仪"输出 TIFF"与"输出 PNG"同样常见，**多页 TIFF**（一次扫多页存一个文件）更是常态。

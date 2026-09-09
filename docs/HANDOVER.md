@@ -1,42 +1,52 @@
-# 交接文档 · PSKT（第 92 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
+# 交接文档 · PSKT（第 97 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
 > 判据原文与逐轮证据仍在 `docs/PLAN.md` / `docs/ACCEPTANCE.md` / `docs/STATUS.md`。
+>
+> **本次交接的特殊之处（第 97 轮）**：用户明确指示「**暂停所有的动作，编写交接文档，详细的**」⇒
+> ① 持久目标**已暂停**（`get_goal` 应为 `phase=paused`、`activation=disarmed`；恢复方法见 §1）；
+> ② 后台**没有**在跑的任务（第 94 轮启动的 600 dpi G2 重跑被这条指令中止，部分结果见 §6，**不是判决**）；
+> ③ 工作树**干净**在 `d69d709`（本轮中途做的两处 CLI 改动**已按"不留未提交工作"的纪律还原**，见 §9）；
+> ④ 本地**领先 `origin/master` 7 个提交、尚未推送**（线上站点仍是修前版本，见 §14）。
 
 ---
 
 ## 0. 一句话现状
 
-在**本机能自动证明的范围内，它是能跑、能用的**：一条命令
-`& .\tools\usability.ps1` 就把「文件 → 可打印产物（2D 纸面 + 3D 码牌）→ 模拟打印扫描 →
-接收落盘 → 字节逐位相同」跑通，第 73 轮实测 **27 PASS / 0 FAIL / 222 s、exit 0**，
-其中包含多片传输（split/join）、加密传输（三种收法）、网页发送端与接收端的真实数据路径、
-局域网服务与"手机视角"的资源逐字节核对。
+**在本机能自动证明的范围内，它是能跑、能用的**：一条命令 `& .\tools\usability.ps1`
+就把「文件 → 可打印产物（2D 纸面 + 3D 码牌）→ 模拟打印扫描 → 接收落盘 → 字节逐位相同」跑通
+（第 96 轮实测 **231 s、全腿 PASS、exit 0**），其中包含多片传输（split/join）、加密传输（三种收法）、
+网页发送端与接收端的真实数据路径、局域网服务与"手机视角"的资源逐字节核对，以及
+**扫描仪格式普查**（PNG 的黑白/灰度/彩色/调色板/16-bit + TIFF 的未压缩/LZW/Deflate/PackBits/多页）。
 
-**没被证明的部分全部集中在四处需要真硬件/真浏览器的验收**（G4 手机连拍、G9 真浏览器、
+**没被证明的部分集中在四处需要真硬件/真浏览器/真打印机的验收**（G4 手机连拍、G9 真浏览器、
 D8 打印缩放、G10 喷嘴矩阵）**加一个只有产品负责人能做的判据决定**（G6 ②）。
+
+**这一轮之前刚修掉的两个用户可见问题**（都在"先用上"的路上）：
+- **D78**：写出的 PDF 里 `/Columns` 写成了 `width*3`，任何主流阅读器（Chrome/Edge/PDFium、
+  pdf.js、mupdf、poppler、Ghostscript）都会按 3 倍行距取图 ⇒ **整页被剪成平行四边形、下半页角标出纸**
+  ⇒ 印出来根本解不了。**这是用户报的「PDF 斜、PNG 直」的真凶，是我们自己的锅**，不是转换工具的锅。
+- **D80/D81/D82**：接收端只吃 8-bit RGB PNG，扫描仪默认的"黑白/线稿"（1-bit 灰或调色板 PNG）、
+  16-bit 灰度、以及**整个 TIFF 容器**（含多页）此前一律拒绝 ⇒ 现在全部原生解码。
 
 ---
 
-## 1. 我是不是卡了 —— 诚实回答
+## 1. 我是不是卡了 —— 诚实回答，以及现在的暂停状态
 
 **卡点不在代码，在验收权。** 目标的完成判据里有半条是「**用户照 docs 能在电脑与手机上各走通一次**」，
-而这半条我无法自己完成，也不允许冒充实机证据。**M4 从第 22 轮起就一直在等一台真手机。**
+这半条我无法自己完成，也不允许冒充实机证据。**M4 从第 22 轮起就一直在等一台真手机。**
 
-**当前状态（第 89 轮）**：用户说「继续，gogogo / 一直循环」，随后说「其实我想先用上，没必要做过度设计」⇒
-循环**在跑**（`get_goal`：`phase=active`、`activation=armed`、`12/80`），但**每轮只做「挡在『用上』路上的那一件事」**，不再往下深挖。
-第 83–89 轮的全部落点都是这一条：格式不对时点名格式（D74）、不写 `--profile` 时默认纸面档（D75）、
-打印缩放到底有多致命（量了一半 D8）、`send` 结尾直接打出下一步命令、少一页时点名被重建的页、
-「拍近一点」这句错建议（D76）、`split` 每片多大。**没有新增功能，也没有放宽任何判据。**
+**当前状态（第 97 轮）**：持久目标 **`phase=paused`**（用户指示「暂停所有的动作」）。
+此前它被用户暂停过两次、又由用户一句话恢复（第 74/90 轮）。**恢复的技术动作**：
+
+1. `get_goal` 取准确的 `id` 与 `revision`（**不要用记忆里的值**）；
+2. `update_goal action=resume`（会话被 resume/fork 之后活动目标是 `disarmed` 的，**必须由人开口**才能 rearm）。
 
 **要往下推进，只有三条路（按价值）**：
-① 你按 §7 跑一次硬件验收（哪怕只跑 G4 的一小部分 / 只打一块板），我按门限表如实记账；
+① 你按 §7 跑一次硬件验收（哪怕只跑 G4 的一小部分 / 只打一块板 / 只点一次浏览器），我按门限表如实记账；
 ② 你明确说「继续找进程内的活儿」，我按 §12 的优先级往下做；
 ③ 你对 §8 的判据决定给个答复（尤其 G6 ② 与 D70），有些债会因此直接出局。
-
-**恢复的技术动作**（给接手的会话）：会话被 resume 或 fork 之后活动目标是 `disarmed` 的，**必须由人开口**才能 rearm；
-先 `get_goal` 取准确的 `id` 与 `revision`，再 `update_goal action=resume`。
 
 ---
 
@@ -56,7 +66,8 @@ D8 打印缩放、G10 喷嘴矩阵）**加一个只有产品负责人能做的�
 - 需要真机/真浏览器/真打印机的部分：给用户可直接执行的步骤与清单，并在可自动化范围内先用**进程内等价证据**顶上，**绝不冒充实机证据**。
 - **M4 未闭合前不打新 tag。**
 - 用户口径（仍然有效）：「其实没必要 600 dpi，只要能够读到就行」⇒ 600 dpi 不是必要路径、G2-600 **无判决**；
-  「你不会过度设计吧，刚好就行」⇒ 修根因、最小范围；「继续，gogogo」。
+  「你不会过度设计吧，刚好就行」⇒ 修根因、最小范围；「其实我想先用上，没必要做过度设计」；
+  「暂停所有的动作，编写交接文档，详细的」（第 97 轮，本文件）。
 
 ---
 
@@ -68,7 +79,7 @@ D8 打印缩放、G10 喷嘴矩阵）**加一个只有产品负责人能做的�
 | `docs/PLAN.md` | 已批准的 v3 契约（判据原文、里程碑） | **别改**。它的 CLI 那行是设计草图，列着未实现的 `watch`/`bench`/`printpack`/`platepack` ⇒ 不是现状清单 |
 | `docs/ACCEPTANCE.md` | **判决权威**：每个门限的判决 + 实测数字 + 划线保留的历史 | 判决只认这里 |
 | `docs/STATUS.md` | 里程碑表 + 门限导航表 + **逐轮块**（新轮次插在最上面） | 只作导航；轮次块逐字保留、不改写 |
-| `docs/DEFECTS.md` | 缺陷台账 D1–D66 | 只增不删，修好划线 + 标注 |
+| `docs/DEFECTS.md` | 缺陷台账 **D1–D83** | 只增不删；修好划线 + 标注；**OPEN 的只有 D83 与几处待决策项** |
 | `docs/USE.md` | 用户手册：§0 构建 · §1 电脑 · §2 手机 · §3 真打印 · §4 一条命令自证 · §5 **硬件验收清单** · §6 出问题 | 用户视角的唯一入口 |
 | `docs/RENDER-CONTRACT.md` / `docs/MESH-CONTRACT.md` | 渲染与网格契约 | 改渲染/板材前读 |
 
@@ -76,25 +87,35 @@ D8 打印缩放、G10 喷嘴矩阵）**加一个只有产品负责人能做的�
 
 ## 4. 仓库地图（谁负责什么）
 
-- **`core/`** —— 协议与算法，**纯 ESM、Node 与浏览器同一份、禁用 `node:` 内建**、零运行时依赖。
-  `protocol.js`（编解码 + `TransferAssembler`）、`frame.js`（页头，`totalPages` 是 **u8** ⇒ 一次传输 ≤255 页）、
-  `profiles.js`（10 个档）、`decode/bootstrap.js`（候选搜索）、`decode/recalibrate.js`（按页实测 ρ 重读，D51）、
-  `decode/advice.js`（每个 reason 必须有 advice，机器强制）、`hash.js`/`chacha20.js`/`deflate.js`（自研）、
-  `naming.js`（下载名策略，D62）、`splitjoin.js`（分片/重组，第 72 轮）、`render/`（版面/PNG/TIFF/PDF/STL/3MF）。
+- **`core/`** —— 协议与算法，**纯 ESM、Node 与浏览器同一份、禁用 node 内建**、零运行时依赖。
+  - `protocol.js`（编解码 + `TransferAssembler`）、`frame.js`（页头，`totalPages` 是 **u8** ⇒ 一次传输 ≤255 页）、
+    `profiles.js`（10 个档）、`naming.js`（下载名策略 D62）、`splitjoin.js`（分片/重组，第 72 轮）。
+  - `decode/`：`bootstrap.js`（候选搜索）、`page.js`（快路 + 标记几何路）、`fiducial.js`（标记检测/墨度）、
+    `warp.js`（单应矫正）、`ideal.js`（逐格匹配滤波读电平）、`recalibrate.js`（按页实测 ρ 重读，D51）、
+    `echo.js`（回显条）、`advice.js`（**每个 reason 必须有 advice，机器强制**）、
+    **`png-read.js`（PNG：位深 1/2/4/8/16、调色板、灰度/RGB/带 alpha，第 95 轮）**、
+    **`tiff-read.js`（TIFF 基线：II/MM、多页、条带、1/4/8/16 位、光度 0/1/2/3、自写 LZW 与 PackBits、FillOrder、Predictor 2，第 96 轮）**。
+  - 自研底层：`hash.js`、`chacha20.js`、`deflate.js`（含 `inflateRaw`）、`crc.js`。
+  - `render/`：`layout.js`、`raster.js`、`png.js`、`tiff.js`、**`pdf.js`（D78 后图像流为裸 RGB 行、无 predictor 参数）**、`stl.js`、`threeMF.js`、`sheet.js`、`glyphs.js`。
+  - `calibrate/`：`mtfplate.js`（板规格 + 外观光栅）、`readmtf.js`（读者 + 推荐）。
+  - `mesh/`：`solids.js`、`stl.js`、`rectilinear.js`、`mtfplate.js`、`plate.js`。
 - **`cli/pskit.mjs`** —— 只做 IO 与参数：`send` / `receive` / `split` / `join` / `calibrate` / `status` /
   `verify --gate` / `roundtrip`。**没有测试钩子**（沙箱禁管道 stdio ⇒ 测试里不能 spawn 它）⇒ CLI 行为只能靠
   `tools/usability.ps1` 的腿或手工命令证明。
 - **`web/`** —— `index.html`（接收页，含最下面「手机连拍」节）、`app.js`（桌面接收）、`capture.js`（连拍取舍，
   **纯收集器 + DOM 半边**，Node 可加载）、`send.html` + `sender.js`（发送页）、`selftest*.js`、`sw.js`。
-- **`tools/`** —— 门限与检查器：`build-web.mjs`、`check-dist.mjs`（13 项，含气隙/外部 URL 断言与 id 契约）、
-  `check-serve.mjs` / `check-lan.mjs`（手机视角）、`smoke-sender.mjs`（13 项）/ `smoke-capture.mjs`、
-  `soak.mjs`（= `verify --gate G6`）、`usability.ps1`（**一条命令的端到端冒烟**）、`check-3mf.mjs`（G8）、
-  `g6-perf-probe.mjs`（解码耗时分解，带 `--profile/--dpi/--palette/--only-hints`）、`check-docs-tables.mjs`。
+- **`tools/`** —— `build-web.mjs`、`check-dist.mjs`（13 项，含气隙/外部 URL 断言与 id 契约）、
+  `check-serve.mjs` / `check-lan.mjs`、`smoke-sender.mjs` / `smoke-capture.mjs`、`soak.mjs`（= `verify --gate G6`）、
+  `usability.ps1`（**一条命令的端到端冒烟**，含 4g 扫描仪 PNG 变体腿与 4h TIFF 变体腿）、
+  `acceptance-kit.ps1` + `acceptance-readme.txt`（用户硬件验收包）、
+  **`mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数，第 92 轮）**、`mtf-probe.ps1`（仿真打印机探针）、
+  `g4-probe.ps1`、`check-3mf.mjs`、`level-diff.mjs`、`g6-perf-probe.mjs`、`rho-report.mjs`、`check-docs-tables.mjs`。
 - **`sim/channel.py`** —— 确定性"打印+扫描/拍照"替身（Python + numpy + cv2）；**宿主 shell 跑得通**。
 - **`ref/`** —— 独立参考实现 `decode.py`（G0）+ vendored 权威规范（如 `3mf-core-1.4.0.xsd`）⇒ **先查这里再上网**。
-- **`tests/unit/*.test.mjs`** —— 321 个用例；`tests/conformance.json` 是跨实现对拍向量。
-- **`.tmp/`** —— gitignored：一次性探针、语料、提交信息草稿。**台账不得指向不入库的文件**（要有永久等价物）。
-- **`web/dist`** —— 构建产物，不进 git。
+- **`tests/unit/*.test.mjs`** —— 单测（**条数以 runner 自己打印的汇总为准**；第 96 轮实测 365/365）；
+  `tests/conformance.json` 是跨实现对拍向量。
+- **`.tmp/`** —— gitignored：一次性探针、语料、日志。**台账不得指向不入库的文件**（要有永久等价物）。
+- **`web/dist`** —— 构建产物，**不进 git**（CI 从源码重建）。
 
 ---
 
@@ -103,13 +124,14 @@ D8 打印缩放、G10 喷嘴矩阵）**加一个只有产品负责人能做的�
 ```powershell
 node tools/build-web.mjs                                  # 期望 exit 0；打印 precache 条数与单文件体积
 node tools/check-dist.mjs                                 # 期望 13 pass / 0 fail + "G9 CHECK: all 13 assertions pass"
-node tools/smoke-sender.mjs                               # 期望 13 PASS / 0 FAIL + "all assertions pass"
-node tools/smoke-capture.mjs                              # 期望 exit 0 + "CAPTURE SMOKE: all assertions pass"
-node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 期望 321/321（≈138 s）
-& .\tools\usability.ps1                                   # 期望 27 PASS / 0 FAIL（≈222 s）
-& .\tools\mtf-probe.ps1                                   # 期望 0 FAIL / "all assertions pass"（≈40 s）
-& .\tools\acceptance-kit.ps1                              # 生成用户的硬件验收包（8 条 PASS / exit 0；≈90 s）
-node cli/pskit.mjs verify --gate all                      # G0 G1 G2 G3 G5 G7 G8 进程内
+node tools/smoke-sender.mjs                               # 期望 "SENDER SMOKE: all assertions pass"、exit 0
+node tools/smoke-capture.mjs                              # 期望 "CAPTURE SMOKE: all assertions pass"、exit 0
+node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 期望 exit 0（第 96 轮实测 365/365，≈155 s）
+& .\tools\usability.ps1                                   # 期望全腿 PASS、exit 0（第 96 轮实测 231 s）
+& .\tools\mtf-probe.ps1                                   # 期望 0 FAIL（仿真打印机 + Python 信道，≈26 s）
+node tools/mtf-matrix.mjs --selftest                      # 期望 "MTF MATRIX SELFTEST: pass"、exit 0（≈1 s）
+& .\tools\acceptance-kit.ps1                              # 生成用户的硬件验收包（exit 0；≈90 s）
+node cli/pskit.mjs verify --gate all                      # G0 G1 G3 G5 G7 G8 进程内；会打印本次未评估哪些
 node tools/check-docs-tables.mjs                          # 期望 "clean -- N rows in M tables"
 ```
 
@@ -117,23 +139,29 @@ node tools/check-docs-tables.mjs                          # 期望 "clean -- N r
 **exit code** 为准。长任务注意工具的 `timeoutMs` 被执行器**封顶 600 s** ⇒ G2 语料（1200+ s）与 soak（30/60 min）
 必须用 `run_in_background` 分批。
 
+**G2 语料怎么造**（300 dpi 侧已达标的那一档，200 份）：
+```powershell
+python sim/channel.py --in .tmp/g2src --out .tmp/sc-scan300-N --seed N --preset scan300 --modifier nocrop   # 每份 ~15 s / 26 MB
+node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan300-*'
+```
+
 ---
 
-## 6. 门限现状（第 79 轮末，与 `docs/ACCEPTANCE.md` 对齐）
+## 6. 门限现状（第 97 轮末，与 `docs/ACCEPTANCE.md` 对齐）
 
 | Gate | 判决 | 差什么 |
 |---|---|---|
-| G0 规格可独立实现 | ✅ | — （`python ref/decode.py` → PASS，309 检查） |
+| G0 规格可独立实现 | ✅ | — （`python ref/decode.py` → PASS） |
 | G1 渲染—读回零误读 | ✅ | — （7 档 × 3 次 = 725,913 格 0 误读） |
-| G2 纸面 200 seed | 🟡 | **300 dpi ✅ `PASS 200/200`**（交付形状：整张 A4、含裁切/套准标记）；**600 dpi 无判决**（第 58 轮曾判 ✗ 162/200，第 63 轮修法落地后重跑到 52/200 由用户中止 ⇒ 用户判 600 dpi 非必要，但**判据没分档** ⇒ 不记绿也不记红） |
+| G2 纸面 200 seed | 🟡 | **300 dpi ✅ `PASS 200/200`**（交付形状：整张 A4、含裁切/套准标记；第 63 轮修法后重跑 1245.4 s、exit 0）。**600 dpi 无最终判决**：第 58 轮曾判 ✗ 162/200；第 63 轮修法（D51 的 RS 仲裁重读）落地后重跑到 52/200 被用户中止；**第 94 轮又启动一次完整重跑**（日志 `.tmp/d49-600-r94.log`），**第 97 轮按用户"暂停"指令中止**：已处理 **150 份 = 149 OK + 1 FAIL**（`sc-scan600-105` = `no-page-header`），页级失败行 103 条，分类 **42 × readout/echo-bad-magic · 31 × markers/no-hollow-corner · 14 × readout/echo-no-contrast · 9 × readout/echo-header-crc · 7 × assemble/intra-fail** ⇒ **这不是判决**（判据要 200/200），但它是"修法之后 600 dpi 侧好转"的第一批数据 |
 | G3 缺页/乱序/重复 | ✅ | — |
-| G4 手机压力 ≥99% | ⬜ | **500 页 × 8 轮仍未跑**（需真手机）；**第 79 轮起有部分证据**：`tools/g4-probe.ps1`（`phone-hard`，8 seed × 2 取景 × 纸面/板材 = 96 页）⇒ **0/8 每条腿**，主导原因是**拍摄前提**而非解码器（信道自己的 `marker_visible [1,1,1,1]`、`corners_visible 4`，但 81/96 页的墨/纸根本不可分 ⇒ 已修诊断 D69）；另实测 **整张 A4 塞进手机画面时纸面档根本读不出**（`phone40` 符号错 72.83%、`rhoMedian 1.20`）⇒ 手机路径要用**粗档**（板材/PL-G），或拍近。**M4 唯一阻塞；D70 是它判据里的前提缺口**。**第 80 轮拿到第一条正面证据**（`phone40` = 整页在画面、光线正常）：纸面 `P-M1-300` **0/8**（两条新诊断分别指向曝光/太远），板材 **`PL-G@0.4` 8/8 = 100% 逐字节还原**（裁切生效时 6/8）⇒ **手机那一端要用粗档**，这不是建议、是实测（`& .\tools\g4-probe.ps1 -Seeds 8 -Preset phone40`）|
-| G5 误接受 0 | ✅ | — （10000 次试验：9200 纠正 / 800 拒 / **0 误接受**，含两项变异检验） |
-| G6 性能 + soak | 🟡 | ① 编码 ✅ 199.4 ms（判据 ≤5 s）；② 解码 **300 dpi ✅ 1373 ms**、**600 dpi ✗ 地板 6192 ms**（判据 ≤2 s/页 ⇒ 见 §8）；③ soak ✅ 30 min 与 60 min 双过（60.02 min、281 cycles、2782 页、误接受 0、RSS +3.16% ≤10%），但**"无泄漏"不主张**（Q1..Q4 未收敛） |
+| G4 手机压力 ≥99% | ⬜ | **500 页 × 8 轮仍未跑**（需真手机）。已有部分证据（`tools/g4-probe.ps1`）：手机端**整页入画**时纸面档 0/8、**板材 `PL-G@0.4` 8/8 逐字节还原** ⇒ 手机那一端要用**粗档**（实测，不是建议）；主导失败是**拍摄前提**（四角标必须在画面内）而非解码器 ⇒ D70 是判据里的前提缺口 |
+| G5 误接受 0 | ✅ | — （10000 次试验 + 2000 次接缝试验：0 误接受） |
+| G6 性能 + soak | 🟡 | ① 编码 ✅ ≤5 s；② 解码 **300 dpi ✅ 1373 ms**、**600 dpi ✗ 地板 6192 ms**（判据 ≤2 s/页 ⇒ §8a）；③ soak ✅ 30 min 与 60 min 双过（误接受 0、RSS +3.16% ≤10%），但"无泄漏"**不主张** |
 | G7 单色兜底 100% | ✅ | — |
-| G8 3MF/STL 独立解析 | 🟡 | 进程内等价全绿（STL 13/13 + 承重反例、3MF XSD 子集校验器 + 与 vendored 权威 XSD 自动对拍）；**差切片软件真人打开一次**（本机无 XSD 引擎） |
-| G9 Web 扫描端 | 🟡 | 产物级全绿（13 项 + `G9 CHECK` 13 断言、零第三方加载点、CSP、SW 清单哈希对上磁盘、bundle 盲解磁盘页摘要相符）；**差真浏览器点一次** + **https 托管（D43）** |
-| G10 喷嘴 × 参数矩阵 | 🟡 | **第 75–78 轮起产物齐了**：MTF 校准板（`calibrate --make-mtf`，含 3MF/STL 网格与四角标记）+ **数据板网格也有角标**（D68 已闭）+ `tools/acceptance-kit.ps1` 一次生成「每个喷嘴一块码牌」。真信道探针 `mtf-probe` 对四个仿真喷嘴三条点名正确。**仍差真打印机印一次**（判决不变） |
+| G8 3MF/STL 独立解析 | 🟡 | 进程内等价全绿（STL + 3MF XSD 子集校验器 + 与 vendored 权威 XSD 自动对拍）；**差切片软件真人打开一次** |
+| G9 Web 扫描端 | 🟡 | 产物级全绿（13 项 + `G9 CHECK` 13 断言、零第三方加载点、CSP、SW 清单哈希对上磁盘、bundle 盲解磁盘页摘要相符）；**差真浏览器点一次**。**D43 的 https 半边第 90 轮已闭**（站点见 §14） |
+| G10 喷嘴 × 参数矩阵 | 🟡 | 产物齐：MTF 板（含 3MF/STL 与四角标记）+ 数据板网格角标（D68 闭）+ 验收包；**第 92 轮起有矩阵读数器**（`tools/mtf-matrix.mjs`：四张照片 → 逐张"建议喷嘴 + 判决"，`--selftest` 四条正例 + 两条对照）。**仍差真打印机印一次**（判决不变） |
 
 **总账（不主张完成）**：✅ 5（G0 G1 G3 G5 G7）· 🟡 5（G2 G6 G8 G9 G10）· ⬜ 1（G4）
 ⇒ **"通过 G0–G10" 不成立**。`verify --gate all` 打印的 `ALL GATES PASS` **每次都会列出本次未评估的门限**
@@ -143,14 +171,24 @@ node tools/check-docs-tables.mjs                          # 期望 "clean -- N r
 
 ## 7. 只有用户能做的验收（照 `docs/USE.md` §5 跑，那里有逐步操作）
 
+**⓿ 先做这一件（第 97 轮新增，很重要）**：**重新导出你的产物**。
+`scans/pack.pdf` 与那三张 `pack_pages-to-jpg-000*.png` 都是**第 91 轮修 D78 之前**的 writer 写出来的
+（PDF 里的图被阅读器剪成平行四边形），**请重新跑一遍**：
+
+```powershell
+node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 输出目录
+```
+
+然后按 **100% 缩放**打印。PNG 路径一直是好的。
+
 | 项 | 一句话 | 现状 |
 |---|---|---|
-| **G4 手机连拍 500×8** | `node tools/serve.mjs` → 手机同 Wi-Fi 打开它打印的局域网地址 → 页面**最下面**「手机连拍（自动挑帧）」→ 开始连拍（**不是**第 1 节那个一次一页的手动快门）→ 每轮收齐后在「存成什么名字」填回带扩展名的原名 → **确认文件真的落盘、扩展名对**（第 73 轮换成了 `Blob`+`createObjectURL`，两种机制都没在真浏览器验过 ⇒ 你这一步就是验证）→ 加密批要**先填口令再开始** | **从未跑过** |
+| **G4 手机连拍 500×8** | `node tools/serve.mjs` → 手机同 Wi-Fi 打开它打印的局域网地址 → 页面**最下面**「手机连拍（自动挑帧）」→ 开始连拍（**不是**第 1 节那个一次一页的手动快门）→ 每轮收齐后在「存成什么名字」填回带扩展名的原名 → **确认文件真的落盘、扩展名对**（第 73 轮换成 `Blob`+`createObjectURL`，两种机制都没在真浏览器验过）→ 加密批要**先填口令再开始** | **从未跑过** |
 | **G9 浏览器** | Chrome / Edge / Safari 各开发送页与接收页各一次（`file://` 单文件版 + http 瘦版各一次）；接收页加 `?selftest=1` 看自检 | 未跑 |
-| **D8 打印缩放** | 打一页，量实际尺寸与 PDF 标称是否一致；被缩放就手动改 100% 再量 | 未量化 |
-| **G10 喷嘴矩阵** | 0.2 / 0.4 / 0.6 / 0.8 各打一块码牌，拍/扫后还原 | 需打印机 |
+| **D8 打印缩放** | 打一页，量实际尺寸与 PDF 标称是否一致；被缩放就手动改 100% 再量 | 未量化（第 85 轮已量到：**均匀/非均匀仿射缩放照样逐字节还原** ⇒ 风险比原以为的小） |
+| **G10 喷嘴矩阵** | 同一块 MTF 板**用 0.2/0.4/0.6/0.8 各打一次** → 四张照片放一个目录、按 `n02/n04/n06/n08.png` 命名 → `node tools/mtf-matrix.mjs --dir 目录 --spec mtf\mtf-plate.json --provenance real-print`；另外各打一块**码牌**拍/扫后 `receive --photo` | **进程内半边已就绪**，真打印机未跑 |
 | **G8 收尾** | 把 `.3mf` 用切片软件（Bambu Studio / Orca / PrusaSlicer）真打开一次 | 未做 |
-| **D43 https 半边** | 给我仓库 URL + 交互凭据 + 允许写 `.github/workflows/pages.yml` ⇒ 才能真装 PWA | 只有你能解 |
+| **D43 https 半边** | 第 90 轮已闭（站点上线）；剩下的"浏览器里点一次安装"归 G9 | 已解 |
 
 做完把结果（截图、量的尺寸、失败页号、接收页点名的缺页号）发回来，**判据不会为了好看而放宽**。
 
@@ -168,101 +206,152 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 | **恰好 1 个候选（地板）** | **6192 ms** | 1（第一次就赢） |
 | 300 dpi 同纸页（对照） | **1373 ms** | 1（加提示 1367 ms ⇒ 提示买不到东西） |
 
-⇒ **完美排序也只到判据的 3.1 倍**，而光 `decodePNG` 就 1547 ms = **预算的 77%**（像素数是 300 dpi 的 4 倍）。
-所以"再造一个廉价的候选排序信号"救不了这一档（最多把 24.7 s 买到 ~6.2 s）⇒ **第 72 轮决定不造它**。三条路只有你能走：
-① 把 ② 限定在 300 dpi（`USE.md` 指给用户的正是这一档，实测 ✅，也与你"没必要 600 dpi"的口径一致）；
-② 为 600 dpi 放宽 2 s 预算；③ 投资一种**根本上更便宜的 600 dpi 读法**（先降采样/分块粗定位再精读 —— 唯一可能
-接近 2 s 的路线，未做、也不主张一定可行）。
+⇒ **完美排序也只到判据的 3.1 倍**，而光 `decodePNG` 就 1547 ms = **预算的 77%**。
+三条路只有你能走：① 把 ② 限定在 300 dpi（`USE.md` 指给用户的正是这一档，实测 ✅，也与你"没必要 600 dpi"一致）；
+② 为 600 dpi 放宽 2 s 预算；③ 投资一种**根本上更便宜的 600 dpi 读法**（未做、也不主张一定可行）。
 
 **(b) 要不要继续自动循环**（见 §1）。
 
-**(c) D49**（600 dpi 页级直读率低）现在 OPEN 非阻塞；若 (a) 选 ①，它随之出局。
+**(c) D49**（600 dpi 页级直读率低）OPEN 非阻塞；若 (a) 选 ①，它随之出局。第 94–97 轮的重跑数据见 §6。
 
-**(d) D70（第 79 轮新增）：G4 的判据没有写明「四个角标必须都在画面内」这个前提。** 实测（`& .\tools\g4-probe.ps1 -Seeds 8`，`phone-hard`）：`crop active` 条件下**画面内角标只剩 68–73/96**，而单应需要 4 个点对 ⇒ 缺角标时**任何**解码器都只能拒绝。两条路：① 给 G4 的判据补上前提（像 G2 侧早就该做的那样：「纸张/板材完整落在成像区内」）；② 要求产品在缺角标时也能工作 —— **物理上不可能**（3 个点解不出 8 自由度的单应）。**我不替你决定**，但选 ① 之后 G4 的失败分类里 `fiducial-out-of-frame` 就应当被记为「前提未满足」而不是「解码失败」。
+**(d) D70**：G4 的判据没有写明「四个角标必须都在画面内」这个前提。实测（`phone-hard`）：缺角标时**任何**
+解码器都只能拒绝（3 个点解不出 8 自由度单应）。两条路：① 给 G4 判据补上前提；② 要求缺角标也能工作（物理上不可能）。
+
+**(e) D83（第 97 轮新增，OPEN）**：见 §9 第一条 —— 要不要现在修（小改、带阳性对照），还是先做别的。
 
 ---
 
 ## 9. 已知债 / 仍未做（别当成新问题重新发现）
 
-- `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
-- ~~**M7 的 MTF 校准板 → 推荐喷嘴/间距那一半未实现**~~（**过期记账，第 75 轮更正**：`core/calibrate/mtfplate.js` + `readmtf.js` + CLI 两个模式 + `tools/mtf-probe.ps1` 第 75 轮已落地，真信道实测四喷嘴里三条点名正确 ✓）⇒ **D67 第 76 轮已闭**（`core/mesh/rectilinear.js` + `core/mesh/mtfplate.js` + CLI `--format 3mf,stl`：每 object 水密、投影对拍 `maxPct 0`、3MF 过 G8 子集）⇒ 板子现在**印得出来**。**D68 第 77 轮也已闭**（数据板网格补上四角标记：几何取自 `layout.fiducials`、环宽 = 该标记自己的 `ringPx`；判据跟着长成「声明过的标记才排除、且每个声明的标记必须真的在且面积对得上」；`verify --gate G8` 378064 三角形、`ref/verify_model.py` `PASS (62 checks)` + `--selftest PASS (11 checks)`）⇒ **印出来的码牌照片现在才有可能被登记**；「照片能不能真的锁住浮雕角标」仍是真机项（G10）。`calibrate` 的"只量不改"那半第 61 轮已落地。
-- 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`（`USE.md` 已如实写）。
-- 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
-- `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在 `$('log')` 上炸）⇒ 真浏览器那一次归 G9。
-- RSS 长跑：60 min 内 Q1..Q4 中位数**未收敛**（+6.32 / +4.21 / +6.44 MB）；判据在 30 与 60 min 都过，**3 h 跑故意没做**（过度设计）。若将来有人报多小时会话内存上涨，从 `ACCEPTANCE.md` ③bis 查起（两个平凡解释已排除）。
-- 255 页上限本身没动（协议字段宽度，改它要动帧格式与**已经印出去的纸**）。
+1. **D83（OPEN，第 97 轮发现，未修）**：一张纯白/空白扫描图在**默认调色板**下被诊断成"失焦、擦镜头"，
+   而它其实是空白页。根因：`findMarkers` 的 `blank-image` 判据依赖**相对底色的墨度**，而 `INK2` 的底色是
+   纸色 `[246,242,234]` ⇒ 纯白页处处"比纸亮" ⇒ `inkCount` 很大 ⇒ 空白判据不触发。
+   **复现**：用 PIL 造一张 2480×3508 的纯白 PNG 到 `.tmp/blank/page-000.png` ⇒
+   `node cli/pskit.mjs receive .tmp/blank --photo --profile P-M1-300 --out .tmp/a.bin` 打印
+   `markers/no-square-candidates` + "wipe the lens"；**阳性对照**加 `--palette PAPER1` ⇒ `markers/blank-image` + 正确的 cause。
+   **修法方向**（未实施）：判"图内自身的墨度动态范围"（如 p99 与 p1 之差相对峰值接近 0）而不是相对底色，
+   注意别撞上 D69 的 `no-contrast`（那张是**有动态范围但中位数很高**）。只许改失败路径的 reason。
+2. **两处本轮做过、又按"不留未提交工作"的纪律还原的 CLI 改进**（已验证可用，但**没有**单测/腿/门限 ⇒ 未提交）：
+   - `send <目录>` 现在会抛裸 Node 错误 `EISDIR: illegal operation on a directory, read`。改法：`statSync(file).isDirectory()` 时抛一句人话（"一次传输只装一个文件；先把目录打包成一个文件再发"）。
+   - `receive` 一次失败的批量只逐张打印原因（40 张照片 = 120 行）。改法：按 `stage/reason` 计数，末尾打一行
+     `note: N image/page(s) failed: 30 x markers/no-contrast, ...` 并附**主导类**的一句 `do`。
+   两处都应配 usability 腿（`send <dir>` 的具名拒绝；空白目录的汇总行）。
+3. `cli/pskit.mjs` **无测试钩子** ⇒ CLI 行为只能靠 usability 腿或手工命令证明（结构性债）。
+4. 网页端**没有浏览器内的分片 UI**：`split`/`join` 在 CLI；网页/手机收到的分片要在「存成什么名字」里填 `part-NNN.bin`。
+5. 桌面接收页 `#outname` 的 `input` 监听器注册在 `run()` 内 ⇒ 每跑一次多挂一个（`applyName` 幂等 ⇒ **属泄漏、不属错误**）。
+6. `app.js` / `capture.js` 的 DOM 分支**进程内跑不到**（Node 一 import 就在取日志元素的表达式上炸）⇒ 真浏览器那一次归 G9。
+7. RSS 长跑：60 min 内 Q1..Q4 中位数**未收敛**；判据在 30 与 60 min 都过，**3 h 跑故意没做**（过度设计）。
+8. 255 页上限本身没动（协议字段宽度，改它要动帧格式与**已经印出去的纸**）。
+9. **第 94 轮启动的 600 dpi G2 重跑被"暂停"中止**（150/200 已处理，数据见 §6）；要判决就重跑：
+   `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan600-*'`（后台，约 1–2 h）。
+10. **本地领先 `origin/master` 7 个提交未推送**（见 §14）⇒ 线上站点仍是修前版本。
 
 ---
 
 ## 10. 环境陷阱（本机 + DSH 沙箱，全部实测过；细节见 `AGENTS.md`）
 
 - pwsh 工具实际是 **Windows PowerShell 5.1**：分隔用 `;`（`&&` 报错）；传给原生程序的**内嵌双引号会被嚼碎**；
-  含 `$` 的内联 JS 会被 PS 先插值 ⇒ **复杂脚本落地成 `.mjs` 再跑**；调用 `.ps1` 用 `& .\x.ps1`（点源会让脚本里的 `exit` 连宿主一起退）。
-- 工具的 `timeoutMs` **封顶 600 s** ⇒ 长任务用 `run_in_background`。
-- PS 的 `>` 重定向写 **UTF-16LE** ⇒ 跨工具取文本用 `node -e`/`.mjs` 直读，或读回时 `.Replace("\`0",'')`。
-- Node 24 重定向输出时用 **spec 报告器**（汇总行以 `ℹ` 开头）⇒ **判"跑没跑"只看 exit code**，要数字就按内容过滤。
+  含 `$` 的内联 JS 会被 PS 先插值 ⇒ **复杂脚本落地成 `.mjs` 再跑**；调用 `.ps1` 用 `& .\x.ps1`。
+- 工具的 `timeoutMs` **封顶 600 s** ⇒ 长任务用 `run_in_background`（后台任务**无超时**）。
+- **`Select-Object -First N` 会提前终止上游原生进程** ⇒ `$LASTEXITCODE` 变成 **`-1`**（看起来像崩了，其实是被杀）。
+  要判 exit code 就别截断，或先 `*> $null` 再单独读 `$LASTEXITCODE`。
+- PS 的 `>` 重定向写 **UTF-16LE** ⇒ 跨工具取文本用 `node -e`/`.mjs` 直读。
+- Node 24 重定向输出时用 **spec 报告器**（汇总行以 `ℹ` 开头）⇒ **判"跑没跑"只看 exit code**。
 - 包装脚本结尾的 `exit 0` 会**掩盖内层失败** ⇒ 一律看打印出来的 `*_EXIT=` 与 job 的 exit code。
-- `spawn EPERM`：**node 进程内**禁管道 stdio ⇒ 测试必须 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`（目录参数会 `ERR_UNSUPPORTED_DIR_IMPORT`）；
-  但**宿主 shell 跑 `python` / `git` / `node` 是通的**（第 40 轮把这行读窄过一次，导致门限样本量只有判据的 1/6 = D42）。
-- `Get-CimInstance` / WMI 被沙箱拒 ⇒ 探内存用 `Get-Process`；判内存看 **RSS + arrayBuffers**，不看 JS heap（D56：heap 恒 5 MB 的同时留住 1.3 GB 外部内存）。
-- `edit` 工具需要**本会话内先 read**；长表格行会被 grep 截断 ⇒ **锚点用短而唯一的前缀**。
+- `spawn EPERM`：**node 进程内**禁管道 stdio ⇒ 测试必须 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`；
+  **宿主 shell 跑 `python` / `git` / `node` 是通的**（第 40 轮把这行读窄过一次 = D42）。测试里需要 python 时用
+  `spawnSync(..., { stdio: 'inherit' })` 并按 `status === 2`（缺 pillow）**明确 skip**（`render-writers.test.mjs` 的范式）。
+- **`git push` 需要一次 `danger-full-access`**：MSYS 传输助手要建 signal pipe，受限沙箱拒（`Win32 error 5`）。
+  第 97 轮那次**授权提示在 10 分钟里没等到答复** ⇒ 推送仍待办（§14）。同理 Chrome 无头也跑不起来（同名错误）。
+- `Get-CimInstance` / WMI 被沙箱拒 ⇒ 探内存用 `Get-Process`；判内存看 **RSS + arrayBuffers**，不看 JS heap。
+- `edit` 工具需要**本会话内先 read**，且**文件被别的命令改过之后必须重读**（第 95 轮 `check-docs-tables --write` 改过 DEFECTS 后，我直接 edit 被拒）。
 - 改文件只用 `edit`/`write`（PS 的 `Get-Content`+`Set-Content` 走 CP1252 往返会把注释变成 U+FFFD）。
-- 表格单元格里**不得有裸 `|`**（GFM 会把代码跨度里的也算列分隔 ⇒ 整行错列还"看着像表"）⇒ 提交前跑 `node tools/check-docs-tables.mjs`。
+- 表格单元格里**不得有裸竖线**（GFM 会把代码跨度里的也算列分隔）⇒ 提交前跑 `node tools/check-docs-tables.mjs`；
+  `tests/unit/defects-ledger.test.mjs` 还会断言"每行四列" ⇒ **改完台账必须跑一遍单测**（第 95 轮我踩过）。
+- **在 `run_code` 里生成代码要小心转义**：外层用 `String.raw` 模板时，被生成的代码里的**反引号与美元花括号插值**会打断它
+  （第 96 轮写 `tiff-read.js` 时踩过 ⇒ 改成字符串拼接）；JS 字符串里给管道符号加的反斜杠会被吞掉 ⇒ 要写双反斜杠。
+- PIL 11.1.0 可用（造扫描仪格式的夹具）；numpy/cv2/scipy 可用；**没有** pytest/img2pdf/pymupdf/pdftoppm。
 
 ---
 
 ## 11. 台账纪律（破坏它比留一个 bug 更糟）
 
 1. **判决权威是 `docs/ACCEPTANCE.md`**；`STATUS.md` 的门限表只作导航；轮次块**逐字保留**；撤回**划线 + 标注**，不改写。
-2. **结果出来之前不写判决**；不把推断当测量（第 72 轮我差点把 600 dpi 的赢家成本写成减法 `11974−6900≈5.1 s`，实测是 **4645 ms**）。
-3. **每个新检查必须有阳性对照**（一个已知命中的例子，证明这个检查能失败）：`4096 B` 必须安静、300 dpi 加提示必须买不到东西、
-   4 MiB 全零必须仍编出 6 页、`join` 的每个拒绝用例都先跑一遍未篡改输入、加密腿的"给对钥匙必须成功"就是前两次拒绝的对照。
-4. **估算只能警告，不能拒绝；只有事实能拒绝**（压缩比无上界 ⇒ 任何"按文件字节数提前拒绝"的阈值都会误拒 ⇒ `earlySizePlan()` 只警告，
-   拒绝留给 core，因为压缩后的长度才是事实）。
-5. **不删 bootstrap 候选来躲失败**（"reorders and never removes"）；**不夹读断电平**（夹 = 被明令禁止的"看起来成功但是错"）。
-6. `say()` / `log()` 赋的是 `textContent` ⇒ **用户可见文案里不许有 markdown**（星号会原样显示）。
-7. 策略要从 DOM 守卫里**抽成导出的纯函数**才验得到（D61/D63/D64/D65/D66 都是这个套路）；但**不要为措辞造假纯函数** ——
-   措辞由 usability 的腿端到端判。
-8. 一次性探针放 `.tmp/`，但**台账不得指向不入库的文件**（第 61 轮把 `.tmp/lvl61.mjs` 提升为 `tools/level-diff.mjs` 就是这个理由）。
-9. 每轮收尾：跑门限 → 更新 `STATUS.md`（+ `DEFECTS.md` 如有）→ `git commit`；**M4 未闭不打 tag**。
+2. **结果出来之前不写判决**；不把推断当测量（第 72 轮差点把 600 dpi 的赢家成本写成减法）。
+3. **每个新检查必须有阳性对照**：`4096 B` 必须安静、300 dpi 加提示必须买不到东西、`join` 的每个拒绝用例都先跑未篡改输入、
+   第 91/95 轮的 D78/D80 修复都配了"旧格式必须仍然失败"的对照。
+4. **估算只能警告，不能拒绝；只有事实能拒绝**（压缩比无上界 ⇒ 任何"按文件字节数提前拒绝"的阈值都会误拒）。
+5. **不删 bootstrap 候选来躲失败**；**不夹读断电平**（夹 = 被明令禁止的"看起来成功但是错"）。
+6. 用户可见文案赋的是 `textContent` ⇒ **文案里不许有 markdown**。
+7. 策略要从 DOM 守卫里**抽成导出的纯函数**才验得到；但**不要为措辞造假纯函数** —— 措辞由 usability 的腿端到端判。
+8. 一次性探针放 `.tmp/`，但**台账不得指向不入库的文件**（要有永久等价物，如 `tools/level-diff.mjs`）。
+9. **不要留未提交的工作**：要么补完（腿 + 门限 + 台账 + 提交），要么还原并在 §9 记清楚（第 97 轮就是这么处理那两处 CLI 改进的）。
+10. 每轮收尾：跑门限 → 更新 `STATUS.md`（+ `DEFECTS.md` 如有）→ `git commit`；**M4 未闭不打 tag**。
 
 ---
 
 ## 12. 如果要继续，优先级建议
 
-**用户侧（价值最高，只有你能做）**：⓿ **先跑 `& .\tools\acceptance-kit.ps1`** —— 第 78 轮起它会一次生成纸面页、每个喷嘴的码牌、MTF 板与一份 `README.txt`（逐步命令 + 失败时发回什么）⇒ ① G4 手机 500×8（闭合 M4 的唯一动作）→ ② G9 三浏览器 × 两源
-（同一批里顺带处理 `sender.js` 的 `data:`→`blob:` 决定与 `#outname`/`#burstname` 目视检查）→ ③ D8 打印缩放实测（一页 + 尺子）
-→ ④ G10 四喷嘴（需打印机）→ ⑤ G8 用切片软件真打开一次 → ⑥ D43 的 https 半边。
+**用户侧（价值最高，只有你能做）**：⓿ **先重新导出产物**（§7 开头，D78 的修复只有重导才用得上）；
+① `& .\tools\acceptance-kit.ps1` 一次生成纸面页、每个喷嘴的码牌、MTF 板与 `README.txt` ⇒
+G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 → D8 打印缩放 → G10 四喷嘴 → G8 切片软件打开一次。
 
 **进程内（若你不能跑硬件，按价值排序）**：
-1. ~~M7 的 MTF 校准板~~（第 75/76 轮）· ~~D68 数据板网格角标~~（第 77 轮）· ~~**G10 的「用户拍回的照片目录 → 自动跑矩阵」读数脚本**~~（**第 92 轮：`tools/mtf-matrix.mjs`** —— 四张照片 + 文件名标签（或 `--label`/`mtf-labels.json`）⇒ 逐张"建议喷嘴 + 判决"，`--selftest` 用板自己的渲染做四条正例 + 两条对照，验收包 README 与 `USE.md §5` 已给出照抄命令）⇒ **G10 的实机那一半现在只剩"真打印机 + 你按 README 拍四张"**；下一条进程内项建议：**G4 的照片侧同款读数脚本**（把手机连拍那一路的失败帧按"缺墨/缺角/太远"自动分类成一张表，让用户拍一次就能定位是哪一档不够），或 **G6 ② 的可行性探针**（§8 里产品负责人若选第 3 条）；
-2. G6 ② 若产品负责人选 ③，先做**可行性探针**（降采样/分块粗定位能不能把 600 dpi 的定位成本压到 ~1 s 量级）——不承诺成功；
-3. 网页端分片 UI（价值中、成本高：要多文件写入与跨会话重组，`File System Access API` 还不通用）；
-4. `#outname` 监听器泄漏（价值低，且改 DOM 生命周期在本机无法验证）；
-5. **不建议做**：为 600 dpi 再优化候选排序（已量到地板，救不了）；3 h 长跑（判据只要求 30–60 min）；
-   任何"为了让门限表好看"的判据收窄。
+1. **修 D83**（§9 第 1 条）：小改 + 三条阳性对照（空白页判 blank、D69 的平光照片仍判 no-contrast、正常页照旧可读）；
+2. **补回 §9 第 2 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿；
+3. **G10 的照片侧读数**已经就绪（`tools/mtf-matrix.mjs`）；若想再往前，可写 **G4 的照片侧同款读数脚本**
+   （把一批手机照片按"缺墨/缺角/太远"自动分类成一张表）；
+4. **G6 ② 的可行性探针**（降采样/分块粗定位能不能把 600 dpi 定位成本压到 ~1 s 量级）—— **只在产品负责人选了 §8(a)③ 时做**，不承诺成功；
+5. 网页端分片 UI（价值中、成本高）；`#outname` 监听器泄漏（价值低、本机验不了）；
+6. **不建议做**：为 600 dpi 再优化候选排序（已量到地板）；3 h 长跑（判据只要求 30–60 min）；任何"为了让门限表好看"的判据收窄。
 
 ---
 
-## 13. 最近几轮的落点（便于对账；上面几行是第 87–89 轮，完整的逐轮记录在 `docs/STATUS.md`）
+## 13. 最近几轮的落点（便于对账；完整的逐轮记录在 `docs/STATUS.md`）
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
-| (本轮) | 96 | **D82**：TIFF 是扫描仪的另一个默认输出，而接收端只会说"读不了"（还让用户装 ImageMagick —— 气隙里不是答案）⇒ 新增零依赖基线 TIFF 读取器（II/MM、多页、1/4/8/16 位、灰度/二值/调色板/RGB、自写 LZW 与 PackBits、Adobe Deflate 的 zlib 包裹、FillOrder 2、Predictor 2），十种真文件变体 + 多页文件全部逐字节还原 |
-| `869abf4` | 95 | **D80/D81**：扫描仪默认档"黑白/线稿"（1-bit 灰或调色板 PNG）与 16-bit 灰度此前一律被拒 ⇒ `decodePNG` 现在支持 colour type 0/2/3/4/6 × 1/2/4/8/16 位深（含 PLTE/tRNS、亚字节 bpp=1 滤波）；顺手修掉 pHYs 单位字节被当 4 字节读 ⇒ `dpi` 恒 null、快路 dpi 守卫空过 |
-| `7f4e556` | 94 | **台账收口**：D51 的状态列头上还写着"未修"（第 63 轮就落地了）⇒ 用 D51 自己点名的两条命令复验：`level-diff` 首读**仍**塌陷（设计如此）、`receive` 把整条传输**救回且逐字节相同** ⇒ 改记 CLOSED 并纠正当时写错的验收形态；同时启动 600 dpi 的 G2 重跑（D49 的最终判决）|
-| `9e68db5` | 93 | **D79**：「扫描成 PDF」这条最常见的路被说成 `no pages found` ⇒ `receive` 现在点名 PDF + 给出导出路径（并提醒别截屏）+ 顶层错误前缀不再重复；usability 4f 腿（拒绝 + 阳性对照）|
-| `f3117c5` | 92 | **G10 的进程内半边补完**：`tools/mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数；文件名/`--label`/`mtf-labels.json` 三种标签；`names-itself` / `allowed-coarser` / `mismatch` / `unregistered` 四种判决；exit 0/1/2；`--selftest` 四条正例 + 两条对照）+ 6 个单测 + 验收包 README/USE §5 的照抄命令 |
-| `fe22372` | 91 | **D78**：PDF 图像流把 `/Columns` 写成 `width*3` ⇒ 每个主流阅读器按 3 倍行距取图、整页剪成平行四边形（用户报的「PDF 斜、PNG 直」就是这条）⇒ 改成裸 RGB 行、字典里不再写 predictor 参数 |
-| `a811673` | 89 | 页数上限的 hint 补上「每片多大」（板材档一次只装 ~21 kB，不是 split 默认的 1.4 MB）+ 可照抄的 `split --max-bytes`；并如实记下我第一版求上限的循环错（按字节往下试 ⇒ 打出「最多 ~255 B」）|
-| `cc119e1` | 88 | `receive` 点名被页间 RS 重建的页（`page 0 (page-000.png) rebuilt from the parity pages …`）+ usability 4e 腿（只放校验页 ⇒ 逐字节还原且点名）|
-| `15883d7` | 87 | **D76**：「拍近一点让码区填满画面」是**把人指向更坏结果**的建议（角标在纸的四角 ⇒ 拍近就出画 ⇒ 完全定位不了）⇒ 三处文案改正 + 验收包 README 补「整块板含四角入画」|
-| `0a1c76c` | 88b | 否掉「把纸打大一点」这个想法（2× 放大过手机档仍 `no-contrast`：手机必须框住整页，像素/格只取决于页上格数）|
-| `34cb5cb` | 75 | **M7 缺的那一半**：`core/calibrate/mtfplate.js`（喷嘴无关的板：5 档阶梯格 + 8 档孤立孔 + 色样 + 纹理样 + 标尺 + 四角标记）+ `core/calibrate/readmtf.js`（登记/覆盖率/颜色全走解码器自己的代码，判据是物理陈述）+ CLI `calibrate --make-mtf` / `--mtf` + `tools/mtf-probe.ps1`（真信道探针：四喷嘴点名 + 两对照，0 FAIL / 26s）+ 7 个单测 ⇒ 见 STATUS 第 75 轮块；**D67 OPEN**（板的网格没写） |
-| `b292a74` | 74 | 写 `docs/HANDOVER.md` + 更正两处过期记账（USE §5 的 G6 soak 行、STATUS 的总账计数）；**代码零改动**、无 tag |
-| `04a6413` | 73 | **D66**：core 一行（`error='need-passphrase'`）+ 三个接收端各一句可执行诊断 + 手机连拍新增 `#burstpass` + 连拍落盘统一到 `Blob` + usability 4c 腿（三种收法，含措辞判定与阳性对照）+ `USE.md` 首次写清口令（并更正我第 72 轮"要手工改名"的错话） |
-| `8c87f71` | 72 | **D65 尾部闭合**：`core/splitjoin.js` + `pskit split`/`join`（缺/短/错一律 exit 1 且不落盘）+ usability 4b 腿（3 次独立传输 + 阴性对照）+ 6 个单测；**G6 ② 地板实测**（6192 ms）⇒ `ACCEPTANCE` 划线 + ②bis；M9 过期记账更正 |
-| `a0ba8ea` | 71 | **D65**：发送页把"一次最多 255 页 ≈1.52 MB"用数字讲清（`transferBudget`/`pageLimitHint`/`earlySizePlan`，只警告不拒绝），删掉不可能触发的 600 页闸门与那句假的"CLI 页数不限" |
+| `d69d709` | 96 | **D82**：零依赖基线 TIFF 读取器（II/MM、多页、1/4/8/16 位、灰度/二值/调色板/RGB、自写 LZW 与 PackBits、Adobe Deflate 的 zlib 包裹、FillOrder 2、Predictor 2）；十种真文件变体 + 多页文件全部逐字节还原 |
+| `869abf4` | 95 | **D80/D81**：PNG 支持 1/2/4/8/16 位与调色板（扫描仪"黑白/线稿"默认档）；pHYs 单位字节被当 4 字节读 ⇒ dpi 恒 null、快路守卫空过 |
+| `7f4e556` | 94 | **台账收口**：D51 第 63 轮就修好了、状态列却仍写"未修" ⇒ 用它自己点名的命令复验（首读仍塌陷=设计、整条传输被救回且逐字节相同）；并启动 600 dpi 的 G2 重跑 |
+| `9e68db5` | 93 | **D79**：「扫描成 PDF」这条最常见的路被说成 `no pages found` ⇒ 现在点名 PDF + 给出导出路径；错误前缀不再重复 |
+| `f3117c5` | 92 | **G10 进程内半边**：`tools/mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数，四种判决 + `--selftest` 四正例两对照） |
+| `fe22372` | 91 | **D78**：PDF 图像流的 `/Columns` 写成 `width*3` ⇒ 每个主流阅读器按 3 倍行距取图、整页剪成平行四边形（用户报的「PDF 斜」）；改成裸 RGB 行、不再带 predictor 参数 |
+| `53c33dd` | 90 | 部署到 GitHub Pages（D43 https 半边闭合）；修 D77（`receive` 的 `skippedTiff` 崩溃） |
+| `a811673` | 89 | 页数上限 hint 补上"每片多大" + 可照抄的 `split --max-bytes` |
+| `cc119e1` | 88 | `receive` 点名被页间 RS 重建的页 + usability 4e 腿 |
+| `15883d7` | 87 | **D76**：「拍近一点」是**把人指向更坏结果**的建议（角标在纸四角）⇒ 三处文案改正 |
 
-**当前**：树干净、`docs/HANDOVER.md` 为本文件、**无 tag**（M4 开在 G4）。
-**目标状态**：同一会话的持久目标**已暂停**（`get_goal` 实测 `phase=paused`、`activation=disarmed`、`roundsStarted 65 / maxGoalRounds 80`）⇒ **不是完成** —— 完成判据里的"用户在电脑与手机上各走通一次"尚未发生。
+---
+
+## 14. 本次会话（第 90–97 轮）：改了什么、怎么复验、怎么推上去
+
+**7 个提交未推送**（`git status -sb` 会显示 `ahead 7`）：
+
+| 提交 | 一句话 |
+|---|---|
+| `d69d709` | TIFF 读取器（D82） |
+| `869abf4` | PNG 位深/调色板 + pHYs dpi（D80/D81） |
+| `7f4e556` | D51 台账收口 + 启动 600 dpi 重跑 |
+| `9e68db5` | 扫描成 PDF 的诊断（D79） |
+| `f3117c5` | G10 矩阵读数器 |
+| `fe22372` | PDF `/Columns` 剪切页（D78） |
+| `53c33dd` | Pages 部署（D43 https 半边） |
+
+**推送**：`git push origin master`（需要一次 `danger-full-access` 授权；批了之后 Pages 会自动重建，
+站点 `https://wangsan71.github.io/High-density-codes/`）。**在此之前，线上站点仍是修前版本**
+（`web/dist` 不入库、由 CI 从源码构建）。
+
+**这次会话新增/改动的可复验入口**：
+
+```powershell
+node tools/mtf-matrix.mjs --selftest                 # 矩阵读数器自证（四喷嘴点名 + 两条对照）
+& .\tools\usability.ps1                              # 含 4g（PNG 变体）与 4h（TIFF 变体）两条新腿
+node --test --test-isolation=none "tests/unit/png-read-depths.test.mjs"   # 8 例
+node --test --test-isolation=none "tests/unit/tiff-read.test.mjs"         # 9 例
+node --test --test-isolation=none "tests/unit/render-pdf.test.mjs"        # 14 例（含 D78 阳性对照）
+```
+
+**一句话给接手人**：代码这一侧现在"用户拿什么格式的扫描件都读得回来"（PNG 全变体 + TIFF 含多页）、
+"打出来的 PDF 不再被阅读器剪歪"；**剩下的事全在纸、手机、浏览器和打印机那边**，
+外加一条已知未修的诊断缺陷（D83）和两条被还原的 CLI 小改进（§9）。
