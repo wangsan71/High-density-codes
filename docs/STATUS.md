@@ -126,6 +126,17 @@
 
 ## 已知风险 / 待办
 
+### 第 146 轮（**手机端认出图片载荷：接收页收到 `PSKI` 就还原成真 PNG 再给用户（不再是一坨不透明字节）**）
+
+**① 做了什么**：`web/app.js` 在组装完载荷、准备下载的那一处（原来只有一行 `new Blob([asm.result], {type:'application/octet-stream'})`）加了**具名识别**：载荷前四字节是 `PSKI`（0x50 0x53 0x4b 0x49）时，用 `unpackImage()` 解码、`encodePNG()` 转成 PNG，blob 类型给 `image/png`，并写一行日志（尺寸/质量/字节数）；**解不开就照原字节下载**并明说，绝不猜格式。**摘要仍算在载荷上**（第 229 行未动）⇒ 与清单里的 `sourceSha256` 依旧一致。
+
+**② 为什么这是对的做法**：`web/app.js` 的头部注释写着「这里不含任何解码逻辑，所有解码都走 `../core`」—— 本轮遵守它：用的是 **CLI 那条路同一份 `core/image/container.js`**（`tools/unpsk.mjs` 用的是同一个函数，且有单测）。
+
+**③ 门限（全部实测）**：`node tools/build-web.mjs` ⇒ **exit 0**（precache 67）；`node tools/check-dist.mjs` ⇒ **13 pass / 0 fail**；单测 **`tests 409 · pass 409 · fail 0`**；`& .\tools\usability.ps1` ⇒ **`USABILITY=0`**（含网页发送端/接收端的真实数据路径那条腿）。
+
+**④ 如实标注（不许夸大）**：这条改动**只被构建与产物断言 + Node 侧的等价路径证明**；**真浏览器里点一次仍然没有证据**（本机无浏览器，与 G9 同一处境）。所以「手机收到图片能直接看」目前仍是**推定**，不是我测过的事实；真机验收那一栏（`docs/USE.md` §5）没有被本轮勾掉。
+
+**⑤ 下一块砖**：用户在真手机上跑一次（收到 `.psk` ⇒ 下载得到 PNG ⇒ 打开能看），或者按计划转 P4 瓦片码。
 ### 第 145 轮（**给下一块砖（手机端认 `.psk`）先验前提：`core/image/` 五块**零** `node:` 依赖 ⇒ 能被浏览器端直接 import**）
 
 **① 做了什么**：零代码改动。下一块砖要在 PWA 接收页里 `import` `core/image/container.js` 来把 `.psk` 显示成图，所以本轮先把**这个前提验掉**：`core/image/` 下五个模块**没有任何真正的 `node:` import**（`grep "from 'node:"` ⇒ **0 处**；唯一的 3 处命中在注释里，是它们自己写的「no node: builtins」那句）。

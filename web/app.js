@@ -10,6 +10,8 @@
  * 把这一点变成「机器断言」而不是「我承诺」。
  */
 import { decodePNG } from './core/decode/png-read.js';
+import { unpackImage } from './core/image/container.js';
+import { encodePNG } from './core/render/png.js';
 import { bootstrapDecode } from './core/decode/bootstrap.js';
 import { TransferAssembler } from './core/protocol.js';
 // 页码被本页自己的码拒绝时，用「按本页实测标定的 ρ 切点」重读一次；重读同样只有过了
@@ -227,7 +229,23 @@ async function run() {
   }
 
   const digest = sha256Hex(asm.result);
-  const blob = new Blob([asm.result], { type: 'application/octet-stream' });
+  // A .psk image payload (PLAN v5 P2b): hand the user a real PNG instead of an opaque blob, decoded with
+  // the SAME decoder the sender used. Anything else stays an opaque download -- guessing at formats is
+  // how you end up shipping a file that opens as garbage. The digest above stays over the payload, so it
+  // is still the digest the manifest carries.
+  let outBytes = asm.result;
+  let outType = 'application/octet-stream';
+  if (asm.result.length > 4 && asm.result[0] === 0x50 && asm.result[1] === 0x53 && asm.result[2] === 0x4b && asm.result[3] === 0x49) {
+    try {
+      const pic = unpackImage(asm.result);
+      outBytes = encodePNG({ width: pic.width, height: pic.height, pixels: pic.rgba, dpi: 96 });
+      outType = 'image/png';
+      log('这是图片载荷：已用同一份解码器还原为 PNG（' + pic.width + '×' + pic.height + '，q' + pic.quality + '，' + outBytes.length + ' B）');
+    } catch (e) {
+      log('看着像图片载荷但解不开：' + e.message + '（仍按原始字节下载）');
+    }
+  }
+  const blob = new Blob([outBytes], { type: outType });
   const url = URL.createObjectURL(blob);
   $('download').href = url;
   // 文件名由字节导出：页头没有名字字段（frame.js:14-28 只有 magic..digest..crc16），
