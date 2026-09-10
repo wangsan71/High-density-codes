@@ -110,7 +110,7 @@ export const MTF_TEXTURE_PERIOD_MM = 0.4;
 
 /** Default plate side (mm) and raster resolution (px/inch) of the appearance render. */
 export const MTF_PLATE_MM = 200;
-export const MTF_DPI = 300;
+const MTF_DPI = 300;
 
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 const rectPxOf = (rectMm, dpi) => {

@@ -33,7 +33,7 @@ export function ewPx(ewMm, dpi) {
  * physical size within `tol` mm of the ideal. Used for cell pitches, where a
  * fraction of a pixel of drift per cell would smear the far edge of the page.
  */
-export function snapPx(mm, dpi, tol = 0.02) {
+function snapPx(mm, dpi, tol = 0.02) {
   const px = Math.round((mm * dpi) / MM_PER_INCH);
   const back = (px * MM_PER_INCH) / dpi;
   if (Math.abs(back - mm) > tol) {

@@ -88,7 +88,7 @@ export function triangleNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
 }
 
 /** 三角形面积（0 = 退化）。 */
-export function triangleArea(ax, ay, az, bx, by, bz, cx, cy, cz) {
+function triangleArea(ax, ay, az, bx, by, bz, cx, cy, cz) {
   const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
   const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
   const cx1 = e1y * e2z - e1z * e2y;

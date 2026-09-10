@@ -94,7 +94,7 @@ function erasureLocator(erasures, n) {
  * Classic Berlekamp-Massey on a plain syndrome sequence (lowest-degree-first).
  * Returns Λ(x) with Λ[0] === 1.
  */
-export function berlekampMassey(S) {
+function berlekampMassey(S) {
   let lam = new Uint8Array([1]);
   let b = new Uint8Array([1]);
   let L = 0;
