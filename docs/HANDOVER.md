@@ -13,6 +13,15 @@
 
 ## 0. 一句话现状
 
+**第 133–141 轮新增（图片这条路，PLAN v5 P2b/P3）**：自研有损图片编码器已闭环 —— `core/image/` 五块
+（`dct.js` 变换+量化、`huff.js` 霍夫曼、`jpegish.js` 系数↔位流、`color.js` 色彩+三角滤波上采样、
+`container.js` 一个图 = 一个自描述载荷），同图对拍**每一档都比 libjpeg 字节少 4–9% 且 PSNR 更高**
+（q70 我们 274,991 B / 35.03 dB vs PIL 290,976 B / 34.94 dB；复现：`node tools/image-codec-bench.mjs`）。
+**用户视角一条命令**：`node cli/pskit.mjs send photo.png --image-mode lossy --pages 5 --profile P-MX-300-5 --format png,pdf --out DIR`
+⇒ 实测 q10、72,358 B、28.67 dB、全分辨率、写出 **4 页**；`receive` 取回的载荷**逐字节相同**（清单摘要可核），
+`node tools/unpsk.mjs photo-back.psk out.png` 变回可看的 PNG。**手机端还没有**：PWA 收到 `.psk` 只会当文件存、
+不会显示成图 —— 这是图片这条路上唯一还没做的一环。
+
 **在本机能自动证明的范围内，它是能跑、能用的**：一条命令 `& .\tools\usability.ps1`
 就把「文件 → 可打印产物（2D 纸面 + 3D 码牌）→ 模拟打印扫描 → 接收落盘 → 字节逐位相同」跑通
 （第 99 轮实测 **289 s、全腿 PASS、exit 0**），其中包含多片传输（split/join）、加密传输（三种收法）、
