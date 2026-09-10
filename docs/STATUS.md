@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 161 轮（**P4 第四块砖：`core/render/tilepage.js` —— 瓦片页真的画出来了（A4/300dpi = 2480x3508，10 px/模块）**）
+
+**① 做了什么**：新增 `core/render/tilepage.js`：`modulePixels(tileMm, modules, dpi)` 与 `renderTilePage({plan, layout, tiles, dpi, sheetW, sheetH})` ⇒ 把 `core/tiles.js` 算出的几何画成像素 —— 每块瓦片先画数据格、**再画定位图形盖在上面**（载荷即便越界也绝不会盖住识读所需的图形），实心图形画成 7 环 + 3x3 实心、空心图形画成 7 环 + 单点实心。几何一行都没有在这里重算。配 `tests/unit/tilepage.test.mjs` 2 条。
+
+**② 实测**：A4@300dpi ⇒ **2480x3508**、**10 px/模块**；采样验证：实心图形中心黑、其环内白；空心图形中心（模块 29）黑、两侧白；第一个数据格（载荷首字节 `0b10000000`）黑、第二个白；**第 5 块瓦片**同样黑 ⇒ 每块瓦片独立且内容一致。
+
+**③ 两个被测试抓住的错误（都记在测试注释里）**：① 空心图形的中心我第一版按「32-3.5」采样 —— 错；它位于模块 26，中心是 **26+3 = 29**。② 更要紧的一个：`modulePixels()` **向下取整** ⇒ 30 mm 的槽位、33 模块在 300 dpi 下画成 **10 px/模块 = 27.9 mm 的墨**（不是 30 mm），所以**按毫米算采样点会漂到隔壁格子**；测试改为**在渲染器自己的像素几何里采样**（`tile 原点 + 模块号 * modulePixels`）。这条对以后写识读器同样重要：**别用标称毫米做亚像素判断**。
+
+**④ 门限**：单测 **`tests 417 · pass 417 · fail 0`**（第 160 轮的 415 + 本轮 2）。**下一块砖**：`core/decode/tile-read.js` —— 从一张照片里认出**任意一块**瓦片并读出它的载荷。
 ### 第 160 轮（**P4 第三块砖：`tileCapacity()` + `fillTileModules()` —— 一张 A4 的瓦片页能装多少、位落在哪**）
 
 **① 做了什么**：`core/tiles.js` 新增两个纯函数：`tileCapacity(plan, layout)` ⇒ `{tiles, cellsPerTile, cells, bytesPerTile, bits, bytes}`；`fillTileModules(cells, bytes)` ⇒ 按**高位在前**把载荷铺进一块瓦片的数据格、不足补零，**装不下就具名拒绝**（把「需要多少格」与「只有多少格」都报出来 —— 静默截断的码正是本项目拒绝交付的那类错误）。配 `tests/unit/tile-capacity.test.mjs` 2 条。
