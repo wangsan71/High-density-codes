@@ -257,6 +257,11 @@ function readTileAuto(img, plan, layout, t, dpi, opts = {}) {
   try {
     return { tile: readTile(img, plan, layout, t, dpi, null, opts), how: 'straight' };
   } catch (e) {
+    // With a page homography the tile positions are known analytically, so searching image space would be
+    // searching the WRONG space: the search "validates" an alignment in the unmapped frame and can hand
+    // back something that only looks right (measured in STATUS round 186: it reports 8/8 finder score and
+    // a plausible offset on a page it cannot actually read). So the fallbacks only exist for the no-map case.
+    if (opts.map) throw e;
     try {
       const found = findTileOffset(img, plan, layout, t, { dpi });
       return { tile: readTile(img, plan, layout, t, dpi, found, opts), how: found.rot ? 'found+rot' + found.rot : 'found+' + found.dx + ',' + found.dy };
