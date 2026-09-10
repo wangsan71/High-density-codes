@@ -126,6 +126,22 @@ $('outname').addEventListener('input', applyName);
 let busy = false;
 $('go').addEventListener('click', () => { if (!busy) run(); });
 
+async function decodeBrowserRaster(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0);
+    const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+    return { width: bitmap.width, height: bitmap.height, pixels: Uint8Array.from(data.data), dpi: null };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function run() {
   busy = true;
   $('out').hidden = true;
@@ -150,9 +166,10 @@ async function run() {
     setStatus(`读第 ${i}/${files.length} 张：${f.name}`);
     let bmp;
     try {
-      bmp = decodePNG(new Uint8Array(await f.arrayBuffer()));
+      const jpegLike = /\.jpe?g$/i.test(f.name) || f.type === 'image/jpeg';
+      bmp = jpegLike ? await decodeBrowserRaster(f) : decodePNG(new Uint8Array(await f.arrayBuffer()));
     } catch (e) {
-      log(`  ${f.name}: 不是能读的 PNG（${e.message}）—— 只支持 PNG，TIFF 请先转 PNG`, 'bad');
+      log(`  ${f.name}: 不是能读的图片（${e.message}）—— PNG/TIFF 由内核直读，JPEG 由浏览器解码；TIFF 请先转 PNG`, 'bad');
       continue;
     }
     const t0 = performance.now();

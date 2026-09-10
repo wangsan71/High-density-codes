@@ -1,11 +1,11 @@
-# 交接文档 · PSKT（第 106 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
+# 交接文档 · PSKT（第 107 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
 > 判据原文与逐轮证据仍在 `docs/PLAN.md` / `docs/ACCEPTANCE.md` / `docs/STATUS.md`。
 >
-> **第 106 轮状态**：模块档已补齐照片回显条 ±2px 对齐搜索；用户高分辨率照片帧头能读，但数据区仍被手持照片光度误码挡住。
-> ① 小载荷 16/16；② 1MB 三档分别 64/45/29 页逐字节还原；③ 回显对齐修复已入库；④ 验收包与扫描检查器就绪；
+> **第 107 轮状态**：网页接收端已恢复 JPEG 原生解码；模块档照片帧头可读，但数据区仍被手持照片光度误码挡住。
+> ① 小载荷 16/16；② 1MB 三档分别 64/45/29 页逐字节还原；③ 回显对齐修复已入库；④ JPEG 浏览器路径已修复；
 > ⑤ 默认档仍 `P-M1-300`；⑥ 真平板扫描是最后缺口；⑦ 代码与台账尚未提交（见 §14）。
 
 ---
@@ -87,7 +87,7 @@ G8/G10 需要切片软件/真打印机，G6 ② 需要产品负责人定判据�
   - `protocol.js`（编解码 + `TransferAssembler`）、`frame.js`（页头，`totalPages` 是 **u8** ⇒ 一次传输 ≤255 页）、
     `profiles.js`（13 个档，其中 `P-MX-300-4/5/6` 是 `physicalEncoding: 'module'`）、
     `naming.js`（下载名策略 D62）、`splitjoin.js`（分片/重组，第 72 轮）。
-  - `decode/`：`bootstrap.js`（候选搜索）、`page.js`（快路 + 标记几何路）、`fiducial.js`（标记检测/墨度）、
+  - `decode/`：`bootstrap.js`（候选搜索）、`page.js`（快路 + 标记几何路 + 回显对齐重试）、`fiducial.js`（标记检测/墨度）、
     `warp.js`（单应矫正）、`ideal.js`（逐格匹配滤波读电平）、`recalibrate.js`（按页实测 ρ 重读，D51）、
     `echo.js`（回显条）、**`module-read.js`（模块阵 timing 校准 + 局部自适应阈值 + 低置信擦除）**、
     `advice.js`（**每个 reason 必须有 advice，机器强制**）、
@@ -100,7 +100,7 @@ G8/G10 需要切片软件/真打印机，G6 ② 需要产品负责人定判据�
 - **`cli/pskit.mjs`** —— 只做 IO 与参数：`send` / `receive` / `split` / `join` / `calibrate` / `status` /
   `verify --gate` / `roundtrip`。**没有测试钩子**（沙箱禁管道 stdio ⇒ 测试里不能 spawn 它）⇒ CLI 行为只能靠
   `tools/usability.ps1` 的腿或手工命令证明。
-- **`web/`** —— `index.html`（接收页，含最下面「手机连拍」节）、`app.js`（桌面接收）、`capture.js`（连拍取舍，
+- **`web/`** —— `index.html`（接收页，含最下面「手机连拍」节）、`app.js`（桌面接收，JPEG 走浏览器原生解码）、`capture.js`（连拍取舍，
   **纯收集器 + DOM 半边**，Node 可加载）、`send.html` + `sender.js`（发送页）、`selftest*.js`、`sw.js`。
 - **`tools/`** —— `build-web.mjs`、`check-dist.mjs`（13 项，含气隙/外部 URL 断言与 id 契约）、
   `check-serve.mjs` / `check-lan.mjs`、`smoke-sender.mjs` / `smoke-capture.mjs`、`soak.mjs`（= `verify --gate G6`）、

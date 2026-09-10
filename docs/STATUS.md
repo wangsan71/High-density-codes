@@ -126,6 +126,14 @@
 
 ## 已知风险 / 待办
 
+### 第 107 轮（**网页接收端恢复原生 JPEG 解码路径：CLI 仍只读 PNG/TIFF，浏览器负责把 JPEG 转成 RGBA 位图**）
+
+**① 用户实测**：照片文件是 `.jpeg` 时，网页接收端仍调用纯 JS `decodePNG`，所以输出“只支持 PNG”。CLI 也无法读 JPEG，用户被卡在格式层。
+
+**② 改动**：`web/app.js` 对 JPEG 文件使用浏览器原生 `createImageBitmap` + `canvas.getImageData`，转换成与 `core` 相同的 RGBA bitmap 后继续走原有 `bootstrapDecode`。`web/index.html` 文件选择器补 `.jpg/.jpeg`。CLI 能力保持不变，不新增纯 JS JPEG 解码器。
+
+**③ 验证**：`build-web` exit 0；`check-dist` **13 pass / 0 fail**、G9 全过。真实 JPEG 解码仍只能在用户浏览器验证；即使格式能读，前述照片数据区 `intra-fail` 仍不因此解除。
+
 ### 第 106 轮（**照片回显条 ±2px 对齐搜索：用户高分辨率照片的帧头已能读出，数据区仍被照片光度误码挡住**）
 
 **① 用户实测**：4032×3024 照片的角标约 45–52px，但 `P-MX-300-6` 三页全部 `readout/echo-header-crc`。逐偏移复算发现三张照片的回显条相对角标单应都有约 `+2px` 横向位移。
