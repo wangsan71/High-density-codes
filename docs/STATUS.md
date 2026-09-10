@@ -126,6 +126,19 @@
 
 ## 已知风险 / 待办
 
+### 第 153 轮（**死代码清理第二批：删掉三个确认无人使用的定义（78 → 75）**）
+
+**① 删了什么**（都在 `core/`，都不被任何代码/文档/参考实现/测试引用）：
+
+- `core/render/units.js` 的 `mmToPxF()`（含其注释）—— 没人调用。
+- `core/nozzles.js` 的 `export const DEFAULT_NOZZLE = '0.4'` —— 默认喷嘴走的是 CLI 的 `args.nozzle` 与 `PLATE_DEFAULT` 路径，这个常量从未被读。
+- `core/calibrate/readmtf.js` 的 `calibrateFromPlate()`（含其注释）—— 一次性封装，`readMtfPlate()` + `recommendFromMtf()` 才是实际使用的两步。
+
+**② 实测**：扫描候选 **78 → 75**；单测 **`tests 413 · pass 413 · fail 0`**；`check-docs-tables` clean。
+
+**③ 方法（防止误删）**：每个名字先查「别处是否提及」→ 再查「自己文件内部是否使用」→ 只有**两处都没有**才整段删；文件内部仍在用的（上一轮那四个）只去掉 `export`。删除用的 `old_string` 直接取自刚读取的文件内容，避免手打错字删错行。
+
+**④ 下一轮**：继续过剩下的 75 个候选（重点看 `core/decode/**` 与 `core/mesh/**`，这两处候选最密），然后回到 P4 第三块砖（把瓦片画出来）。
 ### 第 152 轮（**按你的要求做「每 5 轮查死代码」：把扫描做成永久命令 `tools/find-dead-exports.mjs`，并清掉第一批确认多余的导出**）
 
 **① 做了什么**：

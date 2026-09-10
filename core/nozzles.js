@@ -24,7 +24,6 @@ export const NOZZLES = {
 };
 
 export const NOZZLE_IDS = Object.keys(NOZZLES);
-export const DEFAULT_NOZZLE = '0.4';
 
 /**
  * Universal floor pitch (mm) used by profile PL-G: chosen so that even a 0.8 mm

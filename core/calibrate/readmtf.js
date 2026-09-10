@@ -647,12 +647,6 @@ export function recommendFromMtf(m, opts = {}) {
   return out;
 }
 
-/** Convenience: register, measure and recommend in one call. */
-export function calibrateFromPlate(bitmap, spec, opts = {}) {
-  const m = readMtfPlate(bitmap, spec, opts);
-  if (!m.ok) return { ok: false, measurements: m, recommendation: { ok: false, reason: `${m.stage}/${m.reason}` } };
-  return { ok: true, measurements: m, recommendation: recommendFromMtf(m, opts) };
-}
 
 /** Human-readable summary lines, for the CLI and for the probe tool. */
 export function describeMtfMeasurement(m, rec) {

@@ -18,10 +18,6 @@ export function pxToMm(px, dpi) {
   return (px * MM_PER_INCH) / dpi;
 }
 
-/** Exact (unrounded) millimetres->pixels, for cases where rounding must not accumulate. */
-export function mmToPxF(mm, dpi) {
-  return (mm * dpi) / MM_PER_INCH;
-}
 
 /** Pixels of one extrusion width. */
 export function ewPx(ewMm, dpi) {
