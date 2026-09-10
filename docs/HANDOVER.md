@@ -13,6 +13,13 @@
 
 ## 0. 一句话现状
 
+**第 150–169 轮新增（瓦片页，PLAN v5 P4）**：整页切成 M×N 块**各自带定位图形**的瓦片（三实心 + 一空心），
+载荷**分片**铺进去（每块 4 B 头 + 98 B 数据 + 2 B CRC16）。已落地并实测：几何 `core/tiles.js`（A4/30 mm ⇒ 48 块）、
+渲染 `core/render/tilepage.js`、读回 `core/decode/tile-read.js`（含**平移**容错 `findTileOffset`）、以及一条用户命令
+`node tools/make-tile-page.mjs "文本" --out page.png` + `--read page.png --out payload.bin`（29 B 载荷往返逐字节复原；
+整页容量 **4,704 B**，比 `P-MX-300-5` 的 29,082 B/页少约 6 倍 —— 差价买的是每块自带的定位图形）。
+**还差的**：① 从照片/扫描件读（透视、旋转、光照都未做 ⇒ 手机扫瓦片**还不成立**）② 瓦片级 RS 纠错（现在只有 CRC 检测）
+③ 接进 CLI/手机端的正式收发流程。**每条都已记在 `docs/STATUS.md` 第 150–169 轮块里，别重新发现一遍。**
 **第 133–141 轮新增（图片这条路，PLAN v5 P2b/P3）**：自研有损图片编码器已闭环 —— `core/image/` 五块
 （`dct.js` 变换+量化、`huff.js` 霍夫曼、`jpegish.js` 系数↔位流、`color.js` 色彩+三角滤波上采样、
 `container.js` 一个图 = 一个自描述载荷），同图对拍**每一档都比 libjpeg 字节少 4–9% 且 PSNR 更高**
