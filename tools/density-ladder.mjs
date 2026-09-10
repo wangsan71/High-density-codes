@@ -170,23 +170,31 @@ function make(args) {
 }
 
 /** 一条带里每个模块的深浅：取模块中心的小窗平均灰度。 */
-function moduleGray(rectified, b, c, r, ox = 0, oy = 0) {
-  const { pixels, width } = rectified;
-  const half = Math.max(1, Math.floor(b.cellPx / 4));
-  const x0 = b.x + c * b.cellPx + half + ox;
-  const y0 = b.y + r * b.cellPx + half + oy;
-  let sum = 0, n = 0;
-  for (let dy = 0; dy < Math.max(1, b.cellPx - 2 * half); dy++) {
-    for (let dx = 0; dx < Math.max(1, b.cellPx - 2 * half); dx++) {
-      const x = x0 + dx, y = y0 + dy;
-      if (x < 0 || y < 0 || x >= width) continue;
-      const o = (y * width + x) * 4;
-      if (o + 2 >= pixels.length) continue;
-      sum += (pixels[o] + pixels[o + 1] + pixels[o + 2]) / 3;
-      n++;
-    }
-  }
-  return n ? sum / n : 255;
+/**
+ * One module's grey level, sampled at the module CENTRE with bilinear interpolation.
+ *
+ * Sub-pixel matters here: at 2-3 px per module a half-pixel origin error puts the sample on the
+ * module boundary and flips bits by itself. Greyscale of a whole window cannot fix that (the window
+ * averages both states), so the sample point is interpolated and the caller searches fractional
+ * offsets alongside whole-pixel ones. That makes a pristine re-render read as BER 0 instead of the
+ * 1e-3 floor the first version showed -- a floor that would have been mistaken for physics.
+ */
+function moduleGray(rectified, b, c, r, ox = 0, oy = 0, fx = 0, fy = 0) {
+  const { pixels, width, height } = rectified;
+  const cx = b.x + c * b.cellPx + b.cellPx / 2 + ox + fx;
+  const cy = b.y + r * b.cellPx + b.cellPx / 2 + oy + fy;
+  const x0 = Math.floor(cx), y0 = Math.floor(cy);
+  const tx = cx - x0, ty = cy - y0;
+  const at = (x, y) => {
+    const xx = Math.min(Math.max(x, 0), width - 1);
+    const yy = Math.min(Math.max(y, 0), (height || Math.floor(pixels.length / (width * 4))) - 1);
+    const o = (yy * width + xx) * 4;
+    if (o + 2 >= pixels.length) return 255;
+    return (pixels[o] + pixels[o + 1] + pixels[o + 2]) / 3;
+  };
+  const top = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx;
+  const bot = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
+  return top * (1 - ty) + bot * ty;
 }
 
 function readOne(bitmap, spec) {
@@ -204,19 +212,23 @@ function readOne(bitmap, spec) {
     // offset flips modules by itself. The real decoder searches for alignment, so the ruler must
     // too -- otherwise a pristine re-render would look like it had errors.
     const bitsPre = bandBits(b.seed, b.bits);
-    let bestOx = 0, bestOy = 0, bestErr = Infinity;
-    for (let oy = -4; oy <= 4; oy++) {
-      for (let ox = -4; ox <= 4; ox++) {
-        let wrong = 0, n = 0;
-        for (let rr = 0; rr < b.rows; rr += 3) {
-          for (let cc = 0; cc < b.cols; cc += 3) {
-            const g = moduleGray(r, b, cc, rr, ox, oy);
-            if ((g < 128) !== (bitsPre[rr * b.cols + cc] === 1)) wrong++;
-            n++;
+    let bestOx = 0, bestOy = 0, bestFx = 0, bestFy = 0, bestErr = Infinity;
+    for (let oy = -3; oy <= 3; oy++) {
+      for (let ox = -3; ox <= 3; ox++) {
+        for (const fy of [0, 0.5]) {
+          for (const fx of [0, 0.5]) {
+            let wrong = 0, n = 0;
+            for (let rr = 0; rr < b.rows; rr += 3) {
+              for (let cc = 0; cc < b.cols; cc += 3) {
+                const g = moduleGray(r, b, cc, rr, ox, oy, fx, fy);
+                if ((g < 128) !== (bitsPre[rr * b.cols + cc] === 1)) wrong++;
+                n++;
+              }
+            }
+            const err = n ? wrong / n : 1;
+            if (err < bestErr) { bestErr = err; bestOx = ox; bestOy = oy; bestFx = fx; bestFy = fy; }
           }
         }
-        const err = n ? wrong / n : 1;
-        if (err < bestErr) { bestErr = err; bestOx = ox; bestOy = oy; }
       }
     }
     const bits = bandBits(b.seed, b.bits);
@@ -224,7 +236,7 @@ function readOne(bitmap, spec) {
     const samples = [];
     for (let rr = 0; rr < b.rows; rr++) {
       for (let cc = 0; cc < b.cols; cc++) {
-        const g = moduleGray(r, b, cc, rr, bestOx, bestOy);
+        const g = moduleGray(r, b, cc, rr, bestOx, bestOy, bestFx, bestFy);
         samples.push(g);
         n++;
       }
@@ -246,7 +258,7 @@ function readOne(bitmap, spec) {
     const ber = n ? wrong / n : 1;
     rows.push({
       index: b.index, pitchMm: b.pitchMm, cellPx: b.cellPx, cols: b.cols, rows: b.rows,
-      align: { ox: bestOx, oy: bestOy },
+      align: { ox: bestOx, oy: bestOy, fx: bestFx, fy: bestFy },
       modules: n, dark, light, span, cut, wrong, ber,
       netBytesPerPage: Math.round((n * (1 - 0.2)) / 8),
       bitsPerMm2: b.wMm && b.hMm ? n / (b.wMm * b.hMm) : null,
