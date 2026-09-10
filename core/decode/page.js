@@ -18,6 +18,29 @@ import { readPageIdeal } from './ideal.js';
 import { readModuleIdeal } from './module-read.js';
 
 /**
+ * The corner markers and the narrow header strip can disagree by a couple of
+ * pixels after a hand-held photo. The header is self-checking, so retrying the
+ * echo strip over a small integer neighbourhood costs nothing on a page that
+ * already reads and recovers pages whose homography is otherwise good.
+ */
+function readEchoAligned(bitmap, layout) {
+  const first = readEcho(bitmap, layout);
+  if (first.ok) return first;
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const shifted = {
+        ...layout,
+        echo: { ...layout.echo, x: layout.echo.x + dx, y: layout.echo.y + dy },
+      };
+      const r = readEcho(bitmap, shifted);
+      if (r.ok) return { ...r, alignment: { dx, dy } };
+    }
+  }
+  return first;
+}
+
+/**
  * @param {object} bitmap {width,height,pixels,dpi?,substrate?} RGBA
  * @param {object} ctx {geom, layout, paletteId}
  * @param {object} [opts] {allowFastPath: true, threshold, quietZoneSubstrate, log}
@@ -59,7 +82,7 @@ export function decodePage(bitmap, { geom, layout, paletteId = 'INK2' }, opts = 
 
 /** Header + cells from a bitmap already aligned to the page canvas. */
 function readFast(bitmap, geom, layout, paletteId) {
-  const echo = readEcho(bitmap, layout);
+  const echo = readEchoAligned(bitmap, layout);
   if (!echo.ok) return { ok: false, reason: `echo-${echo.reason}`, detail: echo };
   const read = geom.physicalEncoding === 'module' ? readModuleIdeal(bitmap, layout, geom) : readPageIdeal(bitmap, layout, geom, paletteId);
   const levels = read.levels;
