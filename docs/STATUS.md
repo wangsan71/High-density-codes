@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 166 轮（**瓦片这条路有了往返命令：`make-tile-page --read` 把一张页 PNG 读回载荷（实测 29 B 逐字节复原）**）
+
+**① 做了什么**：`tools/make-tile-page.mjs` 增加 `--read <page.png> [--out payload.bin]`：用 `decodePNG` 读像素、按**像素与 dpi** 反推纸张尺寸与网格、`readTilePage()` 拼回载荷并落盘。⇒ 瓦片这条路现在**一条命令写页、一条命令读回**，用户不必写代码。
+
+**② 实测**：`make-tile-page "round trip through a PNG file" --out .tmp/tp.png` ⇒ 29 B 载荷、48 块、A4/300dpi；`make-tile-page --read .tmp/tp.png --out .tmp/tp-back.bin` ⇒ **`payload 29 B (100 B/tile, 48 tiles read, missing 0)`**，落盘内容 **逐字节等于原文本**（`recovered: "round trip through a PNG file"`）。
+
+**③ 这一步新覆盖了什么**：此前瓦片的读回只被测过**内存里的图像对象**；现在是**真的走了一遍 PNG 编解码**（`encodePNG` → 文件 → `decodePNG`），也就是用户会走的那条路。**仍未覆盖**：打印 + 扫描/拍照（像素会位移、变形、变脏）—— 那是 `findTileOffset` 与将来的透视定位那一层的事。
+
+**④ 门限**：单测 **`tests 421 · pass 421 · fail 0`**；`check-docs-tables` clean。**注**：`--read` 这个模式目前只有**命令级证据**（上面两条），**还没有单测**（要把它抽成可测函数）；已记在这里，避免下次误以为它被测过。
 ### 第 165 轮（**P4 第六块砖：`findTileOffset()` —— 页面平移了也找得到、读得回（±一个模块内）；用"格式自身"当定位判据**）
 
 **① 做了什么**：`core/decode/tile-read.js` 新增 `findTileOffset(img, plan, layout, t, {searchPx})`：在计划位置周围 ±12 px 搜索（四个定位图形各取"中心黑 / 环内白"两处探针打分），再**用 32 位头（块号 / 总块数 / 载荷长度）当硬判据**挑选偏移量 —— 只有对齐正确时头才解得通；`readTile()` 增加可选 `offset` 参数。配 `tests/unit/tile-find.test.mjs` 2 条。

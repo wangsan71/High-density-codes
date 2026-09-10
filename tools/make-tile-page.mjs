@@ -20,6 +20,8 @@ import { resolve } from 'node:path';
 import { planTiles, tileLayout, tileCapacity, fillTileModules } from '../core/tiles.js';
 import { renderTilePage } from '../core/render/tilepage.js';
 import { encodePNG } from '../core/render/png.js';
+import { decodePNG } from '../core/decode/png-read.js';
+import { readTilePage } from '../core/decode/tile-read.js';
 import { SHEETS } from '../core/profiles.js';
 
 const USAGE = [
@@ -66,6 +68,7 @@ function parseArgs(argv) {
     else if (a === '--modules') out.modules = Number(argv[++i]);
     else if (a === '--out') out.outPng = argv[++i];
     else if (a === '--file') out.file = argv[++i];
+    else if (a === '--read') { out.mode = 'read'; out.readFrom = argv[++i]; }
     else if (a === '--help' || a === '-h') out.help = true;
     else rest.push(a);
   }
@@ -75,7 +78,23 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help || (!args.text && !args.file)) { console.log(USAGE); process.exitCode = args.help ? 0 : 2; return; }
+  if (args.help || (args.mode !== 'read' && !args.text && !args.file)) { console.log(USAGE); process.exitCode = args.help ? 0 : 2; return; }
+  if (args.mode === 'read') {
+    // Read a page back from a PNG. The pixels are whatever the file holds -- a print-and-scan round trip
+    // is the same code path with scanned pixels in place of rendered ones, once a photo locator exists.
+    const img = decodePNG(new Uint8Array(readFileSync(resolve(args.readFrom))));
+    const tileW = args.tile;
+    const plan = planTiles({ sheetW: img.width * 25.4 / img.dpi, sheetH: img.height * 25.4 / img.dpi, tileMm: tileW, marginMm: 9, gapMm: 2 });
+    const layout = tileLayout({ modules: args.modules, finder: 7, quiet: 1 });
+    const back = readTilePage(img, plan, layout, img.dpi);
+    const outPath = resolve(args.outPng || 'tile-payload.bin');
+    writeFileSync(outPath, back.payload);
+    console.log('make-tile-page --read: ' + img.width + 'x' + img.height + ' px @ ' + img.dpi + ' dpi -> ' +
+      plan.cols + ' x ' + plan.rows + ' tiles');
+    console.log('  payload   ' + back.length + ' B (' + back.bytesPerTile + ' B/tile, ' + back.tiles.length + ' tiles read, missing ' + back.missing.length + ')');
+    console.log('  wrote     ' + outPath);
+    return;
+  }
   const sheet = SHEETS[args.sheet];
   if (!sheet) throw new Error('make-tile-page: unknown sheet ' + args.sheet + ' (have ' + Object.keys(SHEETS).join(', ') + ')');
   const payload = args.file ? new Uint8Array(readFileSync(resolve(args.file))) : new TextEncoder().encode(args.text);
