@@ -126,6 +126,19 @@
 
 ## 已知风险 / 待办
 
+### 第 144 轮（**按手册原样跑一遍用户会敲的那三条命令（一条命令发图 → 收 → 看），全部实测通过**）
+
+**① 做了什么**：零代码改动，本轮只做一件事 —— 把 `docs/USE.md` 里写给用户的那条命令原样跑一遍，证明手册不是「应该能行」而是**确实能行**。
+
+**② 实测（三条命令，全部 exit 0）**：
+
+- `send photo-1240x1754.png --image-mode lossy --pages 5 --profile P-MX-300-5 --format png --out DIR` ⇒ `1240x1754 -> q10 after 18 encode(s), 72358 B of 87246 B budget (3 data + 2 parity)`，**写出 4 页**；并打印 `LOSSY image payload: the transmitted digest is over these bytes, not over the original file`。
+- `receive DIR --photo --profile P-MX-300-5 --out photo-back.psk` ⇒ `received 72358 bytes`、**`MATCHES manifest (86b3d84e…f5f449)`**。
+- `unpsk photo-back.psk photo-back.png` ⇒ `1240x1754 at quality q10`、PNG **4,075,071 B**。
+
+**③ 如实标注**：`receive` 喂进去的仍是**发送端自己渲染的 PNG**（进程内等价物），**不是真打印机 + 真扫描仪**；本轮的结论是「手册里那三条命令今天确实能跑通、载荷逐字节回来、图能看」，不是「真机验收过了」。
+
+**④ 门限**：本轮零改动 ⇒ 单测/门限沿用第 140 轮（`tests 409 · pass 409 · fail 0`、`usability` exit 0、`check-dist` 13 pass / 0 fail）。**下一块砖**：手机端认 `.psk`（要动 `web/` 源码）。
 ### 第 143 轮（**`send --help` 里补上 `--image-mode lossy`：能用但没人知道 = 不能用**）
 
 **① 做了什么**：`cli/pskit.mjs` 的 `send` 帮助文本加上 `--image-mode lossy` 的说明（需要 `--pages`、**有损**、摘要算在载荷上、用 `tools/unpsk.mjs` 还原、给了一条可直接复制的例子）。零逻辑改动。**为什么**：这个开关第 138 轮就落地了，但只写在 `docs/USE.md` 里；`send --help` 是用户最先看的地方，那里没有就等于半隐藏。
