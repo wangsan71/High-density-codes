@@ -88,7 +88,7 @@ export const MANIFOLD_NOTE =
   'objects may touch or overlap each other - that is not a boolean union and is never claimed (MESH-CONTRACT.md §4)';
 
 /** 判据定义（一句话，给报告和测试引用）。 */
-export const MANIFOLD_RULE = 'every undirected edge is shared by exactly two triangles';
+const MANIFOLD_RULE = 'every undirected edge is shared by exactly two triangles';
 
 /* ═════════════════════ 水密 / 拓扑判据（纯函数） ═════════════════════ */
 

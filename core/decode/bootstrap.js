@@ -37,7 +37,7 @@ import { decodePage } from './page.js';
  *  that does not exist, so single-colour is handled by the renderer's `mono` flag, not by
  *  a palette id. Unknown ids throw, which the candidate loop records as a skipped
  *  candidate rather than letting one bad hint abort the search. */
-export const BOOTSTRAP_PALETTES = ['INK2', 'INK4', 'PAPER1'];
+const BOOTSTRAP_PALETTES = ['INK2', 'INK4', 'PAPER1'];
 
 /** Paper at these densities; plate profiles need their nozzle, so they come later. */
 const BOOTSTRAP_DPIS = [300, 600];

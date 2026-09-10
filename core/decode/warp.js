@@ -23,7 +23,7 @@ export function canvasQuad(layout) {
  * zone, which is empty by construction. Median per channel, so dust or a hair
  * crossing the margin cannot move it.
  */
-export function estimateSubstrate(scan, samples = 4000) {
+function estimateSubstrate(scan, samples = 4000) {
   const { pixels, width, height } = scan;
   const r = [];
   const g = [];

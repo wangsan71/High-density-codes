@@ -128,13 +128,13 @@ export function inkRangeRatio(ink, samples = 20000) {
 }
 
 /** Above this range ratio a capture has usable ink/paper dynamics; see inkRangeRatio. */
-export const BLANK_INK_RANGE_RATIO = 0.02;
+const BLANK_INK_RANGE_RATIO = 0.02;
 
 /** Above this ratio the capture has no usable ink/paper separation (see medianInknessRatio). */
 export const FLAT_CAPTURE_RATIO = 0.5;
 
 /** Fraction of the image that binarises as ink -- reported alongside the ratio, never a cut. */
-export function inkFraction(bin) {
+function inkFraction(bin) {
   const n = (bin.width || 0) * (bin.height || 0);
   return n > 0 ? bin.inkCount / n : 0;
 }

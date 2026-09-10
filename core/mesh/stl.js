@@ -29,7 +29,7 @@ const BYTES_PER_TRIANGLE = 50;
 export const DEGENERATE_AREA_EPS = 1e-15;
 
 /** 头里的固定前缀（同时用作默认 solid 名）。 */
-export const STL_HEADER_PREFIX = 'PSKT/';
+const STL_HEADER_PREFIX = 'PSKT/';
 
 /** STL 无共享顶点拓扑 —— 这句话不许被"改进"成水密声明。 */
 export const WATERTIGHT_NOTE =

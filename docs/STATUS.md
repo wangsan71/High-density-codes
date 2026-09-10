@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 156 轮（**死代码清理按新规则重启：六个"仅内部使用"的符号去掉 `export`（不删函数，零行为风险）**）
+
+**① 做了什么**：吸取上一轮误删的教训，本轮只做**不可能改变行为**的清理 —— 把只在自己文件内部使用的符号的 `export` 去掉：`BLANK_INK_RANGE_RATIO`、`inkFraction`（`core/decode/fiducial.js`）、`estimateSubstrate`（`core/decode/warp.js`）、`MANIFOLD_RULE`（`core/mesh/threeMF.js`）、`STL_HEADER_PREFIX`（`core/mesh/stl.js`）、`BOOTSTRAP_PALETTES`（`core/decode/bootstrap.js`）。**函数体一行未动** ⇒ 即使某个名字其实还有人用，最坏情况也只是"导出少了"而不会少逻辑。
+
+**② 怎么证的**：每个名字先 `grep "^export (const|function|class|let) <name>"` 确认**声明恰好一处**，再用**刚 grep 到的整行原文**做替换（不是手打）；改完复跑单测。**单测 `tests 413 · pass 413 · fail 0`**、`check-docs-tables` clean。
+
+**③ 规则变更（承接第 155 轮撤回）**：删除动作分两级 —— ①**只去 `export`**（零风险，优先做）②**整段删定义**（必须：不向上回溯注释、括号配对确认边界、删完立刻复跑单测）。本轮的六个都属于①。
+
+**④ 下一轮**：继续①（候选里还有一批"2 行"的），攒够一轮再做②；之后回 P4 第三块砖。
 ### 第 155 轮（**~~死代码清理第四批：删掉 `core/decode/page.js` 的 `decodePages()`~~ ⇒ **已撤回：删错了，删掉了仍在使用的 `decodePage()`，当场被单测抓住并已还原**）
 
 **① 发生了什么（如实记，不粉饰）**：我按「grep 定义 → read 拿真实行号 → 向下找第一个顶格 `}` 定边界」删了 `page.js` 末尾 17 行。提交后复跑单测：**`module-matrix.test.mjs` 与 `nearest-ink.test.mjs` 两条整套导入失败**（`module-matrix` 第 10 行 `import { decodePage } from '../../core/decode/page.js'`）⇒ **我删掉的是仍在使用的 `decodePage()`**，`decodePages()` 只是它旁边那个没人用的兄弟。
