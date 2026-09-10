@@ -184,8 +184,26 @@ async function cmdSend(args) {
   if (!input) throw new Error('send: need an input file (see --help)');
   const file = resolve(input);
   if (!existsSync(file)) throw new Error(`send: no such file: ${file}`);
-  const raw = new Uint8Array(readFileSync(file));
+  let raw = new Uint8Array(readFileSync(file));
   const profileId = args.profile || defaultProfileFor(extname(file));
+  if (args['image-mode'] === 'lossy') {
+    // One command instead of two: the picture is packed to fit the page budget here, and everything
+    // downstream treats the result as an ordinary payload. The budget comes from pageBudgetFor() -- the
+    // same function the --pages check below uses -- so the two cannot drift apart.
+    if (!args.pages) throw new Error('send: --image-mode lossy needs --pages N (the budget to pack the picture into)');
+    const { decodePNG } = await import('../core/decode/png-read.js');
+    const { packImageWithin } = await import('../core/image/container.js');
+    const budget = mod.profiles.pageBudgetFor(profileId, Number(args.pages), { sheet: args.sheet });
+    const img = decodePNG(raw);
+    const packed = packImageWithin(img.pixels, img.width, img.height, budget.budgetBytes, {
+      minQuality: args['min-quality'] ? Number(args['min-quality']) : 5,
+    });
+    console.log('  image     ' + img.width + 'x' + img.height + ' -> q' + packed.quality + ' after ' + packed.tried +
+      ' encode(s), ' + packed.bytes.length + ' B of ' + budget.budgetBytes + ' B budget (' +
+      budget.dataPages + ' data + ' + budget.parityPages + ' parity page(s) at ' + profileId + ')');
+    console.log('  lossy     LOSSY image payload: the transmitted digest is over these bytes, not over the original file');
+    raw = packed.bytes;
+  }
   const nozzle = args.nozzle || (mod.profiles.PROFILES[profileId].medium === 'plate' ? '0.4' : undefined);
   const paletteId = pickPalette(mod, profileId, args.palette);
   const dpi = args.dpi ? Number(args.dpi) : mod.profiles.PROFILES[profileId].medium === 'paper' ? mod.profiles.PROFILES[profileId].dpi : 300;

@@ -126,6 +126,13 @@
 
 ## 已知风险 / 待办
 
+### 第 138 轮（**`send --image-mode lossy` 落地：两条命令并成一条；实测与两步走**逐字节同一份载荷**）
+
+**① 做了什么**：`cli/pskit.mjs` 的 `cmdSend` 新增 `--image-mode lossy [--min-quality N]`：读入 PNG → `pageBudgetFor(profile, --pages)` 取预算（**第 137 轮抽出的那个纯函数，与 `--pages` 检查同一份实现，不会漂移**）→ `packImageWithin()` 打包 → 其余流程一字未改（编码/渲染/写盘/清单）。消息里明说这是**有损**、且**摘要算在这份载荷上、不是原文件的 sha256**。
+
+**② 实测（一条命令，替代原来的两条）**：`node cli/pskit.mjs send .tmp/codec-bench/photo-1240x1754.png --image-mode lossy --pages 5 --profile P-MX-300-5 --format png --out .tmp/lossy-send` ⇒ `image 1240x1754 -> q10 after 18 encode(s), 72358 B of 87246 B budget (3 data + 2 parity)`；随后 `wrote 4 page(s) (2 data + 2 parity)`。**关键对照**：清单里的 `sourceSha256 = 86b3d84e…` 与第 135 轮**两步走**（`fit-image --lossy` 出的 `l5.psk`）**完全相同** ⇒ 同一张图、同一预算 ⇒ **逐字节同一份载荷**，合并没有引入任何偏差（打包是确定性的，这一点在 `image-container.test.mjs` 里也钉过）。
+
+**③ 门限**：单测 **`tests 409 · pass 409 · fail 0`**、`check-docs-tables` clean（503 行 / 88 表）、`& .\tools\usability.ps1` ⇒ `USABILITY_EXIT=0`（含 CLI 的发送/接收各腿）。**下一块砖**：手机端（PWA）解 `.psk` 载荷 —— 现在接收端拿到的是图片载荷，得让 `pskt-file.html`/`pskt-send-file.html` 认它，并把 `docs/USE.md` 的三条命令缩成一条。
 ### 第 137 轮（**把"页数预算"从 CLI 内部算式抽成可调用的纯函数 `pageBudgetFor()`（带 CLI 自身输出当基准），为 `send --image-mode lossy` 铺路**）
 
 **① 做了什么**：`core/profiles.js` 新增 `dataPagesFor(pages, parityPct)` 与 `pageBudgetFor(profileId, pages, {sheet})` ⇒ 返回 `{dataPages, parityPages, netBytesPerPage, budgetBytes}`，装不下时**具名拒绝**（"3 页连一个数据页都装不下，校验页下限是 2"）。`tests/unit/page-budget.test.mjs` 2 条。**为什么需要它**：图片那条路要问的是"这个载荷最多能有几字节"（**编码前**就要知道），而 CLI 现在的算式是"这个载荷会占几页"（**编码后**才算），方向相反 ⇒ 有损模式没法直接复用。
