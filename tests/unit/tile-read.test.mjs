@@ -240,3 +240,36 @@ test('tile-read: the page finds and fits its own corners, and a skewed page read
   assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a skewed page must read end to end');
   assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
 });
+
+test('tile-read: a strong skew (80 px) is fitted too, once the tile identity is not assumed', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const W = base.width;
+  const H = base.height;
+  const shearPx = 80;
+  const sheared = { width: W, height: H, dpi, pixels: new Uint8Array(W * H * 4).fill(255) };
+  for (let y = 0; y < H; y++) {
+    const shift = Math.round((shearPx * y) / (H - 1));
+    for (let x = 0; x < W; x++) {
+      const sx = x - shift;
+      if (sx < 0 || sx >= W) continue;
+      const s = (y * W + sx) * 4;
+      const d = (y * W + x) * 4;
+      sheared.pixels[d] = base.pixels[s];
+      sheared.pixels[d + 1] = base.pixels[s + 1];
+      sheared.pixels[d + 2] = base.pixels[s + 2];
+      sheared.pixels[d + 3] = 255;
+    }
+  }
+  const quad = findPageQuadFromTiles(sheared, plan, layout, { dpi, sheetW, sheetH });
+  // Corner accuracy is a diagnostic, not the criterion: the criterion is that the page READS. Half a module
+  // (5 px here) is the margin the sampling can absorb, and at an 80 px skew the fitted x at the top corner
+  // sits about 3 px out -- well inside it, and no longer the 33 px structural error of round 196/197.
+  assert.ok(Math.abs(quad.tl.x) <= 5 && Math.abs(quad.tl.y) <= 5, 'TL ' + JSON.stringify(quad.tl));
+  assert.ok(Math.abs(quad.br.x - (W + shearPx)) <= 5, 'BR x ' + quad.br.x + ' expected ' + (W + shearPx));
+  const back = readTilePage(sheared, plan, layout, dpi, { map: pageMapper([quad.tl, quad.tr, quad.br, quad.bl], W, H) });
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'an 80 px skew must read end to end');
+  assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
+});

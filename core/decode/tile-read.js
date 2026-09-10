@@ -216,46 +216,61 @@ export function findPageQuadFromTiles(img, plan, layout, opts = {}) {
     const ay = solve3(M, [Sxv, Syv, Sv]);
     return (gx, gy) => [ax[0] * gx + ax[1] * gy + ax[2], ay[0] * gx + ay[1] * gy + ay[2]];
   };
-  const pick = (cmp) => hits.reduce((a, b) => (cmp(b, a) ? b : a));
-  const idxTR = plan.cols - 1;
-  const idxBL = (plan.rows - 1) * plan.cols;
-  const coarseTL = pick((b, a) => b.ox + b.oy < a.ox + a.oy);
-  const coarseTR = pick((b, a) => b.ox - b.oy > a.ox - a.oy);
-  const coarseBL = pick((b, a) => b.ox - b.oy < a.ox - a.oy);
-  const seed = [
-    { gx: grid(0).x, gy: grid(0).y, ox: coarseTL.ox, oy: coarseTL.oy },
-    { gx: grid(idxTR).x, gy: grid(idxTR).y, ox: coarseTR.ox, oy: coarseTR.oy },
-    { gx: grid(idxBL).x, gy: grid(idxBL).y, ox: coarseBL.ox, oy: coarseBL.oy },
-  ];
-  let model = fitAffine(seed);
-  // Pair hits with tiles, then AVERAGE the hits that landed on the same tile. Every hit sits somewhere in
-  // that tile's plateau (up to half a module of slack); their mean is the tile's true origin to a fraction
-  // of a pixel, which is a strictly better anchor than any single hit (that difference is what turned four
-  // inconsistent corners into six unreadable tiles in round 190).
-  const byTile = new Map();
-  for (const h of hits) {
-    let bestT = -1;
-    let bd = Infinity;
-    for (let t = 0; t < plan.positions.length; t++) {
-      const g = grid(t);
-      const p = model(g.x, g.y);
-      const d = Math.hypot(h.ox - p[0], h.oy - p[1]);
-      if (d < bd) { bd = d; bestT = t; }
+  const gridLine = (t) => grid(t);
+  const collect = (model, tol) => {
+    const byTile = new Map();
+    for (const h of hits) {
+      let bestT = -1;
+      let bd = Infinity;
+      for (let t = 0; t < plan.positions.length; t++) {
+        const g = gridLine(t);
+        const p = model(g.x, g.y);
+        const d = Math.hypot(h.ox - p[0], h.oy - p[1]);
+        if (d < bd) { bd = d; bestT = t; }
+      }
+      if (bd > tol) continue;
+      if (!byTile.has(bestT)) byTile.set(bestT, { n: 0, ox: 0, oy: 0 });
+      const acc = byTile.get(bestT);
+      acc.n++; acc.ox += h.ox; acc.oy += h.oy;
     }
-    if (bd > tolerance) continue;
-    if (!byTile.has(bestT)) byTile.set(bestT, { n: 0, ox: 0, oy: 0 });
-    const acc = byTile.get(bestT);
-    acc.n++; acc.ox += h.ox; acc.oy += h.oy;
+    const out = [];
+    for (const [t, acc] of byTile) {
+      const g = gridLine(t);
+      out.push({ gx: g.x, gy: g.y, ox: acc.ox / acc.n, oy: acc.oy / acc.n, tile: t, n: acc.n });
+    }
+    return out;
+  };
+  // A few candidate identities for the top-most-left hit, each taken through the WHOLE pipeline. The old
+  // version assumed that hit was tile 0, which fails silently when a corner tile has no hit at all (round
+  // 198: 41 of 48 tiles had anchors at an 80 px skew). Scoring the hypotheses with a crude model did not
+  // work either -- a translation model cannot tell a one-row-out guess from the right one (round 200), so
+  // the score here is the number of tiles the FITTED model can anchor.
+  const h1 = hits.reduce((a, b) => (b.ox + b.oy < a.ox + a.oy ? b : a));
+  const candidates = opts.seedCandidates || [0, 1, plan.cols, plan.cols + 1];
+  const attempt = (t1) => {
+    const g1 = gridLine(t1);
+    const seedModel = (gx, gy) => [h1.ox + (gx - g1.x), h1.oy + (gy - g1.y)];
+    const first = collect(seedModel, Math.max(40, Math.round(toPx(plan.tileMm + plan.gapMm) / 5)));
+    if (first.length < 8) return null;
+    const fittedModel = fitAffine(first);
+    const refined = collect(fittedModel, tolerance);
+    if (refined.length < 8) return null;
+    return { model: fitAffine(refined), anchors: refined.length, t1 };
+  };
+  let best = null;
+  for (const t1 of candidates) {
+    const a = attempt(t1);
+    if (a && (!best || a.anchors > best.anchors)) best = a;
   }
+  if (!best) {
+    throw new RangeError('tile-read: no tile-identity hypothesis could anchor the grid -- the page may be ' +
+      'missing, rotated or too distorted to fit');
+  }
+  let model = best.model;
+  const byTile = new Map();
+  for (const p of collect(model, tolerance)) byTile.set(p.tile, p);
   const pairs = [];
-  for (const [t, acc] of byTile) {
-    const g = grid(t);
-    pairs.push({ gx: g.x, gy: g.y, ox: acc.ox / acc.n, oy: acc.oy / acc.n, tile: t, n: acc.n });
-  }
-  if (pairs.length < 8) {
-    throw new RangeError('tile-read: only ' + pairs.length + ' of ' + hits.length + ' hits agreed with the provisional ' +
-      'grid (need at least 8) -- the page may be missing, rotated or too distorted to fit');
-  }
+  for (const [t, acc] of byTile) pairs.push(acc);
   model = fitAffine(pairs);
   const W = toPx(opts.sheetW);
   const H = toPx(opts.sheetH);
