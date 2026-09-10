@@ -126,6 +126,13 @@
 
 ## 已知风险 / 待办
 
+### 第 137 轮（**把"页数预算"从 CLI 内部算式抽成可调用的纯函数 `pageBudgetFor()`（带 CLI 自身输出当基准），为 `send --image-mode lossy` 铺路**）
+
+**① 做了什么**：`core/profiles.js` 新增 `dataPagesFor(pages, parityPct)` 与 `pageBudgetFor(profileId, pages, {sheet})` ⇒ 返回 `{dataPages, parityPages, netBytesPerPage, budgetBytes}`，装不下时**具名拒绝**（"3 页连一个数据页都装不下，校验页下限是 2"）。`tests/unit/page-budget.test.mjs` 2 条。**为什么需要它**：图片那条路要问的是"这个载荷最多能有几字节"（**编码前**就要知道），而 CLI 现在的算式是"这个载荷会占几页"（**编码后**才算），方向相反 ⇒ 有损模式没法直接复用。
+
+**② 怎么证的（拿 CLI 自己的输出当基准，不是我重新推一遍）**：`node cli/pskit.mjs send … --profile P-MX-300-5 --pages N --dry-run` 打印 `3 -> 1 data + 2 parity = 29082 B`、`5 -> 3 data + 2 parity = 87246 B`、`8 -> 6 data + 2 parity = 174492 B`；测试里把这三行**逐字**钉成期望值 ⇒ 两处算法**对拍**，将来 CLI 那边改了规则这里会红。另钉住：校验页下限 2 ⇒ **1 页、2 页的预算什么都装不下**（具名拒绝）、页数越界与未知档位具名拒绝、**页数增加时预算单调不减**。
+
+**③ 门限**：单测 **`tests 409 · pass 409 · fail 0`**（第 136 轮的 407 + 本轮 2）；`build-web` exit 0；`check-dist` **13 pass / 0 fail**；`check-docs-tables` **clean（503 行 / 88 张表）**；`verify --gate all` / `usability` 见本轮收尾。**下一块砖**：`send --image-mode lossy` = 用 `pageBudgetFor()` 先取预算 → `packImageWithin()` 打包 → 走现有 send 流程（一条命令取代现在的两条）。
 ### 第 136 轮（**把图片这条路写进用户手册 `docs/USE.md` §3（三条命令 + 实测页数 + 什么时候会被拒绝）**）
 
 **① 做了什么**：`docs/USE.md` §3「真打印 / 真扫描 / 真拍照」新增一条：照片的**两条路**（无损缩小 `fit-image` / 有损保原尺寸 `fit-image --lossy`）+ 可照抄的三条命令 + 本轮实测数字（`--pages 5` ⇒ q10、72,358 B、28.67 dB、不降采样；`send` 实际 **4 页** —— 2 数据 + 2 校验）+ **页数以 `send` 打印的为准**（别按字节数除，第 134 轮那次错账的教训）+ 两种会被具名拒绝的情形（`--pages 3` 放不下；G-IMG 的 30 dB 未达到时工具自己打印 NOT met）。**本轮零代码改动**。

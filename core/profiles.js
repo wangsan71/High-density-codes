@@ -28,6 +28,50 @@ export const bitsOfLevels = (levels) => {
   return b;
 };
 
+/**
+ * Largest data-page count that still fits a total page budget, given the parity percentage.
+ * parity = max(2, ceil(data * pct / 100)); the two-page floor is why a 3-page transfer carries only one
+ * data page. Returns 0 when even a single data page does not fit.
+ */
+export function dataPagesFor(pages, parityPct) {
+  for (let d = Math.min(pages, 255); d >= 1; d--) {
+    if (d + Math.max(2, Math.ceil((d * parityPct) / 100)) <= pages) return d;
+  }
+  return 0;
+}
+
+/**
+ * What a page budget actually carries, as bytes, for one profile -- the number a caller needs BEFORE it
+ * encodes anything (the image path asks "how big may this payload be?", not "how many pages will this
+ * payload take?"). Refusals are named rather than silent zeroes.
+ *
+ * Cross-checked against the CLI's own solver: for P-MX-300-5 the CLI prints
+ *    --pages 3 -> 1 data + 2 parity = 29082 B / --pages 5 -> 3 data + 2 parity = 87246 B /
+ *    --pages 8 -> 6 data + 2 parity = 174492 B
+ * and this function returns the same three rows (tests/unit/page-budget.test.mjs).
+ */
+export function pageBudgetFor(profileId, pages, opts = {}) {
+  const prof = PROFILES[profileId];
+  if (!prof) throw new RangeError('pageBudget: unknown profile ' + profileId);
+  if (!Number.isInteger(pages) || pages < 1 || pages > 255) {
+    throw new RangeError('pageBudget: pages must be a whole number 1..255, got ' + pages);
+  }
+  const data = dataPagesFor(pages, prof.parityPct);
+  if (data < 1) {
+    throw new RangeError('pageBudget: ' + pages + ' page(s) cannot carry even one data page at ' + profileId +
+      ' (parity floor is 2 pages) -- use at least 3, or a profile that needs less parity');
+  }
+  const net = planPage(profileId, opts).ecc.netBytesPerPage;
+  return {
+    profile: profileId,
+    pages,
+    dataPages: data,
+    parityPages: pages - data,
+    netBytesPerPage: net,
+    budgetBytes: data * net,
+  };
+}
+
 export const PROFILES = {
   'P-M1-300': {
     id: 'P-M1-300', medium: MEDIUM.PAPER, dpi: 300, cellPx: 10,
