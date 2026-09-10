@@ -40,6 +40,22 @@ import {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 
+/**
+ * Scratch space for tests that need real files on disk.
+ *
+ * This used to be os.tmpdir(), which works everywhere except inside this project's sandbox: the harness
+ * hands a sandboxed process a session-scoped temp directory, and once that directory is gone (or was
+ * never granted to the restricted token) mkdtempSync fails with EPERM -- an environment failure that
+ * looks exactly like a product failure in the test summary. The workspace is the one place every run is
+ * guaranteed to be able to write, so the scratch space lives there and is cleaned up by the caller.
+ * Per D85 in docs/DEFECTS.md.
+ */
+function makeScratch(prefix) {
+  const root = path.join(REPO_ROOT, '.tmp');
+  fs.mkdirSync(root, { recursive: true });
+  return fs.mkdtempSync(path.join(root, prefix));
+}
+
 function eqBytes(a, b, msg) {
   assert.equal(a.length, b.length, `${msg}: length ${a.length} != ${b.length}`);
   for (let i = 0; i < a.length; i++) {
@@ -518,7 +534,7 @@ test('PNG+TIFF: pillow (ref/verify_raster.py) agrees on every dumped sample', (t
     t.skip('PSKIT_PY_VERIFY is set: the python check is being run by hand');
     return;
   }
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pskit-raster-'));
+  const dir = makeScratch('pskit-raster-');
   try {
     const rows = dumpSampleRaster(dir, { includePage: false });
     const files = rows.flatMap((r) => [r.png, r.tif]);
@@ -548,7 +564,7 @@ test('PNG+TIFF: pillow (ref/verify_raster.py) agrees on every dumped sample', (t
 });
 
 test('sidecar: dump-sample-raster writes a self-describing .raw', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pskit-sidecar-'));
+  const dir = makeScratch('pskit-sidecar-');
   try {
     const rows = dumpSampleRaster(dir, { includePage: false });
     assert.ok(rows.length >= 5, 'the small sample set must have several entries');

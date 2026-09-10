@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url';
 import { fdct8x8, idct8x8, quantise, dequantise, QUANT_LUMA, QUANT_CHROMA } from '../core/image/dct.js';
 import { encodeBlocks, decodeBlocks } from '../core/image/jpegish.js';
 import { encodePNG } from '../core/render/png.js';
+import { rgbToYCbCr, upsampleChroma2x, yCbCrToRgb } from '../core/image/color.js';
 
 function parseArgs(argv) {
   const out = { width: 1240, height: 1754, qualities: [30, 50, 60, 70, 80, 90], writeImage: null };
@@ -64,36 +65,6 @@ export function makePhoto(w, h) {
   return px;
 }
 
-function toYCbCr(px, w, h) {
-  const Y = new Float32Array(w * h);
-  const Cb = new Float32Array((w >> 1) * (h >> 1));
-  const Cr = new Float32Array((w >> 1) * (h >> 1));
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const r = px[i], g = px[i + 1], b = px[i + 2];
-      Y[y * w + x] = 0.299 * r + 0.587 * g + 0.114 * b;
-    }
-  }
-  const cw = w >> 1, ch = h >> 1;
-  for (let y = 0; y < ch; y++) {
-    for (let x = 0; x < cw; x++) {
-      let sb = 0, sr = 0;
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < 2; dx++) {
-          const i = ((y * 2 + dy) * w + (x * 2 + dx)) * 4;
-          const r = px[i], g = px[i + 1], b = px[i + 2];
-          sb += 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-          sr += 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-        }
-      }
-      Cb[y * cw + x] = sb / 4;
-      Cr[y * cw + x] = sr / 4;
-    }
-  }
-  return { Y, Cb, Cr, cw, ch };
-}
-
 const pad = (n) => (n + 7) & ~7;
 
 /** One plane through the whole pipeline; returns the bytes it took and the reconstructed plane. */
@@ -127,28 +98,6 @@ export function roundTripPlane(plane, w, h, table, quality) {
   return { bytes: enc.bytes.length, headerBytes: enc.stats.headerBytes, plane: out, W, H };
 }
 
-function toRGB(Y, W, H, cb, cr, cw, ch) {
-  const px = new Uint8Array(W * H * 4);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const yy = Y[y * W + x];
-      // Nearest-neighbour chroma upsampling: a real decoder would interpolate, so this is the
-      // pessimistic side of the comparison and is stated as such in the ledger.
-      const cx = Math.min(cw - 1, x >> 1), cy = Math.min(ch - 1, y >> 1);
-      const b = cb[cy * cw + cx] - 128;
-      const r = cr[cy * cw + cx] - 128;
-      const i = (y * W + x) * 4;
-      px[i] = clamp8(yy + 1.402 * r);
-      px[i + 1] = clamp8(yy - 0.344136 * b - 0.714136 * r);
-      px[i + 2] = clamp8(yy + 1.772 * b);
-      px[i + 3] = 255;
-    }
-  }
-  return px;
-}
-
-/** PSNR over the original w x h window; the decoded planes are padded out to a multiple of 8, and
- *  comparing against that padding would be comparing against rows that do not exist. */
 function psnr(src, dec, w, h, decStride) {
   let se = 0;
   const n = w * h * 3;
@@ -167,7 +116,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const { width: w, height: h } = args;
   const src = makePhoto(w, h);
-  const { Y, Cb, Cr, cw, ch } = toYCbCr(src, w, h);
+  const { Y, Cb, Cr, cw, ch } = rgbToYCbCr(src, w, h);
   const png = encodePNG({ width: w, height: h, pixels: src, dpi: 96 });
   console.log('image: ' + w + 'x' + h + ' (' + (w * h) + ' px), deterministic generator, our PNG of it = ' + png.length + ' B');
   if (args.writeImage) {
@@ -182,7 +131,11 @@ function main() {
     const y = roundTripPlane(Y, w, h, QUANT_LUMA, q);
     const cb = roundTripPlane(Cb, cw, ch, QUANT_CHROMA, q);
     const cr = roundTripPlane(Cr, cw, ch, QUANT_CHROMA, q);
-    const rgb = toRGB(y.plane, y.W, y.H, cb.plane, cr.plane, cb.W, cb.H);
+    // Chroma comes back at its own (padded) size; upsample it to the luma grid with the same triangle
+    // filter a mainstream decoder uses, then rebuild RGB.
+    const cbUp = upsampleChroma2x(cb.plane, cb.W, cb.H, y.W, y.H);
+    const crUp = upsampleChroma2x(cr.plane, cr.W, cr.H, y.W, y.H);
+    const rgb = yCbCrToRgb(y.plane, cbUp, crUp, y.W, y.H);
     const bytes = y.bytes + cb.bytes + cr.bytes;
     const head = y.headerBytes + cb.headerBytes + cr.headerBytes;
     const p = psnr(src, rgb, w, h, y.W);

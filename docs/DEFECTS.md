@@ -3,6 +3,11 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 131 轮新增（D85 · 环境 / 夹具）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D85** | **沙箱给被测进程的会话级临时目录一旦不可用，用 `os.tmpdir()` 的测试会 `EPERM: mkdtemp` 直接红，在汇总里长得像产品坏了**：`tests/unit/render-writers.test.mjs` 里两条（pillow 对拍、`.raw` sidecar）用 `fs.mkdtempSync(os.tmpdir(), ...)` 建暂存目录；harness 把沙箱进程的 TEMP 指向会话级目录 `%TEMP%\dsh-XXXX`，该目录被删或被 ACL 受限令牌拒写之后 mkdtemp 就 EPERM，**两条测试在 0.8 ms 内红掉**（根本没跑到 python 那一步、也没碰到任何被测代码） | `node --test --test-isolation=none "tests/unit/render-writers.test.mjs"` 修前 ⇒ `PNG+TIFF: pillow (ref/verify_raster.py) agrees on every dumped sample` 与 `sidecar: dump-sample-raster writes a self-describing .raw` 两条红，错误原文 `EPERM: operation not permitted, mkdtemp 'C:\Users\ASUS\AppData\Local\Temp\dsh-8nDSLJ\pskit-raster-XXXXXX'`；**阳性对照**：同一条命令、只把暂存目录改到仓库内 `.tmp/` 之后 ⇒ `tests 14 · pass 14 · fail 0` | **CLOSED（第 131 轮）** ✓ 修法 = 该测试文件新增 `makeScratch()`，在 `REPO_ROOT/.tmp` 下 `mkdtempSync`（工作区是每次运行都保证可写的地方）；**只改夹具落地位置，不动任何判据、不改断言** |
 ### 第 128 轮新增（D84 · 环境 / 工具）
 
 | # | 缺陷 | 复现 | 状态 |
