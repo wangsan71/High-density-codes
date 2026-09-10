@@ -126,6 +126,21 @@
 
 ## 已知风险 / 待办
 
+### 第 135 轮（**整条图片链路第一次端到端跑通并逐字节核对：PNG → `fit-image --lossy` → `.psk` → `send`（**4 页**）→ 页 → `receive` → 载荷逐字节相同 → 解回 1240×1754**）
+
+**① 做了什么**：本轮**零代码改动**，只跑命令并把结果核对清楚（上一轮刚接好的有损路径第一次走完整条纸面链路）。
+
+**② 实测（三条命令，全部 exit 0）**：
+
+- `node tools/fit-image.mjs .tmp/codec-bench/photo-1240x1754.png --pages 5 --profile P-MX-300-5 --lossy --out .tmp/codec-bench/l5.psk` ⇒ q10、**72,358 B**、**28.67 dB**、全分辨率。
+- `node cli/pskit.mjs send .tmp/codec-bench/l5.psk --profile P-MX-300-5 --format png --out .tmp/psk-send` ⇒ **`wrote 4 page(s) (2 data + 2 parity)`** —— **注意：比自己按 29,082 B/数据页估的 5 页还少一页**，因为**有损载荷本身还能被 deflate 再压一层**（工具先打印 `up to 3+2 = 5 pages (before compression)`，实际写出 2 数据页）。⇒ **这张照片在 A4/`P-MX-300-5` 上是 4 张纸，不是 5 张**（这个数只有真跑一遍才知道，估算给不出）。
+- `node cli/pskit.mjs receive .tmp/psk-send --photo --out .tmp/psk-back.bin` ⇒ **`received 72358 bytes`**、`sha256 86b3d84e…f5f449` **`MATCHES manifest`**；再用 `unpackImage()` 解回：**载荷逐字节相同（byte-identical YES）**、**1240×1754 / q10 / 8,699,840 B RGBA**。
+
+**③ 如实标注（不许把它说成"真机验收过"）**：这条链路喂给 `receive` 的是**发送端自己渲染出来的 PNG**（进程内等价物），**不是真打印机 + 真扫描仪**；纸面那一半（G4/G9 所需的真机）仍然零证据。本轮的结论只到"载荷能原样穿过页面编码/解码这一层"为止。
+
+**④ 顺带得到的另一个数**：`fit-image` 的预算按 `planPage().ecc.netBytesPerPage` 算（29,082 B/数据页，**未压缩**），而 `send` 会先 deflate 再排页 ⇒ **图片这条路的真实页数总比按载荷大小估的少**；下次报页数应当以 `send` 的输出为准（这是第 134 轮那次错账的同一类坑：**别用中间量当结论**）。
+
+**⑤ 门限**：本轮只改文档 ⇒ 复核单测 **`tests 407 · pass 407 · fail 0`**、`check-docs-tables` clean、`verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（**本次未评估：G4 G6 G9 G10**）。**下一块砖**：把这条链写进 `docs/USE.md`（用户视角的三条命令），并把 `.psk` 载荷接进 `send` 的 `--image-mode`，让用户不必记两条命令。
 ### 第 134 轮（**`fit-image --lossy` 落地（有损全分辨率路径第一次用户可跑）；并**更正第 133 轮那个错账**："3 页 = 87 KB" 是错的，3 页其实只有 **1 个数据页 = 29,082 B**）
 
 **① 做了什么**：`tools/fit-image.mjs` 新增 `--lossy [--min-quality N]`：**保留全分辨率**、把预算花在质量上，走自研编码（`packImageWithin` → `.psk` 载荷），PSNR **由解码自己刚写出的载荷实测**（不是预测），并按 G-IMG 打印"≥30 dB 是否满足"；装不下时是**具名拒绝**（含最便宜档的实测字节与预算、以及出路）。用法进了 USAGE。
