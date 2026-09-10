@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 import { fdct8x8, idct8x8, quantise, dequantise, QUANT_LUMA, QUANT_CHROMA } from '../core/image/dct.js';
 import { encodeBlocks, decodeBlocks } from '../core/image/jpegish.js';
 import { encodePNG } from '../core/render/png.js';
-import { rgbToYCbCr, upsampleChroma2x, yCbCrToRgb } from '../core/image/color.js';
+import { packImage, unpackImage } from '../core/image/container.js';
 
 function parseArgs(argv) {
   const out = { width: 1240, height: 1754, qualities: [30, 50, 60, 70, 80, 90], writeImage: null };
@@ -116,7 +116,6 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const { width: w, height: h } = args;
   const src = makePhoto(w, h);
-  const { Y, Cb, Cr, cw, ch } = rgbToYCbCr(src, w, h);
   const png = encodePNG({ width: w, height: h, pixels: src, dpi: 96 });
   console.log('image: ' + w + 'x' + h + ' (' + (w * h) + ' px), deterministic generator, our PNG of it = ' + png.length + ' B');
   if (args.writeImage) {
@@ -126,23 +125,18 @@ function main() {
     console.log('wrote ' + p + ' for an external oracle to encode');
   }
   console.log('');
-  console.log('q     our bytes   PSNR dB   Y B      CbCr B   header B   B/px');
+  console.log('q     payload B   PSNR dB   Y B      CbCr B    header B   B/px');
   for (const q of args.qualities) {
-    const y = roundTripPlane(Y, w, h, QUANT_LUMA, q);
-    const cb = roundTripPlane(Cb, cw, ch, QUANT_CHROMA, q);
-    const cr = roundTripPlane(Cr, cw, ch, QUANT_CHROMA, q);
-    // Chroma comes back at its own (padded) size; upsample it to the luma grid with the same triangle
-    // filter a mainstream decoder uses, then rebuild RGB.
-    const cbUp = upsampleChroma2x(cb.plane, cb.W, cb.H, y.W, y.H);
-    const crUp = upsampleChroma2x(cr.plane, cr.W, cr.H, y.W, y.H);
-    const rgb = yCbCrToRgb(y.plane, cbUp, crUp, y.W, y.H);
-    const bytes = y.bytes + cb.bytes + cr.bytes;
-    const head = y.headerBytes + cb.headerBytes + cr.headerBytes;
-    const p = psnr(src, rgb, w, h, y.W);
+    // One implementation, used by the product too: packImage/unpackImage from core/image/container.js.
+    const enc = packImage(src, w, h, q);
+    const dec = unpackImage(enc.bytes);
+    const bytes = enc.bytes.length;
+    const p = psnr(src, dec.rgba, w, h, w);
     console.log(
       String(q).padEnd(5) + String(bytes).padEnd(12) + p.toFixed(2).padEnd(10) +
-      String(y.bytes).padEnd(9) + String(cb.bytes + cr.bytes).padEnd(9) + String(head).padEnd(11) +
-      (bytes / (w * h)).toFixed(3));
+      String(enc.stats.planeBytes[0]).padEnd(9) +
+      String(enc.stats.planeBytes[1] + enc.stats.planeBytes[2]).padEnd(10) +
+      String(enc.stats.headerBytes).padEnd(11) + (bytes / (w * h)).toFixed(3));
   }
 }
 

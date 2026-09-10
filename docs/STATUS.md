@@ -126,6 +126,23 @@
 
 ## 已知风险 / 待办
 
+### 第 132 轮（**P2b 第四块砖：`core/image/container.js` —— 一张图变成一个自描述载荷（`packImage`/`unpackImage`）；bench 改用它 ⇒ 桌面测量与产品将用的是同一份实现**）
+
+**① 做了什么**：新增 `core/image/container.js`：24 字节头（`PSKI` 魔数、版本、宽高、质量、子采样模式、三条平面流的长度）+ 三条 `jpegish` 流；`packImage(rgba, w, h, q)` 走完整链路（RGB→YCbCr→4:2:0→8×8 DCT→量化→霍夫曼），`unpackImage(bytes)` 反向走完并**只交回声明尺寸的 RGBA**（补到 8 的倍数的那些行列在解码器内部消化掉）。`tests/unit/image-container.test.mjs` 4 条。
+
+**② 实测（同图，bench 已改用 container）**：载荷只比第 131 轮的平面字节之和多 **24 字节**（154,627 → **154,651**，q30），**PSNR 一个数没动**（q70 **35.03 dB**、q90 **38.05 dB**）⇒ 容器本身的开销 = 一个 24 字节头，其余全是原来那三条流。
+
+| q | 载荷字节 | PSNR dB | Y 平面 | 色度平面 | 容器头 | B/px |
+|---|---|---|---|---|---|---|
+| 30 | 154,651 | 32.93 | 148,418 | 6,209 | 24 | 0.071 |
+| 70 | 274,991 | **35.03** | 259,878 | 15,089 | 24 | 0.126 |
+| 90 | 546,671 | **38.05** | 496,700 | 49,947 | 24 | 0.251 |
+
+**③ 怎么证的（拒绝优先，不是解码优先）**：坏魔数、错版本、太短、**声明长度与实际字节数不一致**、不支持的子采样模式，五条全部**具名抛错**（阳性对照：这些都是故意篡改出来的输入）；`unpackImage` 对截断载荷同样抛错。另外钉住：pack 两次逐字节相同（可复现）、q95 明显优于 q25、质量参数越界**被夹到 1..100 而不是当成别的合同**、RGBA 长度不对**具名拒绝**（`expected width*height*4`）。
+
+**④ 结构上的意义**：到这一轮为止，`core/image/` 的四块（`dct.js`、`huff.js`、`jpegish.js`、`color.js`、`container.js`）**已经没有第二份实现** —— bench 量到的就是产品要跑的那份代码。**下一块砖**：把这个载荷接进 `pskit send --image-mode fit`（含摘要口径：摘要算在**实际传输的图片字节**上，原图 sha256 只作参考）与手机端收图。
+
+**⑤ 门限**：单测 **`tests 404 · pass 404 · fail 0`、`SUITE_EXIT=0`**（第 131 轮的 400 + 本轮 4）；`build-web` exit 0；`check-dist` **13 pass / 0 fail**；`verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（**本次未评估：G4 G6 G9 G10**）；`& .\tools\usability.ps1` ⇒ `USABILITY_EXIT=0`；`check-docs-tables` ⇒ **clean（499 行 / 87 张表）**。
 ### 第 131 轮（**色度换成三角滤波上采样（libjpeg 的 fancy upsampling）+ 抽出 `core/image/color.js` ⇒ 现在是"每一档都比 libjpeg 更小而且 PSNR 更高"；另闭 D85**）
 
 **① 做了什么**：新增 `core/image/color.js`（BT.601 全范围 RGB↔YCbCr、4:2:0 盒式下采样、**三角滤波上采样** `upsampleChroma2x`）+ `tests/unit/image-color.test.mjs` 2 条（变换往返 >40 dB、平坦面精确、斜坡不过冲）；`tools/image-codec-bench.mjs` 删掉自己那份**最近邻**实现、改用这个共享模块（解码侧滤镜替换，**编码侧一个字节都没动**）。
