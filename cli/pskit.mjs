@@ -152,9 +152,19 @@ async function load() {
  * 3D model to a plate is what the user means; everything else gets the paper workhorse USE.md
  * tells people to use.
  */
+const IMAGE_EXT = /^\.(png|jpe?g|webp|heic|heif|tiff?|bmp|gif)$/i;
+
 function defaultProfileFor(ext) {
-  // Every input now defaults to paper: the 3D plate line is retired (docs/PLAN-V5.md section 3), and
-  // a 3D model is just bytes -- if someone wants it on a plate they must pass --profile explicitly.
+  // Every input defaults to paper: the 3D plate line is retired (docs/PLAN-V5.md section 3), and a 3D
+  // model is just bytes -- putting one on a plate takes an explicit --profile.
+  //
+  // Images default to the DENSEST profile that the channel still reads cleanly. Measured (round 117,
+  // sim/channel.py): the cliff is not a physical pitch but "how many pixels per module the scan
+  // gives" -- four pixels per module reads ~1.3e-3 at 300 dpi (0.339mm) and at 600 dpi (0.169mm)
+  // alike, while five or six pixels per module reads zero. At the 300 dpi flatbed the manual points
+  // people at, that makes P-MX-300-5 (0.423mm = 5 px, simulation 16/16) the right default: it carries
+  // 29.1 kB per page against P-M1-300's 7.5 kB, i.e. ~4x fewer pages for the same picture.
+  if (IMAGE_EXT.test(String(ext || ''))) return 'P-MX-300-5';
   return 'P-M1-300';
 }
 
