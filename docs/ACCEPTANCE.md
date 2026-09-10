@@ -128,10 +128,14 @@
 
 **这条判据不覆盖**：`sim/channel.py` 的光学信道模型（Python）、真墨真纸、真手机摄像头、浏览器 ⇒ 那些是 G2/G4/G9 的证据；`tools/soak.mjs` 自己每次也打印 `covers:` 与 `does NOT cover:` 两行，不许被引用成覆盖了它们 ✗
 
-### ✅ G7 · 色道塌陷下单色兜底 100%
+### ~~✅ G7 · 色道塌陷下单色兜底 100%~~ **RETIRED（第 110 轮）**
+> **~~RETIRED~~ · 第 110 轮 · 产品负责人第 109 轮取消 3D 板材线**：本门限验的是3D 板材（PL-D2/D3）在色道塌陷时的单色兜底，属已取消的 3D 线 ⇒ **不再作绿/红依据**，`verify --gate all` 也不再把 it 计入总数。相应档位已冻结（`core/profiles.js` 的 `retired: true`：仍可解码、不再在 CLI/网页提供）。历史判决原文**保留不改写**（撤回＝划线 + 标注）。依据：`docs/PLAN-V5.md` §3。
+
 `verify --gate G7`：单色渲染图由数据自身判为 `colourAlive=false`（**不用边信道** ✓）⇒ 整条色道作擦除、由形状道 + 奇偶复原；`monoSafe:'off'` 档 → **拒绝而非猜** ✓
 
-### 🟡 G8 · 3MF/STL 被独立解析
+### ~~🟡 G8 · 3MF/STL 被独立解析~~ **RETIRED（第 110 轮）**
+> **~~RETIRED~~ · 第 110 轮 · 产品负责人第 109 轮取消 3D 板材线**：本门限验的是3D 码牌产物（3MF/STL）能否被独立解析，属已取消的 3D 线 ⇒ **不再作绿/红依据**，`verify --gate all` 也不再把 it 计入总数。相应档位已冻结（`core/profiles.js` 的 `retired: true`：仍可解码、不再在 CLI/网页提供）。历史判决原文**保留不改写**（撤回＝划线 + 标注）。依据：`docs/PLAN-V5.md` §3。
+
 - **STL ✅**：`python ref/verify_stl.py --selftest .tmp/plate-page0.stl` → 真实 13.1 MB / 262 080 三角形板上 **13/13 PASS**（`84+50n` 逐字节 ✓ 头部自报数与二进制数一致 ✓ units=mm ✓ 零退化 ✓ 每条法向与顶点右手序 cos>0.99 ✓ 包围盒有限且 mm 量级 ✓ **有向体积 +373 mm³** ⇒ 壳体序一致 ✓）+ `--selftest` 造坏副本**必须失败** ⇒ 检查是承重的 ✓
   附带一条反向收获：**无向边 393 120 条中 100% 恰被两个三角形共用 ⇒ 网格其实是水密的**，而 `core/mesh/stl.js` 一路保守报 `watertightHint:false` ⇒ 独立侧测得比自报更好 ✓ "保守误报"不等于真相 ✓
 - **3MF 🟡**：`core/mesh/threeMF.js` 已写出（`encode3MF`/`buildZip`/`readZip`/`parseModelXml`/`manifoldReport`/固定 DOS 时间戳 ✓）但**尚未被第三方解析验证过**，且它是在提交 `3502db8` 之后仍在改的中途状态 ⇒ 不判决 ✓
@@ -146,7 +150,9 @@
 **仍缺（所以是 🟡 不是 ✅）**：真浏览器与真手机各一次人工执行 ✓ 本机没有浏览器也无摄像头 ✓ `?selftest=1` 与 `file://` 路径只由 Node 侧等价物证明 ✓ 记为 **D18**；GitHub Pages 的仓库推送与开关是**用户的动作**（`docs/PLAN.md` L172 ✓ 本轮仍未推送 ✓ `gh` 未安装 ✓ 需要仓库 URL 与交互凭据 ✓）
 **复现**：`node tools/build-web.mjs && node tools/check-dist.mjs --pages .tmp/g2src && node tools/smoke-sender.mjs && node tools/smoke-capture.mjs`
 
-### 🟡 G10 · 喷嘴 × 参数矩阵
+### ~~🟡 G10 · 喷嘴 × 参数矩阵~~ **RETIRED（第 110 轮）**
+> **~~RETIRED~~ · 第 110 轮 · 产品负责人第 109 轮取消 3D 板材线**：本门限验的是3D 打印机的喷嘴 × 参数矩阵，属已取消的 3D 线 ⇒ **不再作绿/红依据**，`verify --gate all` 也不再把 it 计入总数。相应档位已冻结（`core/profiles.js` 的 `retired: true`：仍可解码、不再在 CLI/网页提供）。历史判决原文**保留不改写**（撤回＝划线 + 标注）。依据：`docs/PLAN-V5.md` §3。
+
 **已有真材料**：`PL-G` 在 0.6 mm（3.6 mm 格 = 6 EW）与 0.8 mm（4.5 EW）喷嘴下被 `glyphGeometry` **拒绝**（"2 级形状字母表需 ≥8 EW/格" ✓）⇒ 这是"网格与光栅共用一个形状真值源"的直接后果 ✓ 属正确行为 ✓ 也是矩阵里第一个真实边界点 ✓
 **未做**：0.2/0.4/0.6/0.8 × 各剖面的完整矩阵实跑 ✓ 未标定 MTF 前不判决 ✓
 

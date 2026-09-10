@@ -126,6 +126,18 @@
 
 ## 已知风险 / 待办
 
+### 第 111 轮（**3D 线退场第一步：档位冻结 + 门限划线 + CLI/网页不再提供板材档**）
+
+**① 做了什么**（依据 `docs/PLAN-V5.md` §3，产品负责人已取消 3D 板材线）：
+- `core/profiles.js`：**`PL-M1 / PL-D2 / PL-D3 / PL-D3S / PL-G / REL-H1` 全部加 `retired: true`**（附注释说明"仍可解码、不再提供"）。实测：`retired: PL-M1 PL-D2 PL-D3 PL-D3S PL-G REL-H1`；**active 7 档全是纸面**（P-M1-300/600、P-M2-600、P-C4-600、P-MX-300-6/5/4）。
+- `web/sender.js`：档位下拉框跳过 `p.retired`（用户不再看到板材档；显式传 `--profile` 仍可用）。
+- `cli/pskit.mjs`：`--help` 的档位列表去掉板材档、写明"已退役但仍可解码"；`defaultProfileFor()` **不再把 `.stl/.3mf/.obj` 默认派到 `PL-D2`**（3D 线取消 ⇒ 一律纸面；模型就是字节，要上板必须显式传档）。
+- `docs/ACCEPTANCE.md`：**G7 / G8 / G10 三个小节标题划线 + 退役说明**（写清产品负责人取消、不再作绿/红依据、历史判决原文保留不改写）——按台账纪律"撤回＝划线 + 标注"。
+
+**② 验证**：全量单测 **`tests 377 · pass 377 · fail 0`、`SUITE_EXIT=0`**（退役没有破坏任何既有用例 —— 板材代码冻结未删，纯回归仍绿）；`check-docs-tables` **clean（439 行 / 72 张表）**；`node --check` 过 CLI 与 `web/sender.js`。
+
+**③ 本轮**没有**做的（如实）**：① `verify --gate all` 目前仍会跑 G7/G8/G10 并计入总数 —— 把它们从 `all` 里摘掉、改打印一行 `retired: G7 G8 G10` 是下一步；② 验收包（`acceptance-kit.ps1`）仍在生成板材码牌与 MTF 板，尚未清理成"纸面 + 密度阶梯页"；③ 密度尺（`density-ladder`）3 px / 2 px 带的本底误码（4.7e-4–1.4e-3，原始渲染）仍未修。三件都排在下一步。
+
 ### 第 110 轮（**把批准的 PLAN v5 写成文档**：`docs/PLAN-V5.md` 落地，`docs/PLAN.md` 顶部加指针）
 
 **① 为什么先做这个**（用户指示：「你先把 PLAN 写成文档，避免忘了，然后再继续」）：v5 只存在于会话里，一旦换会话就会丢。

@@ -400,6 +400,9 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   const sel = $('sprofile');
   sel.innerHTML = '';
   for (const [id, p] of Object.entries(PROFILES)) {
+    // Retired profiles (the cancelled 3D plate line) stay decodable but are not offered here:
+    // docs/PLAN-V5.md section 3. Passing one explicitly on the CLI still works.
+    if (p.retired) continue;
     const o = document.createElement('option');
     o.value = id;
     o.textContent = profileOptionLabel(id, p);

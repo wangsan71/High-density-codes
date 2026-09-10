@@ -50,31 +50,46 @@ export const PROFILES = {
     intra: { k: 127, nsym: 127 }, parityPct: 20, monoRecoverable: true,
     note: 'colour laser paper, colour=data + shape=parity',
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'PL-M1': {
-    id: 'PL-M1', medium: MEDIUM.PLATE,
+    id: 'PL-M1', retired: true, medium: MEDIUM.PLATE,
     channels: [{ name: 'shape', levels: 2 }], intra: { k: 223, nsym: 32 },
     parityPct: 20, note: 'single-colour plate, native',
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'PL-D2': {
-    id: 'PL-D2', medium: MEDIUM.PLATE,
+    id: 'PL-D2', retired: true, medium: MEDIUM.PLATE,
     channels: [{ name: 'colour', levels: 2 }, { name: 'shape', levels: 2 }],
     intra: { k: 127, nsym: 127 }, parityPct: 20, monoRecoverable: true,
     note: 'two-filament plate: colour carries data, shape carries parity',
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'PL-D3': {
-    id: 'PL-D3', medium: MEDIUM.PLATE,
+    id: 'PL-D3', retired: true, medium: MEDIUM.PLATE,
     channels: [{ name: 'colour', levels: 4 }, { name: 'shape', levels: 2 }],
     intra: { k: 223, nsym: 32 }, parityPct: 20, monoSafe: 'off',
     note: 'four-filament plate, 3 bits/cell, maximum density: needs all four colours present',
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'PL-D3S': {
-    id: 'PL-D3S', medium: MEDIUM.PLATE,
+    id: 'PL-D3S', retired: true, medium: MEDIUM.PLATE,
     channels: [{ name: 'colour', levels: 4 }, { name: 'shape', levels: 4 }],
     intra: { k: 85, nsym: 85 }, parityPct: 20, monoSafe: 'partial',
     note: 'four-filament with parity: 3 bits/cell, survives ~50% colour loss',
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'PL-G': {
-    id: 'PL-G', medium: MEDIUM.PLATE, pitchMm: UNIVERSAL_PITCH_MM,
+    id: 'PL-G', retired: true, medium: MEDIUM.PLATE, pitchMm: UNIVERSAL_PITCH_MM,
     channels: [{ name: 'shape', levels: 2 }], intra: { k: 127, nsym: 127 },
     parityPct: 33, note: 'universal floor: readable on any nozzle 0.2-0.8 and any phone',
     /**
@@ -86,8 +101,11 @@ export const PROFILES = {
      */
     phoneSafe: true,
   },
+  // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
+  // plates still decode and so the history stays readable; hidden from the CLI help and the web
+  // picker. See docs/PLAN-V5.md section 3.
   'REL-H1': {
-    id: 'REL-H1', medium: MEDIUM.PLATE,
+    id: 'REL-H1', retired: true, medium: MEDIUM.PLATE,
     channels: [{ name: 'height', levels: 2 }], intra: { k: 223, nsym: 32 },
     parityPct: 20, note: 'relief only, decoded from shading (M10, optional)',
   },

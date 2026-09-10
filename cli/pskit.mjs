@@ -21,7 +21,9 @@ const ROOT = resolve(HERE, '..');
 const HELP = `pskit <command> [options]
 
   send <file>            encode a file into printable pages
-    --profile <id>       P-M1-300 P-M1-600 P-M2-600 P-C4-600 P-MX-300-4/5/6 PL-M1 PL-D2 PL-D3 PL-D3S PL-G REL-H1
+    --profile <id>       P-M1-300 P-M1-600 P-M2-600 P-C4-600 P-MX-300-4/5/6
+                         (the 3D plate profiles PL-* and REL-H1 are retired: they still decode,
+                          but they are not offered -- see docs/PLAN-V5.md)
     --nozzle <0.2|0.4|0.6|0.8>   plate profiles only (default 0.4)
     --monoSafe <full|partial|off>  colour-loss protection vs capacity (default per profile)
     --dpi <n>            raster resolution (plate default 300, paper uses the profile dpi)
@@ -151,8 +153,8 @@ async function load() {
  * tells people to use.
  */
 function defaultProfileFor(ext) {
-  const e = String(ext || '').toLowerCase();
-  if (e === '.stl' || e === '.3mf' || e === '.obj') return 'PL-D2';
+  // Every input now defaults to paper: the 3D plate line is retired (docs/PLAN-V5.md section 3), and
+  // a 3D model is just bytes -- if someone wants it on a plate they must pass --profile explicitly.
   return 'P-M1-300';
 }
 
