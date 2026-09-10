@@ -9,7 +9,9 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
   payload-module.bin   高密度模块纸面要传的文件（{{MODULE_BYTES}} B），sha256 {{MODULE_SHA}}
 {{MODULE_LINES}}
   payload-plate.bin    板材那一路要传的文件（6 B），sha256 {{PLATE_SHA}}
-  plates/              码牌（每个喷嘴一块，**只打 page-000 那一块**）
+  density-a4-300/      密度阶梯页（A4@300dpi：0.85/0.51/0.42/0.34mm）
+  density-a5-600/      密度阶梯页（A5@600dpi：0.42/0.25/0.17mm）
+  density-a6-1200/     密度阶梯页（A6@1200dpi：0.127/0.106/0.085mm）
 {{PLATE_LINES}}
   mtf/                 MTF 校准板 mtf-plate.3mf / .stl / .png + mtf-plate.json
 
@@ -41,39 +43,26 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
   一条命令批量检查：
         node tools/check-module-scans.mjs --kit 这个验收包目录 --scans 放 scans-module-6/5/4 的父目录
 
-第 2 步 · 板材（验 G10：每个喷嘴一块码牌）
-  2a. 把 plates\ 里**每个**喷嘴的 page-000.3mf 丢进切片软件，按那个喷嘴打一块
-      （0.2 喷嘴打 0.2 的那块，以此类推；PL-D2 @ 0.4 是默认档）
-  2b. 拍/扫每一块板（正对、避免反光），每块一个目录
-      **必须把整块板含四角都拍进画面**：角标在板的四角，拍近到角标出画就完全定位不了
-      （不是「拍得不够清楚」，而是根本没有参照点）；宁可让板在画面里小一点
-  2c. 逐块跑（把 0.8 换成实际的喷嘴）：
-        node cli/pskit.mjs receive photos-0.8 --photo --profile PL-G --nozzle 0.8 --plate {{PLATE_MM}} --out got-0.8.bin
-        (Get-FileHash -Algorithm SHA256 got-0.8.bin).Hash
-      每块都应当等于 {{PLATE_SHA}}
-  ✗ 某一块读不出：把那条命令的完整输出发回来（它会点名缺哪一页 / 哪一步失败）。
+第 2 步 · 密度阶梯（验 PLAN v5 P0：这套打印机+扫描仪**到底能细到多少**）
+  说明：3D 板材那一条线已被产品负责人取消（PLAN-V5 §3）⇒ 不再打码牌、不再打 MTF 板。
+        这一步量的是**纸**：同一张纸上并排印多种模块间距，扫回来直接给误码率。
 
-第 3 步 · MTF 校准板（验 G10：量"这一档到底能读到多细"）
-  3a. 同一块 mtf\mtf-plate.3mf 用**每个喷嘴各打一次**（喷嘴是切片软件/打印机的设置，
-      不是文件 ⇒ 四块板应当长得一样；也可以把 mtf-plate.png 按 100% 打纸上）
-  3b. 每块拍/扫一张，四张放进同一个目录，按喷嘴命名：
-        n02.png（0.2 喷嘴） n04.png（0.4） n06.png（0.6） n08.png（0.8）
-      名字认不出来也行：--label 0.4=n04.png，或写一个 mtf-labels.json
-        { "0.2": "n02.png", "0.4": "n04.png", "0.6": "n06.png", "0.8": "n08.png" }
-      拍的时候**整块板含四角都要在画面里**（角标是唯一的参照点，出画就登记不了）
-  3c. 读矩阵（板规格不在照片目录里就加 --spec）：
-        node tools/mtf-matrix.mjs --dir 那个目录 --spec mtf\mtf-plate.json --provenance real-print
-  3d. 它逐张给"建议喷嘴"+一句判决：
-        names-itself     认出了打印它的那个喷嘴（想要的）
-        allowed-coarser  只有 0.2 那一档允许，且读数会说明 0.26mm 孔被渗墨填了
-        mismatch         认成了别的喷嘴 —— 把整段输出发回来
-      把这段输出发回来（exit 0 = 每张都认对，1 = 有认错的，2 = 工具没跑起来）
-  3e. 只想量一块板、不要矩阵：
-        node cli/pskit.mjs calibrate 你的照片.png --mtf --spec mtf\mtf-plate.json
-  提示：整张 200mm 板塞进一张手机照片（约 100dpi）连 0.95mm 的孔都读不出，
-        这时它会**拒绝推荐任何喷嘴** —— 那是实话，不是工具挑剔。
-        **别用"拍近一点"来救**：角标在板四角，拍近就出画 ⇒ 连登记都做不到；
-        正确动作是改用 300 dpi 扫描，或如实接受"这一档读不出"。
+  2a. 打三张（都在包里，**100% 缩放**，别选"适应页面"）：
+{{LADDER_LINES}}
+      小纸那两张（A5/A6）如果打印机只吃 A4，就把它打在 A4 纸上 —— PDF 页面尺寸是 A5/A6，
+      实际码区就是那个尺寸，多出来的纸边无所谓。
+  2b. 每张按它自己的 dpi 扫一次（彩色、关自动裁剪/去底色、存 PNG 或 TIFF）：
+        density-a4-300   -> 300 dpi
+        density-a5-600   -> 600 dpi
+        density-a6-1200  -> 1200 dpi（打印机/扫描仪不支持 1200 就跳过这张，别的照做）
+      扫描件放成三个目录：scans-a4 / scans-a5 / scans-a6
+  2c. 逐张读回来（这是唯一一步"我给的命令"）：
+        node tools/density-ladder.mjs --read scans-a4 --spec density-a4-300\density-ladder.json
+        node tools/density-ladder.mjs --read scans-a5 --spec density-a5-600\density-ladder.json
+        node tools/density-ladder.mjs --read scans-a6 --spec density-a6-1200\density-ladder.json
+      把三段输出**原样**发回来。它逐条带打印 BER / 净 B per page / bit per mm² / 可用性。
+  ✗ 如果三张都报 "markers/..."：把扫描件原样发回来（分辨率或裁剪不对是最常见的原因）。
+
 
 第 4 步 · 浏览器（验 G9）
   4a. 在 Chrome / Edge / Safari 里各打开一次发送页与接收页

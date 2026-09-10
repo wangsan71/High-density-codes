@@ -93,32 +93,27 @@ foreach ($profile in 'P-MX-300-6', 'P-MX-300-5', 'P-MX-300-4') {
   }
 }
 
-# ---- plate legs ------------------------------------------------------------------------
-$plateDirs = @()
-foreach ($nozzle in '0.2', '0.4', '0.6', '0.8') {
-  $dir = Join-Path $kit "plates\PL-G-$nozzle"
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  & node cli/pskit.mjs send $platePayload --profile PL-G --nozzle $nozzle --plate $PlateMm --format 3mf,stl --out $dir *> (Join-Path $kit "plate-PL-G-$nozzle.log")
+# ---- density ladder sheets (PLAN v5 P0) -------------------------------------------------
+# The 3D plate line is retired (docs/PLAN-V5.md section 3): no code plates, no MTF board. What the user
+# prints instead is the paper density ladder -- three sheets, each rendered at a dpi where EVERY module
+# is at least 4 px, which is what makes the ruler exact (measured: below 4 px the ruler had its own
+# 5e-4 error floor on a pristine render).
+$ladderSheets = @(
+  @{ name = 'density-a4-300';  sheet = 'A4';      dpi = '300';  pitches = '0.847,0.508,0.423,0.339' },
+  @{ name = 'density-a5-600';  sheet = 'A5';      dpi = '600';  pitches = '0.423,0.254,0.169' },
+  @{ name = 'density-a6-1200'; sheet = '105x148'; dpi = '1200'; pitches = '0.127,0.102,0.085' }
+)
+$ladderLines = @()
+foreach ($s in $ladderSheets) {
+  $dir = Join-Path $kit $s.name
+  & node tools/density-ladder.mjs --make --out $dir --sheet $s.sheet --dpi $s.dpi --pitches $s.pitches *> (Join-Path $kit ($s.name + '-make.log'))
   if ($LASTEXITCODE -ne 0) {
-    Fail "PL-G @ $nozzle (exit $LASTEXITCODE, see plate-PL-G-$nozzle.log)"
+    Fail "$($s.name) (exit $LASTEXITCODE, see $($s.name)-make.log)"
   } else {
-    $plateDirs += [pscustomobject]@{ profile = 'PL-G'; nozzle = $nozzle; dir = "plates\PL-G-$nozzle" }
-    Ok "PL-G @ $nozzle -> 3mf + stl"
+    $ladderLines += "     " + $s.name + "  ->  " + $s.name + "\density-ladder.pdf   (100%, scan at " + $s.dpi + " dpi)"
+    Ok ($s.name + ": " + $s.sheet + " @ " + $s.dpi + " dpi -> density-ladder.pdf")
   }
 }
-$dirD2 = Join-Path $kit 'plates\PL-D2-0.4'
-New-Item -ItemType Directory -Force -Path $dirD2 | Out-Null
-& node cli/pskit.mjs send $platePayload --profile PL-D2 --nozzle 0.4 --plate $PlateMm --format 3mf,stl --out $dirD2 *> (Join-Path $kit 'plate-PL-D2-0.4.log')
-if ($LASTEXITCODE -ne 0) {
-  Fail "PL-D2 @ 0.4 (exit $LASTEXITCODE)"
-} else {
-  $plateDirs += [pscustomobject]@{ profile = 'PL-D2'; nozzle = '0.4'; dir = 'plates\PL-D2-0.4' }
-  Ok 'PL-D2 @ 0.4 -> 3mf + stl'
-}
-
-# ---- MTF calibration plate -------------------------------------------------------------
-& node cli/pskit.mjs calibrate --make-mtf --out (Join-Path $kit 'mtf') --format 3mf,stl,png --plate-mm $PlateMm *> (Join-Path $kit 'mtf-make.log')
-if ($LASTEXITCODE -ne 0) { Fail "MTF plate (exit $LASTEXITCODE, see mtf-make.log)" } else { Ok 'MTF calibration plate -> 3mf + stl + png + spec' }
 
 # ---- every 3MF through the G8 subset checker -------------------------------------------
 $mfCount = 0
@@ -132,6 +127,7 @@ if ($mfCount -gt 0) { Ok "G8 subset check on $mfCount 3MF file(s)" }
 $template = Get-Content (Join-Path $PSScriptRoot 'acceptance-readme.txt') -Raw -Encoding utf8
 $plateLines = (($plateDirs | ForEach-Object { "     " + $_.profile + " @ " + $_.nozzle + "mm  ->  " + $_.dir + "\page-000.3mf / .stl" }) -join "`n")
 $moduleReadmeLines = ($moduleLines -join "`n")
+$ladderReadmeLines = ($ladderLines -join "`n")
 $readme = $template.Replace('{{PAPER_BYTES}}', "$PaperBytes")
 $readme = $readme.Replace('{{PAPER_SHA}}', $paperHash)
 $readme = $readme.Replace('{{MODULE_BYTES}}', "$ModuleBytes")
@@ -140,6 +136,7 @@ $readme = $readme.Replace('{{MODULE_LINES}}', $moduleReadmeLines)
 $readme = $readme.Replace('{{PLATE_SHA}}', $plateHash)
 $readme = $readme.Replace('{{PLATE_MM}}', "$PlateMm")
 $readme = $readme.Replace('{{PLATE_LINES}}', $plateLines)
+$readme = $readme.Replace('{{LADDER_LINES}}', $ladderReadmeLines)
 [IO.File]::WriteAllText((Join-Path $kit 'README.txt'), $readme, (New-Object Text.UTF8Encoding($false)))
 
 Write-Host ''

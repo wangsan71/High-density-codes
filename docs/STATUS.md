@@ -126,6 +126,18 @@
 
 ## 已知风险 / 待办
 
+### 第 115 轮（**验收包按 v5 重做：去掉板材/MTF，换成三张密度阶梯页 + 一条读数命令**）
+
+**① 改动**（依据 `docs/PLAN-V5.md` §3、§7）：
+- `tools/acceptance-kit.ps1`：**删掉 5 块板材码牌与 MTF 板**（3D 线已取消），换成 `density-a4-300` / `density-a5-600` / `density-a6-1200` 三张阶梯页（每张 `density-ladder.pdf` + `.json`，PDF 都是**真尺寸**：A4 210×297、A5 148×210、A6 105×148）。
+- `tools/acceptance-readme.txt`：**第 2 步从"打码牌"改成"打密度阶梯"**（含每张该用哪个 dpi 扫、扫描件命名、以及唯一那条 `node tools/density-ladder.mjs --read ...` 命令），删掉 MTF 那整节与"拍近一点"的旧提示。
+
+**② 实测**：`& .\tools\acceptance-kit.ps1 -Out .tmp\kit-v5` ⇒ **`KIT_EXIT=0`、7 条 PASS**（纸面 3 页 + 三个模块档 + **三张阶梯页**），包里**没有任何 3MF/STL/MTF**。
+
+**③ 门限**：本轮只动 `tools/`（未动 core/web）⇒ `verify --gate all` ⇒ **`ALL GATES PASS`（6/7 evaluated）`VERIFY_EXIT=0`**（未评估 G4 G6 G9 G10，与每轮一致）；`check-docs-tables` ⇒ **clean（443 行 / 73 张表）**。
+
+**④ 下一步（需要用户动手）**：把 `.tmp/kit-v5` 里的三张阶梯页打印（100%）、按表扫描、跑三条 `--read`、把输出发回 ⇒ 我拿到**第一份真机密度表**，填进 `docs/PLAN-V5.md` §6，再决定 P1 的默认档与 P2 的纸张目标。
+
 ### 第 114 轮（**密度尺改为"自己拥有版面"，三张阶梯页（A4@300 / A5@600 / A6@1200）全部自读 BER = 0.000000**）
 
 **① 为什么必须自己拥有版面**：阶梯页不是协议页，不能借某个 profile 的晶格尺寸 —— 实测**每个 profile 的页面都是 ~191×279 mm，塞不进 A5（148×210）更塞不进 A6**，之前两次生成直接 `pageLayout: page 191.5x278.9mm does not fit ...` 失败。现在 `--make` 自建画布（按纸张 mm × dpi）、自画角标、自定条带矩形，`density-ladder.json` 里写全 `width/height/fiducials/bandRect/bands`，读数器只认 spec、不再 import `profiles`/`pageLayout`/`raster`。
