@@ -39,11 +39,11 @@ import { PROFILES, planPage } from '../profiles.js';
 import { mtfPlateLayout, MTF_PLATE_VERSION, MTF_HOLE_FRACTION } from './mtfplate.js';
 
 /** A hole whose centre is at most this inked counts as open. Physical, not fitted. */
-export const HOLE_OPEN_CUT = 0.25;
+const HOLE_OPEN_CUT = 0.25;
 /** The ink around a hole must be at least this inked for the rung to mean anything. */
-export const RIM_INKED_CUT = 0.7;
+const RIM_INKED_CUT = 0.7;
 /** Fraction of the nominal hole side used as the measurement window, so edges stay out. */
-export const HOLE_WINDOW_FRACTION = 0.55;
+const HOLE_WINDOW_FRACTION = 0.55;
 
 const median = (a) => {
   if (!a.length) return NaN;

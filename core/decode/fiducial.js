@@ -91,7 +91,7 @@ export function otsu(ink, samples = 40000) {
  * first and rejected: a sharp page cropped to its code area reaches 0.560 and a scrambled image
  * reaches even higher, so that statistic fires on good captures -- measured.)
  */
-export function medianInknessRatio(ink, samples = 20000) {
+function medianInknessRatio(ink, samples = 20000) {
   const v = ink && ink.values ? ink.values : ink;
   const max = ink && ink.max !== undefined ? ink.max : (v && v.length ? Math.max(...v) : 0);
   if (!v || !v.length || !(max > 0)) return 0;
@@ -112,7 +112,7 @@ export function medianInknessRatio(ink, samples = 20000) {
  * range. p1/p99 rather than min/max prevent a handful of dust specks from turning a blank page
  * into a contrast diagnosis.
  */
-export function inkRangeRatio(ink, samples = 20000) {
+function inkRangeRatio(ink, samples = 20000) {
   const v = ink && ink.values ? ink.values : ink;
   const max = ink && ink.max !== undefined ? ink.max : (v && v.length ? Math.max(...v) : 0);
   if (!v || v.length < 4 || !(max > 0)) return { p1: 0, p99: 0, range: 0, ratio: 0, tailRatio: 0 };

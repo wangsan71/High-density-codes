@@ -42,19 +42,19 @@ const COUNTER_MAX = 0xffffffff;
 /* rotations (bit-twiddling only, uint32 semantics via >>> 0)          */
 /* ------------------------------------------------------------------ */
 
-export function rotl16(v) {
+function rotl16(v) {
   return ((v << 16) | (v >>> 16)) >>> 0;
 }
 
-export function rotl12(v) {
+function rotl12(v) {
   return ((v << 12) | (v >>> 20)) >>> 0;
 }
 
-export function rotl8(v) {
+function rotl8(v) {
   return ((v << 8) | (v >>> 24)) >>> 0;
 }
 
-export function rotl7(v) {
+function rotl7(v) {
   return ((v << 7) | (v >>> 25)) >>> 0;
 }
 

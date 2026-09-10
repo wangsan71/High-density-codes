@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 157 轮（**死代码清理：又清掉 15 个"仅内部使用"的导出（候选 68 → 53），仍属零风险那一级**）
+
+**① 做了什么**：继续只做①级清理（去掉 `export`、函数体不动）：`core/calibrate/mtfplate.js` 四个常量、`core/calibrate/readmtf.js` 三个常量、`core/chacha20.js` 四个 `rotl*` 旋转助手、`core/decode/calibrate.js` 的 `levelAreas` 与 `integrateLevelAreas`、`core/decode/fiducial.js` 的 `medianInknessRatio` 与 `inkRangeRatio` —— 共 **15 个**。
+
+**② 怎么筛的（机械可复核）**：脚本对候选逐个 `grep` **自己文件内**的出现次数：**≥2 次**说明"定义 + 至少一处内部使用" ⇒ 属于①级（安全去 `export`）；**恰好 1 次**说明文件里只有定义 ⇒ 属于②级（要删定义，本轮不动）。本轮检查 16 个，15 个属①。
+
+**③ 门限**：单测 **`tests 413 · pass 413 · fail 0`**、`check-docs-tables` clean；候选 **68 → 53**。
+
+**④ 下一轮**：清完①级的剩余部分（还有一批在 `core/mesh/**`、`core/render/**`），之后回 P4 第三块砖。
 ### 第 156 轮（**死代码清理按新规则重启：六个"仅内部使用"的符号去掉 `export`（不删函数，零行为风险）**）
 
 **① 做了什么**：吸取上一轮误删的教训，本轮只做**不可能改变行为**的清理 —— 把只在自己文件内部使用的符号的 `export` 去掉：`BLANK_INK_RANGE_RATIO`、`inkFraction`（`core/decode/fiducial.js`）、`estimateSubstrate`（`core/decode/warp.js`）、`MANIFOLD_RULE`（`core/mesh/threeMF.js`）、`STL_HEADER_PREFIX`（`core/mesh/stl.js`）、`BOOTSTRAP_PALETTES`（`core/decode/bootstrap.js`）。**函数体一行未动** ⇒ 即使某个名字其实还有人用，最坏情况也只是"导出少了"而不会少逻辑。

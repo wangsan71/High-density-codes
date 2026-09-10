@@ -100,16 +100,16 @@ export const MTF_FEATURE_MM = Array.from(
 ).sort((a, b) => a - b);
 
 /** The feature ladder's own pitch: big enough that only the hole can be the limit. */
-export const MTF_FEATURE_PITCH_MM = 3.0;
+const MTF_FEATURE_PITCH_MM = 3.0;
 
 /** Frame cell (mm) the corner markers are sized on: the coarsest rung, so they survive. */
-export const MTF_FRAME_CELL_MM = 2.4;
+const MTF_FRAME_CELL_MM = 2.4;
 
 /** Top-skin texture period (mm) of the ribbed patches. */
-export const MTF_TEXTURE_PERIOD_MM = 0.4;
+const MTF_TEXTURE_PERIOD_MM = 0.4;
 
 /** Default plate side (mm) and raster resolution (px/inch) of the appearance render. */
-export const MTF_PLATE_MM = 200;
+const MTF_PLATE_MM = 200;
 const MTF_DPI = 300;
 
 const round4 = (x) => Math.round(x * 1e4) / 1e4;

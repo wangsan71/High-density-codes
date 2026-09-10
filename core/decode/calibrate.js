@@ -92,7 +92,7 @@ export function expectedInkArea(geom, geo, opt = {}) {
 }
 
 /** Per-level covered-area fractions, from the same object the renderer drew with. */
-export function levelAreas(geo) {
+function levelAreas(geo) {
   if (!geo) return null;
   if (Array.isArray(geo.areaLevels) && geo.areaLevels.length) return geo.areaLevels;
   if (Number.isFinite(geo.area)) {
@@ -114,7 +114,7 @@ export function levelAreas(geo) {
  * @param {number} levels
  * @param {number} [n]  integration grid per side (51 is ~2 600 samples/cell)
  */
-export function integrateLevelAreas(geo, levels, n = 51) {
+function integrateLevelAreas(geo, levels, n = 51) {
   const out = [];
   for (let lv = 0; lv < levels; lv++) {
     let hits = 0;
