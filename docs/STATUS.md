@@ -126,6 +126,17 @@
 
 ## 已知风险 / 待办
 
+### 第 171 轮（**瓦片级 RS 纠错第一次尝试：接口用错、5 条测试红 ⇒ 已还原；把"卡在哪"记下来**）
+
+**① 做了什么（以及为什么撤销）**：给每块瓦片加 Reed-Solomon（`RS_PARITY = 16`，每块 4B 头 + 82B 数据 + 16B 校验 + 2B CRC16，整页容量 4,704 → 3,936 B），写侧用 `rsEncodeBlocks(block, per, RS_PARITY)`、读侧用 `rsDecodeBlocks(codeword, per, RS_PARITY)` 后**再**校验 CRC。结果：**6 条瓦片测试红了 5 条**，错误是 `RangeError: offset is out of bounds`（写侧与读侧都出现）。
+
+**② 处置**：`git checkout -- tools/make-tile-page.mjs core/decode/tile-read.js` 还原 ⇒ **`tests 423 · pass 423 · fail 0`**、`git status` 干净。**本轮净代码改动为零。**
+
+**③ 具体卡在哪（给下一轮的我，省一次试错）**：`rsEncodeBlocks/rsDecodeBlocks` 在**整页协议**里的用法与本轮不同 —— 我没有先读 `core/protocol.js` 里它们真实的调用形状（例如它是否要求数据长度是 `k` 的整数倍、是否返回**数组的数组**、`k` 参数到底是数据长度还是数据**符号数**），就按签名猜着用了。⇒ **下次动手前先读一处真实调用点**（`grep rsEncodeBlocks core/ protocol.js cli/`），再改代码。
+
+**④ 这条与本项目的红线的关系**：纠错没接上**不等于**读错会被当成对的 —— 第 169 轮的 **CRC16 仍在**，误读照样是具名拒绝；只是"脏了一块就整块作废"，还不能"修好它"。
+
+**⑤ 门限**：单测 **`tests 423 · pass 423 · fail 0`**（还原后复跑）。**下一块砖**：仍是瓦片级 RS（先读真实调用形状），或照片那一层。
 ### 第 170 轮（**交接文档 §0 补上瓦片页这条路（下一个人不必从 20 个轮次块里拼）**）
 
 **① 做了什么**：`docs/HANDOVER.md` §0 增加第 150–169 轮瓦片页的小结：已落地的六件（几何 `core/tiles.js`、渲染 `core/render/tilepage.js`、读回 `core/decode/tile-read.js`、平移容错 `findTileOffset`、用户命令 `tools/make-tile-page.mjs` 写/读、每块 4B 头 + 98B 数据 + 2B CRC16）与三个数字（48 块、**4,704 B/页**、比 `P-MX-300-5` 少约 6 倍），以及**还差的三件**（照片层、瓦片级 RS、接进正式收发流程），并指向 STATUS 的轮次块。零代码改动。
