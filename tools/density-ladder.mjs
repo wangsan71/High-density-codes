@@ -17,15 +17,12 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
-import { planPage, PROFILES } from '../core/profiles.js';
-import { pageLayout } from '../core/render/layout.js';
-import { renderPageBitmap, renderSheetBitmap } from '../core/render/raster.js';
 import { encodePNG } from '../core/render/png.js';
 import { encodePDFDocument } from '../core/render/pdf.js';
 import { decodePNG } from '../core/decode/png-read.js';
 import { decodeTIFF } from '../core/decode/tiff-read.js';
 import { findMarkers } from '../core/decode/fiducial.js';
-import { canvasQuad, canvasToPhoto } from '../core/decode/warp.js';
+import { canvasToPhoto } from '../core/decode/warp.js';
 import { homographyFromQuad, sampleBilinear } from '../core/decode/transform.js';
 
 /** 默认阶梯：从今天的默认档间距一路细到 2R 才需要的间距。 */
@@ -95,23 +92,40 @@ function planBands(rect, pitches, dpi) {
   return bands;
 }
 
+/**
+ * The ladder owns its geometry: it is not a protocol page, so it must NOT inherit some profile's
+ * lattice size (measured: every profile's page is ~191x279mm, which does not fit A5 or A6 at all --
+ * the whole point of the small-paper ladder). Everything the reader needs is written into the spec.
+ */
 function make(args) {
-  const profileId = args.profile || 'P-MX-300-4';
-  const prof = PROFILES[profileId];
-  if (!prof) throw new Error('unknown profile ' + profileId);
-  const dpi = args.dpi ? Number(args.dpi) : prof.dpi;
+  const dpi = args.dpi ? Number(args.dpi) : 300;
   const sheetMm = sheetMmOf(args.sheet || 'A4');
   const pitches = parsePitches(args.pitches);
-  const geom = planPage(profileId, {});
-  const layout = pageLayout(geom, dpi, { sheetMm });
-  const blank = renderPageBitmap({ geom, levels: new Uint16Array(geom.totalCells), layout, palette: 'PAPER1', echoBits: null });
-  const px = blank.pixels;
-  const W = blank.width, H = blank.height;
+  const mmPx = (mm) => Math.max(1, Math.round((mm / 25.4) * dpi));
+  const W = mmPx(sheetMm.w);
+  const H = mmPx(sheetMm.h);
+  const px = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) { px[i * 4] = 255; px[i * 4 + 1] = 255; px[i * 4 + 2] = 255; px[i * 4 + 3] = 255; }
 
-  // 可用晶格矩形 = originPx .. originPx + cols*cellPx（角标与回显条都在它外面）
+  // Corner fiducials, same convention as a data page (three solid + one hollow, ringed), sized in
+  // millimetres so a 1200 dpi sheet gets physically the same markers a 300 dpi sheet gets.
+  // Copy the marker geometry of a page the detector is known to read (P-MX-300-4: half 32 px and
+  // ring 12 px at 300 dpi, i.e. 2.71mm and 1.02mm), rather than inventing a smaller marker: measured,
+  // 48 px markers with a 4 px ring gave "no-square-candidates" even on a page with nothing else on it.
+  const half = mmPx(2.71);
+  const ring = mmPx(1.02);
+  const inset = half + mmPx(0.34);
+  const fiducials = [
+    { role: 'tl', solid: true, x: inset, y: inset, half },
+    { role: 'tr', solid: true, x: W - inset, y: inset, half },
+    { role: 'bl', solid: true, x: inset, y: H - inset, half },
+    { role: 'br', solid: false, x: W - inset, y: H - inset, half },
+  ];
   const rect = {
-    x: layout.originPx.x, y: layout.originPx.y,
-    w: layout.cols * layout.cellPx, h: layout.rows * layout.cellPx,
+    x: inset + half + mmPx(2),
+    y: inset + half + mmPx(2),
+    w: W - 2 * (inset + half + mmPx(2)),
+    h: H - 2 * (inset + half + mmPx(2)),
   };
   const bands = planBands(rect, pitches, dpi);
   // Two requested pitches can land on the same cellPx (the pixel grid cannot express them).
@@ -137,6 +151,15 @@ function make(args) {
     }
   };
 
+  for (const f of fiducials) {
+    // Quiet zone first: a ladder page is mostly ink (measured: 44% of pixels), and with the marker
+    // sitting directly in that field the detector's binarisation has no stable level to separate a
+    // square from -- measured as "no-square-candidates" on a page whose markers were demonstrably
+    // drawn. Real pages have the same quiet zone; the ladder must too.
+    paint(f.x - f.half * 2, f.y - f.half * 2, f.half * 4, [255, 255, 255]);
+    paint(f.x - f.half, f.y - f.half, f.half * 2, [0, 0, 0]);
+    if (!f.solid) paint(f.x - f.half + ring, f.y - f.half + ring, f.half * 2 - 2 * ring, [255, 255, 255]);
+  }
   for (const b of bands) {
     const bits = bandBits(b.seed, b.bits);
     for (let r = 0; r < b.rows; r++) {
@@ -150,13 +173,14 @@ function make(args) {
   mkdirSync(outDir, { recursive: true });
   // PNG = the sheet canvas (paper + marks + code area); PDF = the code-area raster that carries
   // sheetMm, which is the shape encodePDFDocument expects (same pairing the CLI uses for pack.pdf).
-  const sheetBitmap = blank.sheetMm ? renderSheetBitmap(blank) : blank;
-  writeFileSync(join(outDir, 'density-ladder.png'), encodePNG(sheetBitmap));
-  writeFileSync(join(outDir, 'density-ladder.pdf'), encodePDFDocument([blank.sheetMm ? blank : sheetBitmap]));
+  const sheetBitmap = { width: W, height: H, pixels: px, dpi, pageMm: [sheetMm.w, sheetMm.h] };
+  writeFileSync(join(outDir, 'density-ladder.png'), encodePNG({ width: W, height: H, pixels: px, dpi }));
+  writeFileSync(join(outDir, 'density-ladder.pdf'), encodePDFDocument([sheetBitmap]));
   const spec = {
     tool: 'density-ladder', version: 1,
-    profile: profileId, dpi, sheetMm, sheetName: args.sheet || 'A4',
-    layout: { width: layout.width, height: layout.height, originPx: layout.originPx, cellPx: layout.cellPx, cols: layout.cols, rows: layout.rows },
+    dpi, sheetMm, sheetName: args.sheet || 'A4',
+    width: W, height: H,
+    fiducials: fiducials.map((x) => ({ role: x.role, solid: x.solid, x: x.x, y: x.y, half: x.half })),
     bandRect: rect,
     bands,
     note: 'Print at 100% (no fit-to-page). Scan at 300/600/1200 dpi, colour, auto-crop OFF, and run --read.',
@@ -201,15 +225,11 @@ function moduleGray(rectified, b, c, r, ox = 0, oy = 0, fx = 0, fy = 0) {
 function readOne(bitmap, spec) {
   const found = findMarkers(bitmap, {});
   if (!found.ok) return { ok: false, reason: 'markers/' + found.reason };
-  // Rebuild the real layout (rectifyPage needs the fiducial list to know the canvas frame),
-  // from the profile and sheet the ladder was generated with.
-  const geom = planPage(spec.profile, {});
-  const layout = pageLayout(geom, spec.dpi, { sheetMm: spec.sheetMm });
-  // Do NOT rectify-then-sample: that resamples the page onto the canvas first, and on 2-3 px
-  // modules the second sampling lands each module a little differently -> a ~1e-3 error floor on a
-  // PRISTINE render, which would have been mistaken for physics. Instead map each module centre
-  // through the marker homography and sample the ORIGINAL image once (same math a real scan needs).
-  const cw = canvasQuad(layout);
+  // The canvas frame comes from the spec (the ladder owns its geometry), not from any profile.
+  // Do NOT rectify-then-sample: map each module centre through the marker homography and sample the
+  // ORIGINAL image once (one less interpolation, and the math a real scan needs).
+  const cw = {};
+  for (const fd of spec.fiducials) cw[fd.role] = { x: fd.x, y: fd.y };
   const H = homographyFromQuad([cw.tl, cw.tr, cw.br, cw.bl], [found.quad.tl, found.quad.tr, found.quad.br, found.quad.bl]);
   if (!H) return { ok: false, reason: 'homography-degenerate' };
   const grey = (b, c, r, ox = 0, oy = 0, fx = 0, fy = 0) => {
@@ -221,7 +241,7 @@ function readOne(bitmap, spec) {
     return (s[0] + s[1] + s[2]) / 3;
   };
   if (process.env.LADDER_DEBUG) {
-    const cwq = canvasQuad(layout);
+    const cwq = cw;
     const b0 = spec.bands[0];
     const p0 = canvasToPhoto(H, b0.x + b0.cellPx / 2, b0.y + b0.cellPx / 2);
     console.log('  DEBUG canvas tl', JSON.stringify(cwq.tl), 'quad tl', JSON.stringify(found.quad.tl));
