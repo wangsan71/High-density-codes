@@ -28,7 +28,7 @@ const HELP = `pskit <command> [options]
     --monoSafe <full|partial|off>  colour-loss protection vs capacity (default per profile)
     --dpi <n>            raster resolution (plate default 300, paper uses the profile dpi)
     --plate <mm>         printable plate edge (default 200)
-    --sheet <A4|Letter>  paper profiles only
+    --sheet <A4|A5|A6|Letter>  paper profiles only (the lattice is derived from the sheet)
     --parity <pct>       inter-page parity percentage (default per profile)
     --passphrase <pw>    ChaCha20 encrypt the payload (PBKDF2-SHA256, 150k iters)
     --format <png|tiff|pdf|both|all|stl|3mf>   default png; may be combined (png,3mf)

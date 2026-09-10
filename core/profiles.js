@@ -180,6 +180,11 @@ export function getProfile(id) {
 
 const SHEETS = {
   A4: { w: 210, h: 297 },
+  // PLAN v5: the target is more data on less paper, so the smaller sheets are first-class. The
+  // lattice is derived from the sheet inside planPage (region = sheet - 2*margin, minus the quiet
+  // zone), so an A5 page simply carries fewer cells at the same pitch -- no new profile needed.
+  A5: { w: 148, h: 210 },
+  A6: { w: 105, h: 148 },
   LETTER: { w: 215.9, h: 279.4 },
 };
 
