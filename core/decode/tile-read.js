@@ -228,7 +228,11 @@ export function findPageQuadFromTiles(img, plan, layout, opts = {}) {
     { gx: grid(idxBL).x, gy: grid(idxBL).y, ox: coarseBL.ox, oy: coarseBL.oy },
   ];
   let model = fitAffine(seed);
-  const pairs = [];
+  // Pair hits with tiles, then AVERAGE the hits that landed on the same tile. Every hit sits somewhere in
+  // that tile's plateau (up to half a module of slack); their mean is the tile's true origin to a fraction
+  // of a pixel, which is a strictly better anchor than any single hit (that difference is what turned four
+  // inconsistent corners into six unreadable tiles in round 190).
+  const byTile = new Map();
   for (const h of hits) {
     let bestT = -1;
     let bd = Infinity;
@@ -239,8 +243,14 @@ export function findPageQuadFromTiles(img, plan, layout, opts = {}) {
       if (d < bd) { bd = d; bestT = t; }
     }
     if (bd > tolerance) continue;
-    const g = grid(bestT);
-    pairs.push({ gx: g.x, gy: g.y, ox: h.ox, oy: h.oy, tile: bestT });
+    if (!byTile.has(bestT)) byTile.set(bestT, { n: 0, ox: 0, oy: 0 });
+    const acc = byTile.get(bestT);
+    acc.n++; acc.ox += h.ox; acc.oy += h.oy;
+  }
+  const pairs = [];
+  for (const [t, acc] of byTile) {
+    const g = grid(t);
+    pairs.push({ gx: g.x, gy: g.y, ox: acc.ox / acc.n, oy: acc.oy / acc.n, tile: t, n: acc.n });
   }
   if (pairs.length < 8) {
     throw new RangeError('tile-read: only ' + pairs.length + ' of ' + hits.length + ' hits agreed with the provisional ' +

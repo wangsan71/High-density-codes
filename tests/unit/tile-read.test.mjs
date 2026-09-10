@@ -230,7 +230,10 @@ test('tile-read: the page finds and fits its own corners, and a skewed page read
     }
   }
   const quad = findPageQuadFromTiles(sheared, plan, layout, { dpi, sheetW, sheetH });
-  assert.ok(quad.anchors >= 100, 'the fit must use many anchors, got ' + quad.anchors + ' of ' + quad.hits + ' hits');
+  // anchors = TILES with at least one hit (48 here); hits = individual signature matches (137). The fit
+  // uses one averaged anchor per tile, which is why both numbers are reported.
+  assert.equal(quad.anchors, plan.positions.length, 'every tile should contribute an anchor');
+  assert.ok(quad.hits >= 100, 'the scan should find many hits, got ' + quad.hits);
   assert.ok(Math.abs(quad.tl.x) <= 3 && Math.abs(quad.tl.y) <= 3, 'TL ' + JSON.stringify(quad.tl));
   assert.ok(Math.abs(quad.br.x - (W + shearPx)) <= 3, 'BR x ' + quad.br.x + ' expected ' + (W + shearPx));
   const back = readTilePage(sheared, plan, layout, dpi, { map: pageMapper([quad.tl, quad.tr, quad.br, quad.bl], W, H) });
