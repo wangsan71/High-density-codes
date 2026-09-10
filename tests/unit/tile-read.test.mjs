@@ -160,3 +160,49 @@ test('tile-read: one page homography absorbs a shear the per-tile search cannot'
   assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a 40 px page shear must read once the corners are given');
   assert.deepEqual(back.missing, []);
 });
+
+test('tile-read: with a page map, a wrecked tile is refused instead of being "found" in the wrong space', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const W = base.width;
+  const H = base.height;
+  const shearPx = 40;
+  const sheared = { width: W, height: H, dpi, pixels: new Uint8Array(W * H * 4).fill(255) };
+  for (let y = 0; y < H; y++) {
+    const shift = Math.round((shearPx * y) / (H - 1));
+    for (let x = 0; x < W; x++) {
+      const sx = x - shift;
+      if (sx < 0 || sx >= W) continue;
+      const s = (y * W + sx) * 4;
+      const d = (y * W + x) * 4;
+      sheared.pixels[d] = base.pixels[s];
+      sheared.pixels[d + 1] = base.pixels[s + 1];
+      sheared.pixels[d + 2] = base.pixels[s + 2];
+      sheared.pixels[d + 3] = 255;
+    }
+  }
+  const quad = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W + shearPx, y: H }, { x: shearPx, y: H }];
+  const map = pageMapper(quad, W, H);
+  const px = 10;
+  const toPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const pos = plan.positions[7];
+  const ox = toPx(pos.x);
+  const oy = toPx(pos.y);
+  const shift7 = Math.round((shearPx * (oy + 15)) / (H - 1));
+  // Wreck 60 data cells of tile 7 -- past what 16 RS parity bytes can repair.
+  for (let i = 0; i < 60; i++) {
+    const c = layout.dataCells[i * 13];
+    for (let y = oy + c.y * px; y < oy + (c.y + 1) * px; y++) {
+      for (let x = ox + c.x * px + shift7; x < ox + (c.x + 1) * px + shift7; x++) {
+        if (y < 0 || y >= H || x < 0 || x >= W) continue;
+        const k = (y * W + x) * 4;
+        sheared.pixels[k] = 0; sheared.pixels[k + 1] = 0; sheared.pixels[k + 2] = 0;
+      }
+    }
+  }
+  assert.throws(() => readTilePage(sheared, plan, layout, dpi, { map }), /unreadable|refusing|could not be corrected/);
+  const partial = readTilePage(sheared, plan, layout, dpi, { map, allowPartial: true });
+  assert.equal(partial.partial, true, 'the damaged tile must be reported, not guessed');
+});
