@@ -29,7 +29,9 @@ const USAGE = [
   '  node tools/make-tile-page.mjs --file payload.bin [...]',
 ].join('\n');
 
-const HEADER_BYTES = 2;
+// index, tile count, payload length (u16) -- the length is what lets a reader trim the zero padding of
+// the last tile instead of guessing where the payload ended.
+const HEADER_BYTES = 4;
 
 export function tilePageTiles(payload, plan, layout) {
   const cap = tileCapacity(plan, layout);
@@ -45,6 +47,8 @@ export function tilePageTiles(payload, plan, layout) {
     const buf = new Uint8Array(HEADER_BYTES + slice.length);
     buf[0] = t & 0xff;
     buf[1] = cap.tiles & 0xff;
+    buf[2] = (payload.length >> 8) & 0xff;
+    buf[3] = payload.length & 0xff;
     buf.set(slice, HEADER_BYTES);
     tiles.push(fillTileModules(layout.dataCells, buf));
   }
