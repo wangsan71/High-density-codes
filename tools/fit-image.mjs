@@ -55,6 +55,40 @@ function downscale(img, k) {
   return { width: w, height: h, pixels: out, dpi: img.dpi || 300 };
 }
 
+/** Nearest-neighbour upscale back to a target size (what a viewer would show of the fitted image). */
+function upscaleNearest(img, w, h) {
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const sy = Math.min(img.height - 1, Math.floor((y * img.height) / h));
+    for (let x = 0; x < w; x++) {
+      const sx = Math.min(img.width - 1, Math.floor((x * img.width) / w));
+      const o = (sy * img.width + sx) * 4;
+      const q = (y * w + x) * 4;
+      out[q] = img.pixels[o]; out[q + 1] = img.pixels[o + 1]; out[q + 2] = img.pixels[o + 2]; out[q + 3] = img.pixels[o + 3];
+    }
+  }
+  return { width: w, height: h, pixels: out, dpi: img.dpi };
+}
+
+/**
+ * PSNR of the round trip a receiver would actually see: fitted image scaled back up to the original
+ * size, compared against the original. G-IMG asks for >= 30 dB, so the number has to be printed here,
+ * where the pixels are, rather than asserted somewhere else.
+ */
+function psnrAgainst(original, fitted) {
+  const back = upscaleNearest(fitted, original.width, original.height);
+  let se = 0;
+  const n = original.width * original.height;
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < 3; c++) {
+      const d = original.pixels[i * 4 + c] - back.pixels[i * 4 + c];
+      se += d * d;
+    }
+  }
+  const mse = se / (n * 3);
+  return mse === 0 ? Infinity : 10 * Math.log10((255 * 255) / mse);
+}
+
 function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -115,7 +149,9 @@ try {
     if (!chosen) throw new Error('fit-image: even 1/' + maxFactor + ' does not fit ' + pages + ' page(s) (budget ' + budget + ' B); raise --pages, use a denser profile, or shrink the picture elsewhere');
     const outPath = resolve(args.out || join(dirnameOf(inPath), basename(inPath).replace(/\.png$/i, '') + '-fit' + chosen.k + '.png'));
     writeFileSync(outPath, chosen.bytes);
+    const psnr = psnrAgainst(img, chosen.small);
     console.log('  LOSSY: 1/' + chosen.k + ' downscale, ' + img.width + 'x' + img.height + ' -> ' + chosen.small.width + 'x' + chosen.small.height);
+    console.log('  quality   PSNR ' + (psnr === Infinity ? 'inf' : psnr.toFixed(2)) + ' dB after scaling back to ' + img.width + 'x' + img.height + (psnr >= 30 ? '  (G-IMG criterion >= 30 dB: met)' : '  (G-IMG criterion >= 30 dB: NOT met -- raise --pages or accept a coarser picture)'));
     console.log('  wrote     ' + outPath + ' (' + chosen.bytes.length + ' B, compressed ' + chosen.zipped + ' B)');
     console.log('  next      node cli/pskit.mjs send "' + outPath + '" --profile ' + profileId + (args.sheet ? ' --sheet ' + args.sheet : '') + ' --pages ' + pages + ' --format png,pdf --out <dir>');
   }
