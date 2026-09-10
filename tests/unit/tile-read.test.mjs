@@ -71,5 +71,63 @@ test('tile-read: Reed-Solomon repairs a few damaged cells, and too much damage i
   // Wreck 40 cells of the same tile: beyond what the parity can repair, so it must be refused by name
   // rather than decoded into different bytes.
   for (let k = 0; k < 40; k++) paintCell(5, 200 + k * 3, true);
-  assert.throws(() => readTilePage(img, plan, layout, dpi), /could not be corrected|fails its CRC16/);
+  // The refusal is now at the PAGE level and says so: a tile that cannot be repaired makes the whole
+  // page unreadable rather than a payload with a hole in it.
+  assert.throws(() => readTilePage(img, plan, layout, dpi), /refusing rather than returning a payload with holes|could not be corrected/);
+});
+
+test('tile-read: straight, nudged and turned tiles all read, and a hole is refused', () => {
+  const payload = new Uint8Array(2000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 41 + 13) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const img = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const px = 10;
+  const side = layout.modules * px;
+  const toPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const spin = (tileIndex, quarterTurns) => {
+    const pos = plan.positions[tileIndex];
+    const ox = toPx(pos.x);
+    const oy = toPx(pos.y);
+    const copy = new Uint8Array(side * side * 4);
+    for (let y = 0; y < side; y++) {
+      for (let x = 0; x < side; x++) {
+        const s = ((oy + y) * img.width + ox + x) * 4;
+        const d = (y * side + x) * 4;
+        copy[d] = img.pixels[s]; copy[d + 1] = img.pixels[s + 1]; copy[d + 2] = img.pixels[s + 2]; copy[d + 3] = 255;
+      }
+    }
+    for (let y = 0; y < side; y++) {
+      for (let x = 0; x < side; x++) {
+        let sx = x, sy = y;
+        for (let i = 0; i < quarterTurns; i++) { const nx = side - 1 - sy; sy = sx; sx = nx; }
+        const s = (sy * side + sx) * 4;
+        const d = ((oy + y) * img.width + ox + x) * 4;
+        img.pixels[d] = copy[s]; img.pixels[d + 1] = copy[s + 1]; img.pixels[d + 2] = copy[s + 2]; img.pixels[d + 3] = 255;
+      }
+    }
+  };
+  spin(3, 2);
+  const back = readTilePage(img, plan, layout, dpi);
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a spun tile must still be read');
+  assert.deepEqual(back.missing, []);
+  assert.equal(back.partial, false);
+  assert.ok(back.hows.straight >= 40, 'most tiles read straight: ' + JSON.stringify(back.hows));
+  assert.equal(back.hows.rot180, 1, 'the spun tile is the one that needed turning');
+  // Now wreck one tile beyond repair: the page must be refused, not returned with a hole.
+  const pos = plan.positions[7];
+  const ox7 = toPx(pos.x);
+  const oy7 = toPx(pos.y);
+  for (let i = 0; i < 60; i++) {
+    const c = layout.dataCells[i * 11];
+    for (let y = oy7 + c.y * px; y < oy7 + (c.y + 1) * px; y++) {
+      for (let x = ox7 + c.x * px; x < ox7 + (c.x + 1) * px; x++) {
+        const k = (y * img.width + x) * 4;
+        img.pixels[k] = 0; img.pixels[k + 1] = 0; img.pixels[k + 2] = 0;
+      }
+    }
+  }
+  assert.throws(() => readTilePage(img, plan, layout, dpi), /unreadable .*refusing rather than returning a payload with holes/);
+  const partial = readTilePage(img, plan, layout, dpi, { allowPartial: true });
+  assert.equal(partial.partial, true);
+  assert.ok(partial.missing.includes(7), 'the wrecked tile is reported: ' + JSON.stringify(partial.missing));
 });

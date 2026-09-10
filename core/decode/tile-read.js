@@ -227,21 +227,54 @@ export function readTile(img, plan, layout, t, dpi, offset) {
 }
 
 /** Read every tile and reassemble the payload. Missing tiles are reported, never guessed. */
-export function readTilePage(img, plan, layout, dpi) {
-  const first = readTile(img, plan, layout, 0, dpi);
-  const per = first.bytesPerTile;
-  const out = new Uint8Array(first.length);
-  const seen = new Uint8Array(first.count);
-  const tiles = [];
-  for (let t = 0; t < first.count; t++) {
-    const r = readTile(img, plan, layout, t, dpi);
-    tiles.push({ index: r.index, bytes: r.bytes.length });
-    seen[t] = 1;
-    const from = t * per;
-    if (from >= first.length) continue;
-    out.set(r.slice.subarray(0, Math.min(per, first.length - from)), from);
+/**
+ * Read one tile the way a stranger with a phone would: straight, then nudged, then turned. Every attempt
+ * is judged by the same CRC the reader trusts, so "it read" means "it validated" and nothing else.
+ */
+function readTileAuto(img, plan, layout, t, dpi) {
+  try {
+    return { tile: readTile(img, plan, layout, t, dpi), how: 'straight' };
+  } catch (e) {
+    try {
+      const found = findTileOffset(img, plan, layout, t, { dpi });
+      return { tile: readTile(img, plan, layout, t, dpi, found), how: found.rot ? 'found+rot' + found.rot : 'found+' + found.dx + ',' + found.dy };
+    } catch (e2) {
+      const rot = detectTileRotation(img, plan, layout, t, { dpi });
+      return { tile: readTile(img, plan, layout, t, dpi, { dx: 0, dy: 0, rot: rot.rot }), how: 'rot' + rot.rot };
+    }
   }
+}
+
+export function readTilePage(img, plan, layout, dpi, opts = {}) {
+  const first = readTileAuto(img, plan, layout, 0, dpi);
+  const per = first.tile.bytesPerTile;
+  const out = new Uint8Array(first.tile.length);
+  const tiles = [{ index: first.tile.index, bytes: first.tile.bytes.length, how: first.how }];
+  const hows = {};
+  hows[first.how] = 1;
+  out.set(first.tile.slice.subarray(0, Math.min(per, first.tile.length)), 0);
   const missing = [];
-  for (let t = 0; t < seen.length; t++) if (!seen[t]) missing.push(t);
-  return { payload: out, length: first.length, tiles, missing, bytesPerTile: per };
+  for (let t = 1; t < first.tile.count; t++) {
+    let got;
+    try {
+      got = readTileAuto(img, plan, layout, t, dpi);
+    } catch (e) {
+      missing.push(t);
+      continue;
+    }
+    tiles.push({ index: got.tile.index, bytes: got.tile.bytes.length, how: got.how });
+    hows[got.how] = (hows[got.how] || 0) + 1;
+    const from = t * per;
+    if (from >= first.tile.length) continue;
+    out.set(got.tile.slice.subarray(0, Math.min(per, first.tile.length - from)), from);
+  }
+  // A page with a hole in it is NOT a page: returning a short payload and calling it a success is the
+  // "looks successful but is wrong" failure this project refuses to ship. Partial reads happen only when
+  // the caller asks for them, and then they are labelled.
+  if (missing.length && !opts.allowPartial) {
+    throw new RangeError('tile-read: ' + missing.length + ' tile(s) unreadable (' + missing.slice(0, 8).join(', ') +
+      (missing.length > 8 ? ', ...' : '') + ') -- refusing rather than returning a payload with holes' +
+      ' (pass { allowPartial: true } to get the readable part, labelled)');
+  }
+  return { payload: out, length: first.tile.length, tiles, missing, bytesPerTile: per, hows, partial: missing.length > 0 };
 }
