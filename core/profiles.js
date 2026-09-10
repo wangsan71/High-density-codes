@@ -135,7 +135,8 @@ export const PROFILES = {
 };
 
 export const PROFILE_IDS = Object.keys(PROFILES);
-export const DEFAULT_PROFILE = 'PL-D2';
+// The plate line is retired (PLAN-V5 section 3), so the fallback is a paper profile now.
+export const DEFAULT_PROFILE = 'P-M1-300';
 
 /**
  * The sender's and receiver's profile dropdown labels, and the one predicate behind the warning.
