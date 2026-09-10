@@ -24,6 +24,7 @@ import { decodePNG } from '../core/decode/png-read.js';
 import { readTilePage } from '../core/decode/tile-read.js';
 import { SHEETS } from '../core/profiles.js';
 import { crc16 } from '../core/crc.js';
+import { rsEncode } from '../core/rs.js';
 
 const USAGE = [
   'make-tile-page -- draw a tiled page (QR-style: every tile has its own finder patterns)',
@@ -39,10 +40,14 @@ const USAGE = [
 // (it is also what makes the locator able to tell a good alignment from a plausible one).
 const HEADER_BYTES = 4;
 export const CRC_BYTES = 2;
+// Per-tile Reed-Solomon. rsEncode()/rsDecode() are the low-level pair the whole-page protocol uses
+// (core/protocol.js:224/245); the *Blocks() wrappers return objects, which is what broke an earlier
+// attempt at exactly this. k + RS_PARITY fills the tile's data cells: 82 + 16 + 4 header + 2 CRC = 104.
+export const RS_PARITY = 16;
 
 export function tilePageTiles(payload, plan, layout) {
   const cap = tileCapacity(plan, layout);
-  const per = cap.bytesPerTile - HEADER_BYTES - CRC_BYTES;
+  const per = cap.bytesPerTile - HEADER_BYTES - CRC_BYTES - RS_PARITY;
   if (per < 1) throw new RangeError('make-tile-page: a tile of ' + cap.bytesPerTile + ' B cannot hold a ' + HEADER_BYTES + '-byte header');
   if (payload.length > per * cap.tiles) {
     throw new RangeError('make-tile-page: ' + payload.length + ' B does not fit a tiled sheet of ' + cap.tiles +
@@ -56,8 +61,15 @@ export function tilePageTiles(payload, plan, layout) {
     buf[1] = cap.tiles & 0xff;
     buf[2] = (payload.length >> 8) & 0xff;
     buf[3] = payload.length & 0xff;
-    buf.set(slice, HEADER_BYTES);
-    const sum = crc16(buf.subarray(0, buf.length - CRC_BYTES));
+    const block = new Uint8Array(per);
+    block.set(slice, 0);
+    buf.set(rsEncode(block, RS_PARITY), HEADER_BYTES);
+    // The CRC covers the header and the DATA (not the RS parity): it judges what correction produced,
+    // which is the only thing the reader actually trusts.
+    const check = new Uint8Array(HEADER_BYTES + per);
+    check.set(buf.subarray(0, HEADER_BYTES), 0);
+    check.set(block, HEADER_BYTES);
+    const sum = crc16(check);
     buf[buf.length - 2] = (sum >> 8) & 0xff;
     buf[buf.length - 1] = sum & 0xff;
     tiles.push(fillTileModules(layout.dataCells, buf));

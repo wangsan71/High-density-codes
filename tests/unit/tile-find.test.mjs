@@ -54,8 +54,8 @@ test('tile-read: a tile shifted by a few pixels is still found and still reads',
     assert.equal(found.score, found.maxScore, 'all finder probes should agree');
     const tile = readTile(moved, plan, layout, 10, dpi, found);
     assert.equal(tile.index, 10);
-    // 98 usable bytes per tile now (4-byte header + 2-byte CRC16 out of 104).
-    assert.deepEqual(Array.from(tile.slice), Array.from(payload.subarray(980, 1078)), 'tile 10 carries bytes 980..1077');
+    // 82 usable bytes per tile (104 raw - 4 header - 2 CRC16 - 16 RS parity).
+    assert.deepEqual(Array.from(tile.slice), Array.from(payload.subarray(820, 902)), 'tile 10 carries bytes 820..901');
   }
 });
 

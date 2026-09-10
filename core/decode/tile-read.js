@@ -12,9 +12,11 @@
 
 import { modulePixels } from '../render/tilepage.js';
 import { crc16 } from '../crc.js';
+import { rsDecode } from '../rs.js';
 
 const HEADER_BYTES = 4;
 const CRC_BYTES = 2;
+const RS_PARITY = 16;
 
 /**
  * Find where a tile actually sits, instead of assuming it sits where the plan says.
@@ -169,17 +171,27 @@ export function readTile(img, plan, layout, t, dpi, offset) {
   const length = (bytes[2] << 8) | bytes[3];
   if (index !== t) throw new RangeError('tile-read: tile ' + t + ' declares index ' + index + ' -- the page and the geometry disagree');
   if (count !== plan.positions.length) throw new RangeError('tile-read: tile ' + t + ' declares ' + count + ' tiles but the plan has ' + plan.positions.length);
-  const per = bytes.length - HEADER_BYTES - CRC_BYTES;
+  const per = bytes.length - HEADER_BYTES - CRC_BYTES - RS_PARITY;
   if (length > per * count) throw new RangeError('tile-read: header claims ' + length + ' bytes, which the sheet cannot hold');
-  // The CRC is checked BEFORE the slice is trusted: a tile read at the wrong alignment produces
-  // plausible-looking bytes, and the only thing that distinguishes them from correct ones is this check.
-  const want = (bytes[bytes.length - 2] << 8) | bytes[bytes.length - 1];
-  const got = crc16(bytes.subarray(0, bytes.length - CRC_BYTES));
-  if (want !== got) {
-    throw new RangeError('tile-read: tile ' + t + ' fails its CRC16 (header says ' + want.toString(16) + ', the pixels say ' + got.toString(16) + ') -- the tile is misread, not empty');
+  // Reed-Solomon repairs a few misread cells, then the CRC judges the result: correction alone cannot say
+  // it failed, detection alone cannot save a tile with one bad cell. Together they turn a misread tile
+  // into a named refusal instead of wrong bytes.
+  const codeword = bytes.subarray(HEADER_BYTES, bytes.length - CRC_BYTES);
+  const dec = rsDecode(codeword, RS_PARITY);
+  if (!dec.ok) {
+    throw new RangeError('tile-read: tile ' + t + ' could not be corrected (' + (dec.reason || 'unknown') + ', ' + dec.errors + ' error(s))');
   }
-  const slice = bytes.subarray(HEADER_BYTES, HEADER_BYTES + Math.max(0, Math.min(per, length - t * per)));
-  return { index, count, length, slice, bytes, bytesPerTile: per };
+  const data = dec.cw.subarray(0, per);
+  const check = new Uint8Array(HEADER_BYTES + per);
+  check.set(bytes.subarray(0, HEADER_BYTES), 0);
+  check.set(data, HEADER_BYTES);
+  const want = (bytes[bytes.length - 2] << 8) | bytes[bytes.length - 1];
+  const got = crc16(check);
+  if (want !== got) {
+    throw new RangeError('tile-read: tile ' + t + ' fails its CRC16 after correction (header says ' + want.toString(16) + ', the pixels say ' + got.toString(16) + ') -- the tile is misread, not empty');
+  }
+  const slice = data.subarray(0, Math.max(0, Math.min(per, length - t * per)));
+  return { index, count, length, slice, bytes, bytesPerTile: per, corrected: dec.errors + dec.erasures };
 }
 
 /** Read every tile and reassemble the payload. Missing tiles are reported, never guessed. */
