@@ -57,6 +57,26 @@ export function tilePageTiles(payload, plan, layout) {
   return { tiles, capacity: cap, bytesPerTile: per, usedBytes: payload.length };
 }
 
+/**
+ * Read a tiled page back from PNG bytes. Exported so it can be tested without a file system: the CLI mode
+ * below is a thin wrapper around exactly this call.
+ */
+export function readTilePageFromPng(pngBytes, opts = {}) {
+  const img = decodePNG(pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes));
+  const tileMm = opts.tile === undefined ? 30 : opts.tile;
+  const modules = opts.modules === undefined ? 33 : opts.modules;
+  // The sheet size is derived from the raster and its dpi rather than from a profile table: the file knows
+  // how big it is, and a page that was printed at 100% keeps those numbers.
+  const plan = planTiles({
+    sheetW: (img.width * 25.4) / img.dpi,
+    sheetH: (img.height * 25.4) / img.dpi,
+    tileMm, marginMm: 9, gapMm: 2,
+  });
+  const layout = tileLayout({ modules, finder: 7, quiet: 1 });
+  const back = readTilePage(img, plan, layout, img.dpi);
+  return { ...back, img, plan, layout };
+}
+
 function parseArgs(argv) {
   const out = { tile: 30, dpi: 300, sheet: 'A4', modules: 33, text: null, file: null, outPng: null };
   const rest = [];
@@ -82,11 +102,8 @@ function main() {
   if (args.mode === 'read') {
     // Read a page back from a PNG. The pixels are whatever the file holds -- a print-and-scan round trip
     // is the same code path with scanned pixels in place of rendered ones, once a photo locator exists.
-    const img = decodePNG(new Uint8Array(readFileSync(resolve(args.readFrom))));
-    const tileW = args.tile;
-    const plan = planTiles({ sheetW: img.width * 25.4 / img.dpi, sheetH: img.height * 25.4 / img.dpi, tileMm: tileW, marginMm: 9, gapMm: 2 });
-    const layout = tileLayout({ modules: args.modules, finder: 7, quiet: 1 });
-    const back = readTilePage(img, plan, layout, img.dpi);
+    const back = readTilePageFromPng(new Uint8Array(readFileSync(resolve(args.readFrom))), { tile: args.tile, modules: args.modules });
+    const { img, plan } = back;
     const outPath = resolve(args.outPng || 'tile-payload.bin');
     writeFileSync(outPath, back.payload);
     console.log('make-tile-page --read: ' + img.width + 'x' + img.height + ' px @ ' + img.dpi + ' dpi -> ' +

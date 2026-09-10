@@ -126,6 +126,13 @@
 
 ## 已知风险 / 待办
 
+### 第 167 轮（**把上一轮记下的欠账还掉：瓦片的 PNG 读回路径抽成可测函数 + 2 条单测**）
+
+**① 做了什么**：`tools/make-tile-page.mjs` 把 `--read` 里的逻辑抽成导出的 `readTilePageFromPng(pngBytes, opts)`（CLI 模式变成它的一层薄壳），新增 `tests/unit/tile-page-file.test.mjs` 2 条 —— 覆盖"真 PNG 字节往返"（`encodePNG` → `decodePNG`），这正是命令行能证明、但将来重构可能悄悄弄坏的那一段。
+
+**② 实测**：600 B 伪随机载荷 ⇒ 渲染 → PNG → 读回**逐字节相同**、`missing = []`、网格 6x8/dpi 300 都对；4 B 载荷 ⇒ 长度裁到 **4**（不是补零的 100）；**阳性对照**：把同一张页按 25 mm 瓦片去读 ⇒ **具名抛错**（网格不符，被 `readTile` 的头校验挡住）—— 证明"参数错了不会被当成读成功"。
+
+**③ 门限**：单测 **`tests 423 · pass 423 · fail 0`**（第 166 轮的 421 + 本轮 2）；`check-docs-tables` clean。**下一块砖**：照片那一层（透视/旋转）或把瓦片接进正式收发流程。
 ### 第 166 轮（**瓦片这条路有了往返命令：`make-tile-page --read` 把一张页 PNG 读回载荷（实测 29 B 逐字节复原）**）
 
 **① 做了什么**：`tools/make-tile-page.mjs` 增加 `--read <page.png> [--out payload.bin]`：用 `decodePNG` 读像素、按**像素与 dpi** 反推纸张尺寸与网格、`readTilePage()` 拼回载荷并落盘。⇒ 瓦片这条路现在**一条命令写页、一条命令读回**，用户不必写代码。
