@@ -30,7 +30,7 @@ import {
   polyDegLF,
 } from './gf256.js';
 
-export const RS_MAX_N = 255;
+const RS_MAX_N = 255;
 export const RS_FCR = 0;
 
 const genCache = new Map();

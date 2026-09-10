@@ -27,13 +27,13 @@ import { sha256 } from './hash.js';
 import { compress, decompress } from './deflate.js';
 import { chacha20Xor, deriveKey } from './chacha20.js';
 
-export const NONCE_LEN = 12;
+const NONCE_LEN = 12;
 
 /* ------------------------------------------------------------------ */
 /* geometry-derived helpers                                            */
 /* ------------------------------------------------------------------ */
 
-export function channelNames(geom) {
+function channelNames(geom) {
   const names = geom.channels.map((c) => c.name);
   if (geom.ecc.mode === 'unequal') {
     return { primary: 'colour', secondary: 'shape', bits: Object.fromEntries(geom.channels.map((c) => [c.name, c.bits])) };
@@ -598,7 +598,7 @@ async function finish(pageContents) {
 /* small utilities                                                     */
 /* ------------------------------------------------------------------ */
 
-export function sameBytes(a, b) {
+function sameBytes(a, b) {
   if (!a || !b || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;

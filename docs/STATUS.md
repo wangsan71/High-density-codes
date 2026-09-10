@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 158 轮（**死代码清理：一次清掉 34 个「仅内部使用」的导出（候选 53 → 19），剩 19 个「文件里只有定义」的留给下一轮慎重处理**）
+
+**① 做了什么**：把候选按同一把尺子分成两类 —— `grep` **自己文件内**出现 ≥2 次＝定义 + 内部使用 ⇒ **只去 `export`**（本轮 34 个，覆盖 `core/decode`、`core/mesh`、`core/render`、`core/rs.js`、`core/profiles.js`、`core/protocol.js`、`core/palette.js`、`core/nozzles.js`、`core/gf256.js`、`core/frame.js`、`core/deflate.js`）；**恰好 1 次**＝文件里只有定义 ⇒ 属「要删定义」那一级，**本轮一个都没碰**（19 个已列名登记）。
+
+**② 为什么不碰那 19 个**：第 155 轮那次误删（删掉仍在使用的 `decodePage`）就是栽在自动定函数边界上。按新规则，删定义必须逐个确认括号配对、不许向上回溯，且删完立刻复跑单测 —— 这值得单独一轮，不该塞进批量里。
+
+**③ 门限**：单测 **`tests 413 · pass 413 · fail 0`**；`build-web` exit 0；`check-dist` **13 pass / 0 fail**；`check-docs-tables` clean；候选 **53 → 19**（累计：82 → 78 → 75 → 74 → 68 → 53 → 19）。
+
+**④ 下一轮**：①把那 19 个逐个处理（先查是否在 docs/ref 里出现 —— 例如 `DEFAULT_PROFILE` 在 `docs/STATUS.md` 里，属「文档即接口」，要保留）；②然后回 P4 第三块砖。
 ### 第 157 轮（**死代码清理：又清掉 15 个"仅内部使用"的导出（候选 68 → 53），仍属零风险那一级**）
 
 **① 做了什么**：继续只做①级清理（去掉 `export`、函数体不动）：`core/calibrate/mtfplate.js` 四个常量、`core/calibrate/readmtf.js` 三个常量、`core/chacha20.js` 四个 `rotl*` 旋转助手、`core/decode/calibrate.js` 的 `levelAreas` 与 `integrateLevelAreas`、`core/decode/fiducial.js` 的 `medianInknessRatio` 与 `inkRangeRatio` —— 共 **15 个**。

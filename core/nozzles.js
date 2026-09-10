@@ -39,7 +39,7 @@ export function getNozzle(id) {
 }
 
 /** Nearest integer number of extrusion widths that is >= `mm`. */
-export function ewCountAtLeast(mm, ewMm) {
+function ewCountAtLeast(mm, ewMm) {
   const k = Math.ceil(round4(mm / ewMm) - 1e-9);
   return Math.max(1, k);
 }

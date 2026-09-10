@@ -19,10 +19,10 @@ import { getNozzle, pitchFor, quantizePitch, UNIVERSAL_PITCH_MM } from './nozzle
 import { QUIET_CELLS } from './render/constants.js';
 import { minCellEwFor } from './render/glyphs.js';
 
-export const MEDIUM = { PAPER: 'paper', PLATE: 'plate' };
+const MEDIUM = { PAPER: 'paper', PLATE: 'plate' };
 
 /** bits per level count */
-export const bitsOfLevels = (levels) => {
+const bitsOfLevels = (levels) => {
   const b = Math.round(Math.log2(levels));
   if (1 << b !== levels) throw new RangeError('levels must be a power of two');
   return b;
@@ -365,7 +365,7 @@ export function planPage(profileId, opts = {}) {
  *   'off'     data spans every channel with a standard light parity budget ->
  *             maximum density, no colour-loss protection at all.
  */
-export function planEcc(p, channels, parityPct, opts = {}) {
+function planEcc(p, channels, parityPct, opts = {}) {
   const byName = Object.fromEntries(channels.map((c) => [c.name, c]));
   const monoSafe = opts.monoSafe || p.monoSafe || (p.monoRecoverable ? 'full' : 'off');
   const colour = byName.colour;
@@ -446,7 +446,7 @@ export function planEcc(p, channels, parityPct, opts = {}) {
 }
 
 /** Inter-page MDS budget: parityPct% extra pages, n = k + p <= 255. */
-export function planInter(dataBytesPerPage, parityPct) {
+function planInter(dataBytesPerPage, parityPct) {
   const p = Math.max(2, Math.ceil((parityPct / 100) * 255 * 0.25));
   // choose the largest systematic n <= 255 with at least parityPct% parity
   const nsym = Math.max(2, Math.round((255 * parityPct) / (100 + parityPct)));

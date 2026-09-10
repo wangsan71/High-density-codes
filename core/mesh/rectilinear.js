@@ -20,7 +20,7 @@
  */
 
 /** 坐标量化位数：与 weldTriangles/3MF 的 6 位小数一致，避免 1e-15 级差异把边算成两条。 */
-export const COORD_QUANT = 1e6;
+const COORD_QUANT = 1e6;
 
 const q = (v) => Math.round(v * COORD_QUANT);
 

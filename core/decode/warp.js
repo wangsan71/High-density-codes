@@ -11,7 +11,7 @@ import { homographyFromQuad, apply, inv3, sampleBilinear } from './transform.js'
  */
 
 /** Corner-marker centres in canonical canvas pixels, keyed by role. */
-export function canvasQuad(layout) {
+function canvasQuad(layout) {
   const out = {};
   for (const f of layout.fiducials) out[f.role] = { x: f.x, y: f.y };
   if (!(out.tl && out.tr && out.br && out.bl)) throw new RangeError('canvasQuad: layout has no fiducials');

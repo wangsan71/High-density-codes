@@ -53,7 +53,7 @@ export const PALETTES = {
   },
 };
 
-export const PALETTE_IDS = Object.keys(PALETTES);
+const PALETTE_IDS = Object.keys(PALETTES);
 
 export function getPalette(id) {
   const p = PALETTES[id];

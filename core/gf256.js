@@ -13,9 +13,9 @@
  * Zero dependency, synchronous, runs on Node >= 20 and in browsers (no WebCrypto).
  */
 
-export const GF_POLY = 0x11d;
+const GF_POLY = 0x11d;
 export const GF_Q = 256; // field size
-export const GF_M = 255; // multiplicative group order
+const GF_M = 255; // multiplicative group order
 export const GF_PRIM = 2; // primitive element α
 
 const EXP = new Uint8Array(512);

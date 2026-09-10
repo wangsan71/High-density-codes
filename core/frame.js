@@ -48,7 +48,7 @@ export const PAGE_KIND = { DATA: 0, PARITY: 1 };
 
 const CODE_ORDER = PROFILE_IDS.slice();
 export const PROFILE_CODES = Object.fromEntries(CODE_ORDER.map((id, i) => [id, i]));
-export const PROFILE_BY_CODE = Object.fromEntries(CODE_ORDER.map((id, i) => [i, id]));
+const PROFILE_BY_CODE = Object.fromEntries(CODE_ORDER.map((id, i) => [i, id]));
 
 export function nozzleCode(id) {
   if (!id) return 0;

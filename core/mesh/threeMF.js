@@ -77,13 +77,13 @@ const METHOD_STORE = 0;
 const METHOD_DEFLATE = 8;
 
 /** 坐标文本的小数位数；与 `plate.js:WELD_DECIMALS` 同值，写死不用环境变量。 */
-export const COORD_DECIMALS = 6;
+const COORD_DECIMALS = 6;
 
 /** 编码器版本：进 ZIP 注释? 不，进 XML metadata，且不含时间。 */
-export const THREE_MF_PRODUCER = 'PSKT pskit M5/1 (hand-written OPC writer, zero dependency)';
+const THREE_MF_PRODUCER = 'PSKT pskit M5/1 (hand-written OPC writer, zero dependency)';
 
 /** STL 侧不许"改进"成水密声明；3MF 侧的说法在这里。 */
-export const MANIFOLD_NOTE =
+const MANIFOLD_NOTE =
   'watertightness is asserted per 3MF object (every undirected edge used exactly twice, consistent outward orientation, positive signed volume); ' +
   'objects may touch or overlap each other - that is not a boolean union and is never claimed (MESH-CONTRACT.md §4)';
 

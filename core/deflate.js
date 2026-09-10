@@ -69,7 +69,7 @@ export const MAGIC = new Uint8Array([0x50, 0x53, 0x5a, 0x31]); // "PSZ1"
 export const METHOD_STORED = 0x00;
 export const METHOD_DEFLATE = 0x01;
 export const HEADER_SIZE = 10;
-export const MAX_ORIGINAL_LENGTH = 0xffffffff;
+const MAX_ORIGINAL_LENGTH = 0xffffffff;
 
 /* ------------------------------------------------------------------ */
 /* RFC 1951 sec. 3.2.5 length / distance tables                        */

@@ -24,7 +24,7 @@ export { QUIET_CELLS, FID_CELLS, ECHO_COLS, MIN_CELL_PX };
  * rotation of the sheet can never be mistaken for a valid page.
  */
 
-export const ECHO_ROWS = (HEADER_LEN * 8) / ECHO_COLS; // 8 rows of 56 bits
+const ECHO_ROWS = (HEADER_LEN * 8) / ECHO_COLS; // 8 rows of 56 bits
 
 /**
  * @param {object} geom a planned page from core/profiles.js#planPage
@@ -182,7 +182,7 @@ export function pageLayout(geom, dpi, opts = {}) {
 }
 
 /** Inverse of pageLayout's geometry for the decoder: cell size and origin from three fiducials. */
-export function layoutFromFiducials(fid, geom) {
+function layoutFromFiducials(fid, geom) {
   const tl = fid.find((f) => f.role === 'tl');
   const tr = fid.find((f) => f.role === 'tr');
   const bl = fid.find((f) => f.role === 'bl');

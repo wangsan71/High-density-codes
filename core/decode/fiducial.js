@@ -563,7 +563,7 @@ function detectIn(bin, opts) {
  * opposite sides agree within tolerance, and exactly one corner must be hollow
  * at the bottom right of that ordering (which is what fixes rotation).
  */
-export function buildQuad(list, bin, region) {
+function buildQuad(list, bin, region) {
   if (list.length < 3) return { ok: false, reason: 'too-few-candidates', need: 4, have: list.length };
   if (list.length === 3) {
     // Exactly three same-size squares and no fourth. Two operationally opposite situations

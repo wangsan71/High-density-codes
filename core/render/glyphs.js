@@ -22,14 +22,14 @@
  */
 
 /** Outer radius of the reference annulus (fraction of the cell edge). */
-export const ANNULUS_OUTER = 0.47;
+const ANNULUS_OUTER = 0.47;
 /**
  * Cell width (in extrusion widths) at or above which the ideal fractional
  * geometry is used as-is: the extrusion is now so fine relative to the cell that
  * rounding to whole EWs costs less than the process noise already present, so
  * quantising would be theatre. Also the ceiling of the quantisation search.
  */
-export const IDEAL_CROSSOVER_EW = 24;
+const IDEAL_CROSSOVER_EW = 24;
 /** Inner radius of the reference annulus. */
 export const ANNULUS_INNER = 0.38;
 /** Annulus area as a fraction of the cell area: pi*(R^2 - r^2), cell = 1 unit^2. */
@@ -54,11 +54,11 @@ MEASURE.bandGuardArea = Math.PI * (MEASURE.bandOut ** 2 - MEASURE.bandIn ** 2);
 /** Multiply a guard-band coverage sum by this to estimate the full annulus area. */
 MEASURE.bandScale = ANNULUS_AREA / MEASURE.bandGuardArea;
 /** Largest dot radius we ever print (rho == RHO_HI). */
-export const MAX_DOT_RADIUS = 0.28;
+const MAX_DOT_RADIUS = 0.28;
 
 /** Smallest / largest rho we ever print. */
-export const RHO_LO = 0.3;
-export const RHO_HI = (Math.PI * MAX_DOT_RADIUS ** 2) / ANNULUS_AREA;
+const RHO_LO = 0.3;
+const RHO_HI = (Math.PI * MAX_DOT_RADIUS ** 2) / ANNULUS_AREA;
 
 /** Target rho for a shape level. Level 0 prints no dot at all. */
 export function rhoFor(level, levels) {

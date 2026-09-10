@@ -26,13 +26,13 @@ const HEADER_BYTES = 80;
 const BYTES_PER_TRIANGLE = 50;
 
 /** 面积小于该值的三角形视为退化（mm²）。真实最小特征 (~0.05mm 格) ≫ 此值。 */
-export const DEGENERATE_AREA_EPS = 1e-15;
+const DEGENERATE_AREA_EPS = 1e-15;
 
 /** 头里的固定前缀（同时用作默认 solid 名）。 */
 const STL_HEADER_PREFIX = 'PSKT/';
 
 /** STL 无共享顶点拓扑 —— 这句话不许被"改进"成水密声明。 */
-export const WATERTIGHT_NOTE =
+const WATERTIGHT_NOTE =
   'STL has no shared-vertex topology; watertightness is asserted by the 3MF path, not here';
 
 /** 二进制 STL 的字节数：84 + 50*n。 */
@@ -75,7 +75,7 @@ export function solidHeader(name = 'PSKT', triangleCount = 0) {
  * 由顶点顺序（右手定则）求单位法向。退化 → [0, 0, 0]。
  * @returns {number[]}
  */
-export function triangleNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
+function triangleNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
   const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
   const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
   let nx = e1y * e2z - e1z * e2y;

@@ -81,8 +81,8 @@ export const WELD_DECIMALS = 6;
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /** 圆分段下限/上限（偶数）：24 段 ⇒ 多边形面积偏差 (2π/24)²/6 ≈ 1.1%。 */
-export const MIN_FACETS = 24;
-export const MAX_FACETS = 96;
+const MIN_FACETS = 24;
+const MAX_FACETS = 96;
 
 /** G8 §6.3 判据：逐格投影面积差 <8%。 */
 export const PROJECTION_TOL_PCT = 8;
@@ -118,7 +118,7 @@ export function reliefSegments(outerRadiusMm, ewMm) {
 }
 
 /** 该 shape 档的中心圆点比例半径 —— 与 `glyphMaskForLevel` 的分支**逐字同构**。 */
-export function dotFractionForLevel(level, geo) {
+function dotFractionForLevel(level, geo) {
   if (geo && geo.dot) return geo.dot[level] ?? 0;
   // 理想几何没有量化点径表，glyphMaskForLevel 走的是 rhoFor -> dotRadiusForRho；
   // 这里复用同一对导出函数，不另写公式。
@@ -454,7 +454,7 @@ export function buildPlateModel({ geom, levels, layout, mono = false, palette = 
  * `cellPx`、同样的 4× 超采样），不是另外算的圆面积，也不是"shape>0 才有料"这种和装配
  * 同源的判断 —— `shape` 档 0 也有一圈外环，参考值必须反映这一点，否则对拍就是空转。
  */
-export function renderReferenceAreas({ layout, shapeLevels, pitchMm }) {
+function renderReferenceAreas({ layout, shapeLevels, pitchMm }) {
   const tiles = buildCoverageTiles(layout.cellPx, shapeLevels, layout.glyph);
   const cellArea = pitchMm * pitchMm;
   const denom = layout.cellPx * layout.cellPx * 255;
