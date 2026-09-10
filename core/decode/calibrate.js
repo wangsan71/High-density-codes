@@ -166,54 +166,6 @@ export function integratedInkArea(inkness) {
  * @param {object} target  from expectedInkArea (uses expectedFraction)
  * @param {object} [opts]
  * @param {number} [opts.pixelsPerPixel]  px per mm at capture (to turn mm^2 into px^2)
- * @param {number[]} [opts.ladder]        multipliers to try
- * @returns {{ok:true, factor:number, ratio:number, base:number, tried:object[]}|{ok:false,reason:string,ratio:number,base:number}}
- */
-export function calibrateInkCut(inkness, target, opts = {}) {
-  const values = inkness && inkness.values ? inkness.values : inkness;
-  const n = values.length;
-  if (!n) return { ok: false, reason: 'no pixels', ratio: NaN, base: NaN };
-  if (!target || !target.ok) return { ok: false, reason: (target && target.reason) || 'no expected-area target', ratio: NaN, base: NaN };
-  const base = otsu(inkness);
-  const ppmm = opts.pixelsPerPixel;
-  if (!(ppmm > 0)) return { ok: false, reason: 'need pixels-per-mm to compare mm^2 against pixel counts', ratio: NaN, base };
-  const expectedPx = target.expectedFraction * n; // fraction of the page box, applied to the page-box pixels
-  const peak = maxOf(values);
-  const measure = (thr) => {
-    let c = 0;
-    for (let i = 0; i < n; i++) if (values[i] > thr) c++;
-    return c;
-  };
-  const ladder = opts.ladder || [1.3, 1.15, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.22];
-  void ppmm;
-  void peak;
-  const tried = [];
-  let best = null;
-  for (const f of ladder) {
-    const thr = base * f;
-    const got = measure(thr);
-    const ratio = got / Math.max(1e-9, expectedPx);
-    tried.push({ factor: f, ratio: Number(ratio.toFixed(3)) });
-    const err = Math.abs(Math.log(ratio));
-    if (!best || err < best.err) best = { factor: f, ratio, err, got };
-    // Monotone in the cut: once we have passed the target going downward there is no
-    // point trying looser cuts, they only admit more background.
-    if (ratio > 1 && f < 1) break;
-  }
-  if (!best) return { ok: false, reason: 'ladder produced no measurement', ratio: NaN, base };
-  const tight = best.err <= (opts.tolerance ?? 0.35);
-  return {
-    ok: tight,
-    reason: tight ? undefined : `closest cut still off by ${(100 * best.err).toFixed(0)}% log-ratio`,
-    factor: best.factor,
-    ratio: best.ratio,
-    base,
-    inkPx: best.got,
-    expectedPx,
-    tried,
-  };
-}
-
 function maxOf(a) {
   let m = -Infinity;
   for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i];
