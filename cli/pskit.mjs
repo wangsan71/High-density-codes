@@ -41,6 +41,8 @@ const HELP = `pskit <command> [options]
     --mono               render as a single-colour print (proves the G7 fallback)
     --palette <id>       INK2 INK4 PAPER1 (default chosen by profile)
     --out <dir>          output directory (default artifacts/<name>)
+    --pages <n>          a page budget: refuse (and name the alternatives) if this file cannot fit
+                         n pages, instead of printing a pack that is longer than asked for
     --dry-run            plan and report only, write nothing
 
   receive <dir|file>     decode page images back to the payload
@@ -248,6 +250,43 @@ async function cmdSend(args) {
   // payload that compresses well needs fewer pages than this. Say so, or the
   // actual count below reads like pages went missing.
   console.log(`  net       ${geom.ecc.netBytesPerPage} B/page -> up to ${plan.dataPages}+${plan.parityPages} = ${plan.totalPages} pages (before compression)`);
+
+  // --pages N is a contract, not a wish: work out what N pages can actually carry (parity pages come
+  // out of the budget) and compare it with what this file compresses to. Measured motivation
+  // (PLAN-V5): the owner asked for "an image under 1 MB in no more than a few pages", and until this
+  // existed nothing told them which page count a picture actually needs.
+  if (args.pages !== undefined) {
+    const want = Number(args.pages);
+    if (!Number.isInteger(want) || want < 1 || want > 255) throw new RangeError(`send: --pages must be a whole number 1..255 (one transfer is at most 255 pages), got ${args.pages}`);
+    const pct = args.parity ? Number(args.parity) : mod.profiles.PROFILES[profileId].parityPct;
+    let maxData = 0;
+    for (let d = want; d >= 1; d--) {
+      const par = Math.max(2, Math.ceil((d * pct) / 100));
+      if (d + par <= want) { maxData = d; break; }
+    }
+    const budget = maxData * geom.ecc.netBytesPerPage;
+    const { compress } = await import('../core/deflate.js');
+    const zipped = compress(raw);
+    const compressed = zipped.length;
+    console.log(`  budget    --pages ${want} -> ${maxData} data + ${want - maxData} parity page(s) = ${budget} B; this file compresses to ${compressed} B`);
+    if (compressed > budget) {
+      console.log(`send: REFUSED -- ${compressed} B does not fit ${want} page(s) of ${profileId}`);
+      console.log(`  raise --pages (this file needs about ${plan.totalPages} at ${profileId}), or use a denser profile:`);
+      for (const id of ['P-MX-300-4', 'P-MX-300-5', 'P-MX-300-6', 'P-M1-600']) {
+        if (id === profileId) continue;
+        const g2 = mod.profiles.planPage(id, { sheet: args.sheet, plateMm: args.plate ? Number(args.plate) : undefined });
+        const per = g2.ecc.netBytesPerPage;
+        const d2 = Math.ceil(compressed / per);
+        const pct2 = args.parity ? Number(args.parity) : mod.profiles.PROFILES[id].parityPct;
+        const par2 = Math.max(2, Math.ceil((d2 * pct2) / 100));
+        const fits = d2 + par2 <= want ? '  <- fits' : '';
+        console.log(`    ${id}: ${d2 + par2} page(s) at ${per} B/page${fits}`);
+      }
+      console.log('  not implemented yet: --image-mode fit (downscale a picture to fit a page budget). See docs/PLAN-V5.md P3.');
+      process.exitCode = 2;
+      return;
+    }
+  }
 
   if (args['dry-run']) {
     // A dry run has to be able to fail. It used to print a complete, plausible plan for pages the
