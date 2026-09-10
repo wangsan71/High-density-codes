@@ -18,6 +18,53 @@
  * @param {number} spec.gapMm   gap between neighbouring tiles (and to the quiet zone)
  * @returns {{cols:number, rows:number, tiles:number, tileMm:number, gapMm:number, widthMm:number, heightMm:number, positions:Array<{x:number,y:number}>}}
  */
+/**
+ * Inside one tile: where the finders go and which cells are left for data (PLAN v5 P4).
+ *
+ * QR's arrangement, for the same reason QR uses it: three solid squares give a camera scale, rotation
+ * and which corner is which; the small hollow one at the fourth corner disambiguates orientation. The
+ * difference from QR is that here every tile is independent, so a reader only ever needs one.
+ *
+ * Everything is in module units -- the renderer multiplies by a pixel/module count and the geometry does
+ * not care. Returns the data cells explicitly so the encoder cannot silently use a cell that belongs to
+ * a finder pattern (that is exactly how a code ends up unreadable in the field).
+ */
+export function tileLayout(spec = {}) {
+  const modules = spec.modules === undefined ? 33 : spec.modules;
+  const finder = spec.finder === undefined ? 7 : spec.finder;
+  const quiet = spec.quiet === undefined ? 1 : spec.quiet;
+  for (const [name, v] of [['modules', modules], ['finder', finder], ['quiet', quiet]]) {
+    if (!Number.isInteger(v) || v < 0) throw new RangeError('tiles: ' + name + ' must be a non-negative whole number, got ' + v);
+  }
+  if (modules < 1) throw new RangeError('tiles: a tile must be at least one module across, got ' + modules);
+  if (finder + 2 * quiet > modules) {
+    throw new RangeError('tiles: a ' + finder + '-module finder with a ' + quiet + '-module quiet zone does not fit a ' +
+      modules + '-module tile (needs ' + (finder + 2 * quiet) + ')');
+  }
+  const blocked = new Uint8Array(modules * modules);
+  const at = (x, y) => y * modules + x;
+  const solid = [
+    { x: 0, y: 0, size: finder, hollow: false },
+    { x: modules - finder, y: 0, size: finder, hollow: false },
+    { x: 0, y: modules - finder, size: finder, hollow: false },
+  ];
+  const hollow = { x: modules - finder, y: modules - finder, size: finder, hollow: true };
+  const all = solid.concat([hollow]);
+  // Each pattern reserves its own modules plus the quiet ring around it.
+  for (const f of all) {
+    for (let y = f.y - quiet; y < f.y + f.size + quiet; y++) {
+      for (let x = f.x - quiet; x < f.x + f.size + quiet; x++) {
+        if (x >= 0 && y >= 0 && x < modules && y < modules) blocked[at(x, y)] = 1;
+      }
+    }
+  }
+  const dataCells = [];
+  for (let y = 0; y < modules; y++) {
+    for (let x = 0; x < modules; x++) if (!blocked[at(x, y)]) dataCells.push({ x, y });
+  }
+  return { modules, finder, quiet, finders: all, dataCells, dataCount: dataCells.length };
+}
+
 export function planTiles(spec) {
   const { sheetW, sheetH, tileMm, marginMm = 9, gapMm = 2 } = spec || {};
   for (const [name, v] of [['sheetW', sheetW], ['sheetH', sheetH], ['tileMm', tileMm]]) {
