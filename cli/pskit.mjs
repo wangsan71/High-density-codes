@@ -606,7 +606,8 @@ async function cmdReceive(args) {
       throw new Error(
         `receive: found ${unreadable.length + pdfs.length} file(s) in ${dir}, but none in a format this build reads (${fmtList}). ` +
           'PNG and TIFF are decoded natively; JPEG, WebP and friends are not (PDF is written but never rasterized). Convert them first, e.g. ' +
-          "magick convert '*.jpg' -png out/page-%03d.png  (ImageMagick) or python -c \"from PIL import Image; ...\" -- " +
+          "tools\\jpeg-to-png.ps1 -Source DIR -Out DIR-png (Windows), " +
+          "magick convert '*.jpg' -png out/page-%03d.png (ImageMagick), or python -c \"from PIL import Image; ...\" -- " +
           'or open the browser receiver, which decodes JPEG natively.',
       );
     }

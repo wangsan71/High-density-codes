@@ -1,11 +1,11 @@
-# 交接文档 · PSKT（第 107 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
+# 交接文档 · PSKT（第 108 轮末 · 骨架写于第 73 轮末、逐轮更新 · **无 tag**）
 
 > 写给：接手这个仓库的下一个人（或下一个会话里的我），以及要做几个决定的产品负责人。
 > 目的：**不要重新发现已经发现过的事**。这里只写"现在什么是真的、怎么验、谁才能推进"，
 > 判据原文与逐轮证据仍在 `docs/PLAN.md` / `docs/ACCEPTANCE.md` / `docs/STATUS.md`。
 >
-> **第 107 轮状态**：网页接收端已恢复 JPEG 原生解码；模块档照片帧头可读，但数据区仍被手持照片光度误码挡住。
-> ① 小载荷 16/16；② 1MB 三档分别 64/45/29 页逐字节还原；③ 回显对齐修复已入库；④ JPEG 浏览器路径已修复；
+> **第 108 轮状态**：网页与 CLI 两条 JPEG 路径都已补齐；模块档照片帧头可读，但数据区仍受手持照片光度误码限制。
+> ① 小载荷 16/16；② 1MB 三档分别 64/45/29 页逐字节还原；③ 回显对齐与浏览器 JPEG 已修复；④ CLI 有 `jpeg-to-png.ps1`；
 > ⑤ 默认档仍 `P-M1-300`；⑥ 真平板扫描是最后缺口；⑦ 代码与台账尚未提交（见 §14）。
 
 ---
@@ -106,6 +106,7 @@ G8/G10 需要切片软件/真打印机，G6 ② 需要产品负责人定判据�
   `check-serve.mjs` / `check-lan.mjs`、`smoke-sender.mjs` / `smoke-capture.mjs`、`soak.mjs`（= `verify --gate G6`）、
   `usability.ps1`（**一条命令的端到端冒烟**，含 4g 扫描仪 PNG 变体腿与 4h TIFF 变体腿）、
   `acceptance-kit.ps1` + `acceptance-readme.txt`（用户硬件验收包，**含 P-MX-300-4/5/6 纸面腿**）、
+  **`jpeg-to-png.ps1`（Windows 下 JPEG 照片转 PNG，使用 System.Drawing）**、
   **`check-module-scans.mjs`（三档真扫描目录的一键摘要核对）**、
   **`mtf-matrix.mjs`（照片目录 → 喷嘴矩阵读数，第 92 轮）**、`mtf-probe.ps1`（仿真打印机探针）、
   `g4-probe.ps1`、`check-3mf.mjs`、`level-diff.mjs`、`g6-perf-probe.mjs`、`rho-report.mjs`、`check-docs-tables.mjs`。

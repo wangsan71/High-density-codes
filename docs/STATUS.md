@@ -126,6 +126,14 @@
 
 ## 已知风险 / 待办
 
+### 第 108 轮（**JPEG CLI 转换助手落地：Windows 上一条命令转 PNG，核心仍不引入第三方 JPEG 解码器**）
+
+**① 用户需求**：手机原图是 JPEG，但 CLI 只读 PNG/TIFF。网页端已用浏览器原生解码 JPEG；CLI 用户仍缺少零依赖转换步骤。
+
+**② 改动**：新增 `tools/jpeg-to-png.ps1`，使用 Windows 自带 `System.Drawing` 把目录中的 `.jpg/.jpeg` 转成同名 PNG；CLI 的 JPEG 拒绝提示同步指向该工具。核心保持纯 ESM，不加入第三方 JPEG codec。
+
+**③ 验证**：对用户 `D:\pskt-photos` 三个 JPEG 转换成功；不存在目录返回 exit 2；转换后 CLI 可进入 PNG 解码路径。照片本身仍可能因拍摄质量失败，格式层已解决。
+
 ### 第 107 轮（**网页接收端恢复原生 JPEG 解码路径：CLI 仍只读 PNG/TIFF，浏览器负责把 JPEG 转成 RGBA 位图**）
 
 **① 用户实测**：照片文件是 `.jpeg` 时，网页接收端仍调用纯 JS `decodePNG`，所以输出“只支持 PNG”。CLI 也无法读 JPEG，用户被卡在格式层。
