@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 import { fdct8x8, idct8x8, quantise, dequantise, QUANT_LUMA, QUANT_CHROMA } from '../core/image/dct.js';
 import { encodeBlocks, decodeBlocks } from '../core/image/jpegish.js';
 import { encodePNG } from '../core/render/png.js';
-import { packImage, unpackImage } from '../core/image/container.js';
+import { packImage, packImageWithin, unpackImage } from '../core/image/container.js';
 
 function parseArgs(argv) {
   const out = { width: 1240, height: 1754, qualities: [30, 50, 60, 70, 80, 90], writeImage: null };
@@ -31,6 +31,7 @@ function parseArgs(argv) {
     else if (a === '--height') out.height = Number(argv[++i]);
     else if (a === '--qualities') out.qualities = String(argv[++i]).split(',').map(Number);
     else if (a === '--write-image') out.writeImage = argv[++i];
+    else if (a === '--budget') out.budget = Number(argv[++i]);
     else throw new Error('unknown argument: ' + a);
   }
   return out;
@@ -137,6 +138,16 @@ function main() {
       String(enc.stats.planeBytes[0]).padEnd(9) +
       String(enc.stats.planeBytes[1] + enc.stats.planeBytes[2]).padEnd(10) +
       String(enc.stats.headerBytes).padEnd(11) + (bytes / (w * h)).toFixed(3));
+  }
+  if (args.budget) {
+    // What a real page budget buys on this content: the search encodes until something fits, so this
+    // number is measured, not extrapolated from the table above.
+    const r = packImageWithin(src, w, h, args.budget, { minQuality: 5 });
+    const dec = unpackImage(r.bytes);
+    console.log('');
+    console.log('budget ' + args.budget + ' B (e.g. 3 A4 pages at P-MX-300-5 = ' + (3 * 29100) + ' B): ' +
+      'chose q' + r.quality + ' after ' + r.tried + ' encode(s), payload ' + r.bytes.length + ' B (' +
+      (r.bytes.length / (w * h)).toFixed(3) + ' B/px), PSNR ' + psnr(src, dec.rgba, w, h, w).toFixed(2) + ' dB');
   }
 }
 

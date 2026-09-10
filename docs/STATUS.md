@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 133 轮（**P2b 第五块砖：`packImageWithin()` —— 按字节预算选质量，而且**实测**不估算；顺带量到"3 页预算下能给到什么"**）
+
+**① 做了什么**：`core/image/container.js` 新增 `QUALITY_LADDER`（95 递减到 5）与 `packImageWithin(rgba, w, h, maxBytes, {minQuality})`：从最高档往下**真的编码一遍**、比真实长度，第一个装得下的就返回；都不行就**具名拒绝**并把"最便宜的那一档实测花了多少字节、预算多少"写进消息里（并给出路：降采样或加页）。`tests/unit/image-budget.test.mjs` 3 条。**为什么是实测**：压缩比没有上界，按估算拒绝会误拒（AGENTS §6.4）；唯一被写明的假设是"质量降 ⇒ 字节不升"，万一某个内容违反它，返回的载荷**照样装得下**（错在安全的那一侧）。
+
+**② 实测（本轮最有用的一个数）**：给 bench 加 `--budget`，在**同一张 1240×1754 合成照片**上跑 —— 预算 **87,300 B（= 3 张 A4 `P-MX-300-5`，29.1 kB/页）** ⇒ 搜索走 18 档后选 **q10**，载荷 **72,358 B（0.033 B/px）**、**PSNR 28.67 dB**、**整幅分辨率不降采样**。对照第 127 轮的预言机结论：同样 3 页预算下 `fit v1`（降采样 + PNG）只给 **77×109 / 35.25 dB** ⇒ **同样页数，现在换到全分辨率（约 16 倍像素），代价是 6.6 dB**。**这个取舍要产品负责人拍板**（本轮不替他决定，只是把两个数摆在一起）。
+
+**③ 怎么证的**：三条测试的界都**从这张图实测的两端推出来**（`hi` = q95 的字节、`lo` = q10 的字节），因为小图有结构性地板（每块至少要一个 EOB 符号）——第一版我按"预算 = 全量的某个比例"写，当场被实测打回（48×32 的平滑图 q10 仍需 193 B，比例预算根本到不了）。钉住的不变式：**返回的载荷绝不超预算**、宽松预算不拿次档充数（`tried === 1`）、紧预算不得给出更高档、不可行的预算按名字拒绝（`even q5 needs N bytes and the budget is M`）。
+
+**④ 门限**：单测 **`tests 407 · pass 407 · fail 0`、`SUITE_EXIT=0`**（第 132 轮的 404 + 本轮 3）；`build-web` exit 0；`check-dist` **13 pass / 0 fail**；`verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（**本次未评估：G4 G6 G9 G10**）；`& .\tools\usability.ps1` ⇒ `USABILITY_EXIT=0`；`check-docs-tables` ⇒ clean（503 行 / 88 张表）。**下一块砖**：把 `packImageWithin` 接进 `pskit send --image-mode fit`（含摘要口径与手机端收图）。
 ### 第 132 轮（**P2b 第四块砖：`core/image/container.js` —— 一张图变成一个自描述载荷（`packImage`/`unpackImage`）；bench 改用它 ⇒ 桌面测量与产品将用的是同一份实现**）
 
 **① 做了什么**：新增 `core/image/container.js`：24 字节头（`PSKI` 魔数、版本、宽高、质量、子采样模式、三条平面流的长度）+ 三条 `jpegish` 流；`packImage(rgba, w, h, q)` 走完整链路（RGB→YCbCr→4:2:0→8×8 DCT→量化→霍夫曼），`unpackImage(bytes)` 反向走完并**只交回声明尺寸的 RGBA**（补到 8 的倍数的那些行列在解码器内部消化掉）。`tests/unit/image-container.test.mjs` 4 条。

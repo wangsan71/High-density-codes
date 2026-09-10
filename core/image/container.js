@@ -103,6 +103,43 @@ export function packImage(rgba, width, height, quality) {
   };
 }
 
+/**
+ * The quality ladder the "fit into a byte budget" search walks, highest first. Steps of five are what
+ * the measured rate/distortion curve (STATUS round 131/132) supports; a finer ladder buys fractions of
+ * a dB for whole extra encodes.
+ */
+export const QUALITY_LADDER = [95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5];
+
+/**
+ * Pack an image so that the payload fits maxBytes, by trying the ladder from the top down.
+ *
+ * This MEASURES instead of estimating: it really encodes and compares real lengths, because "compression
+ * ratio" has no upper bound and a budget refused on an estimate is a budget refused wrongly (AGENTS
+ * section 6.4). One assumption is stated rather than hidden: bytes are assumed to fall as quality falls,
+ * so the first rung that fits ends the search. If that assumption were ever violated for a particular
+ * image, the returned payload still fits -- it might just not be the best one that fits, which is the
+ * safe direction to be wrong in.
+ *
+ * Refusal is named and actionable: it says what the smallest rung actually cost and what the budget was.
+ */
+export function packImageWithin(rgba, width, height, maxBytes, opts = {}) {
+  const minQuality = opts.minQuality === undefined ? 10 : opts.minQuality;
+  if (!(maxBytes > 0)) throw new RangeError('container: byte budget must be positive, got ' + maxBytes);
+  const ladder = (opts.ladder || QUALITY_LADDER).filter((q) => q >= minQuality);
+  if (ladder.length === 0) throw new RangeError('container: no quality on the ladder is at or above minQuality ' + minQuality);
+  let smallest = null;
+  for (let i = 0; i < ladder.length; i++) {
+    const enc = packImage(rgba, width, height, ladder[i]);
+    smallest = enc;
+    if (enc.bytes.length <= maxBytes) {
+      return { ...enc, quality: ladder[i], tried: i + 1, budget: maxBytes, fits: true };
+    }
+  }
+  throw new RangeError(
+    'container: even q' + ladder[ladder.length - 1] + ' needs ' + smallest.bytes.length +
+    ' bytes and the budget is ' + maxBytes + ' -- downscale the image or allow more pages');
+}
+
 /** Read the header. Everything that is not exactly what this build writes is a named refusal. */
 export function parseContainer(bytes) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('container: expected a Uint8Array');
