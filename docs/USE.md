@@ -102,6 +102,11 @@ node tools/check-lan.mjs   --port 8137    # 验它交出去的资源与构建清
 
   **一条命令就够（第 138 轮起）**：`--image-mode lossy --pages N` 会自己按预算选质量并打包，收回来的是 `.psk` 图片载荷（不是原 PNG）。想先把载荷存下来、看清它多大再决定打几页，就用两步：`node tools/fit-image.mjs photo.png --pages N --profile P-MX-300-5 --lossy --out photo.psk` 再 `send photo.psk`。
 
+  ```powershell
+  node tools/unpsk.mjs photo-back.psk photo-back.png     # 把收回来的 .psk 变回可看的 PNG
+  ```
+
+  **收回来的是图片载荷，不是原 PNG**：`receive` 交回的是发送端打包的那份 `.psk` 字节（逐字节相同、清单摘要可核）；用 `tools/unpsk.mjs` 解开就能看/存/转发，它用的是与发送端**同一份解码器**，不会二次损失。
   实测（1240×1754 的**带噪**合成照片、A4/`P-MX-300-5`，第 138 轮用**一条命令**复跑、载荷与两步走逐字节相同）：`--pages 5` ⇒ 选 **q10**、载荷 **72,358 B**、**PSNR 28.67 dB**、**不降采样**；`send` 实际写出 **4 页**（2 数据 + 2 校验 —— 比按载荷大小估的少一页，因为载荷本身还能被再压一层）。**页数一律以 `send` 打印的为准**，别自己按字节数除。
 
   会看到拒绝的时候：`--pages 3` 时这张图**放不下**，工具会明说 `even q5 needs 33537 bytes and the budget is 29082` 并给出路（加页 / 换更密的档 / 接受更小的图）。**判据 G-IMG 要求 PSNR ≥ 30 dB**，这条路上没达到时工具会自己打印 `NOT met` —— 想要 30 dB 就得加页或换档。
