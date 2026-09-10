@@ -126,6 +126,13 @@
 
 ## 已知风险 / 待办
 
+### 第 140 轮（**`tools/unpsk.mjs`：把 `.psk` 图片载荷变回可看的 PNG —— 图片这条路的"另一半"**）
+
+**① 做了什么**：新增 `tools/unpsk.mjs`（30 行，零依赖）：`unpackImage()` 解 `.psk` → `encodePNG()` 写成 PNG。**为什么需要**：`send --image-mode lossy` 能发图了，但收回来的是 `.psk` 载荷 —— 在此之前**用户没有任何办法把它看一眼**（只能写代码）。这不是重编码，用的是与发送端**同一份解码器**，所以看到的就是纸上传回来的那份数据。
+
+**② 实测（三条命令）**：`node tools/unpsk.mjs .tmp/psk-back.bin .tmp/psk-view.png` ⇒ **第 135 轮从纸面链路取回的那份载荷**解出 `1240x1754 at quality q10`，PNG **4,075,071 B**（exit 0）；一步走产出的载荷同样解出 4,075,071 B（**两条路一致**）；拿一张渲染页（不是 `.psk`）当输入 ⇒ **`container: not a PSKI payload (bad magic)`、exit 2**（具名拒绝，阳性对照）。
+
+**③ 门限**：单测 **`tests 409 · pass 409 · fail 0`**、`check-docs-tables` clean；本轮未改 `core/` 与 `web/` ⇒ 构建/产物门限沿用上一轮全绿。**下一块砖**：把这个能力接进手机端那一页（收到 `.psk` 直接显示成图），或按你的意思换方向。
 ### 第 139 轮（**手册与实现对齐：`docs/USE.md` 改成一条命令的写法（`--image-mode lossy`），两步走降为备选**）
 
 **① 做了什么**：第 138 轮把两条命令并成一条之后，手册里还写着"先 `fit-image` 再 `send`" ⇒ **文档过期就是缺陷**（用户照 docs 走会多绕一步）。本轮改成：主路径 `send photo.png --image-mode lossy --pages N` + `receive … --out photo-back.psk`；两步走保留为"想先看载荷多大再决定"的备选；并注明**收回来的不是原 PNG 而是 `.psk` 图片载荷**。本轮**零代码改动**。
