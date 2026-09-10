@@ -227,7 +227,11 @@ export function planPage(profileId, opts = {}) {
   }
 
   const sheet = p.medium === MEDIUM.PAPER ? SHEETS[opts.sheet || 'A4'] : { w: opts.plateMm || 200, h: opts.plateMm || 200 };
-  const marginMm = opts.marginMm ?? (p.medium === MEDIUM.PAPER ? 9 : 6);
+  // Measured (round 120): a flat 9 mm margin costs areal efficiency as the sheet shrinks -- the lattice
+  // occupies 76.7% of an A4 with P-MX-300-5 but only 56.4% of an A6, because the margin and the quiet
+  // zone are fixed while the sheet is not. Scaling the margin with the short side keeps A4 (12.6 -> 9)
+  // and Letter (13.0 -> 9) byte-for-byte unchanged, so no already-printed page moves.
+  const marginMm = opts.marginMm ?? (p.medium === MEDIUM.PAPER ? Math.min(9, Math.round(sheet.w < sheet.h ? sheet.w * 0.06 * 10 : sheet.h * 0.06 * 10) / 10) : 6);
   const region = { w: sheet.w - 2 * marginMm, h: sheet.h - 2 * marginMm };
   if (region.w <= 0 || region.h <= 0) throw new RangeError('margin leaves no printable region');
 
