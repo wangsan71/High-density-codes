@@ -65,6 +65,44 @@ export function tileLayout(spec = {}) {
   return { modules, finder, quiet, finders: all, dataCells, dataCount: dataCells.length };
 }
 
+/**
+ * How much payload one tiled sheet can carry, and how the bits land in the cells (PLAN v5 P4).
+ *
+ * Capacity is deliberately expressed in cells first: every tile is independent, so a reader that sees
+ * one tile gets exactly one tile's worth of payload -- that is the whole point of tiling, and it is also
+ * the reason the per-tile error correction has to be planned per tile rather than per sheet.
+ */
+export function tileCapacity(plan, layout) {
+  if (!plan || !layout) throw new RangeError('tiles: tileCapacity needs a plan and a layout');
+  const cellsPerTile = layout.dataCells.length;
+  const cells = cellsPerTile * plan.tiles;
+  return {
+    tiles: plan.tiles,
+    cellsPerTile,
+    cells,
+    bytesPerTile: Math.floor(cellsPerTile / 8),
+    bits: cells,
+    bytes: Math.floor(cells / 8),
+  };
+}
+
+/**
+ * Spread a payload across one tile's data cells, most significant bit first, zero-padded at the end.
+ * Refuses -- by name, with both numbers -- when the payload does not fit, because a silently truncated
+ * code is exactly the "looks successful but is wrong" failure this project refuses to ship.
+ */
+export function fillTileModules(cells, bytes) {
+  const need = bytes.length * 8;
+  if (need > cells.length) {
+    throw new RangeError('tiles: ' + bytes.length + ' B need ' + need + ' cells but the tile only has ' + cells.length);
+  }
+  const modules = new Uint8Array(cells.length);
+  for (let i = 0; i < need; i++) {
+    modules[i] = (bytes[i >> 3] >> (7 - (i & 7))) & 1;
+  }
+  return modules;
+}
+
 export function planTiles(spec) {
   const { sheetW, sheetH, tileMm, marginMm = 9, gapMm = 2 } = spec || {};
   for (const [name, v] of [['sheetW', sheetW], ['sheetH', sheetH], ['tileMm', tileMm]]) {
