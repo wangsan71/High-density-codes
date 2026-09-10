@@ -41,6 +41,10 @@ const HELP = `pskit <command> [options]
     --mono               render as a single-colour print (proves the G7 fallback)
     --palette <id>       INK2 INK4 PAPER1 (default chosen by profile)
     --out <dir>          output directory (default artifacts/<name>)
+    --image-mode lossy   treat the input as a picture and pack it to fit --pages (needs --pages);
+                         full resolution, quality chosen by measuring, transmitted LOSSY (digest is
+                         over the payload, not the original file); unpack the result with
+                         tools/unpsk.mjs. Example: send photo.png --image-mode lossy --pages 5
     --pages <n>          a page budget: refuse (and name the alternatives) if this file cannot fit
                          n pages, instead of printing a pack that is longer than asked for
     --dry-run            plan and report only, write nothing
