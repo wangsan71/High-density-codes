@@ -25,7 +25,8 @@ import { encodePDFDocument } from '../core/render/pdf.js';
 import { decodePNG } from '../core/decode/png-read.js';
 import { decodeTIFF } from '../core/decode/tiff-read.js';
 import { findMarkers } from '../core/decode/fiducial.js';
-import { rectifyPage } from '../core/decode/warp.js';
+import { canvasQuad, canvasToPhoto } from '../core/decode/warp.js';
+import { homographyFromQuad, sampleBilinear } from '../core/decode/transform.js';
 
 /** 默认阶梯：从今天的默认档间距一路细到 2R 才需要的间距。 */
 const DEFAULT_PITCHES = [0.847, 0.508, 0.423, 0.339, 0.254, 0.169, 0.127, 0.102, 0.085];
@@ -204,8 +205,30 @@ function readOne(bitmap, spec) {
   // from the profile and sheet the ladder was generated with.
   const geom = planPage(spec.profile, {});
   const layout = pageLayout(geom, spec.dpi, { sheetMm: spec.sheetMm });
-  const r = rectifyPage(bitmap, layout, found.quad, {});
-  if (!r.ok) return { ok: false, reason: 'rectify/' + r.reason };
+  // Do NOT rectify-then-sample: that resamples the page onto the canvas first, and on 2-3 px
+  // modules the second sampling lands each module a little differently -> a ~1e-3 error floor on a
+  // PRISTINE render, which would have been mistaken for physics. Instead map each module centre
+  // through the marker homography and sample the ORIGINAL image once (same math a real scan needs).
+  const cw = canvasQuad(layout);
+  const H = homographyFromQuad([cw.tl, cw.tr, cw.br, cw.bl], [found.quad.tl, found.quad.tr, found.quad.br, found.quad.bl]);
+  if (!H) return { ok: false, reason: 'homography-degenerate' };
+  const grey = (b, c, r, ox = 0, oy = 0, fx = 0, fy = 0) => {
+    const x = b.x + c * b.cellPx + b.cellPx / 2 + ox + fx;
+    const y = b.y + r * b.cellPx + b.cellPx / 2 + oy + fy;
+    const p = canvasToPhoto(H, x, y);
+    if (!p) return 255;
+    const s = sampleBilinear(bitmap.pixels, bitmap.width, bitmap.height, 4, p.x, p.y).values;
+    return (s[0] + s[1] + s[2]) / 3;
+  };
+  if (process.env.LADDER_DEBUG) {
+    const cwq = canvasQuad(layout);
+    const b0 = spec.bands[0];
+    const p0 = canvasToPhoto(H, b0.x + b0.cellPx / 2, b0.y + b0.cellPx / 2);
+    console.log('  DEBUG canvas tl', JSON.stringify(cwq.tl), 'quad tl', JSON.stringify(found.quad.tl));
+    console.log('  DEBUG band0 first module canvas', (b0.x + b0.cellPx / 2), (b0.y + b0.cellPx / 2), '-> photo', JSON.stringify(p0), 'bitmap', bitmap.width + 'x' + bitmap.height);
+    const s = sampleBilinear(bitmap.pixels, bitmap.width, bitmap.height, 4, p0.x, p0.y);
+    console.log('  DEBUG sample', JSON.stringify(s));
+  }
   const rows = [];
   for (const b of spec.bands) {
     // Whole-pixel origin error is the ruler's own noise floor: at 2-3 px per module a half-pixel
@@ -220,7 +243,7 @@ function readOne(bitmap, spec) {
             let wrong = 0, n = 0;
             for (let rr = 0; rr < b.rows; rr += 3) {
               for (let cc = 0; cc < b.cols; cc += 3) {
-                const g = moduleGray(r, b, cc, rr, ox, oy, fx, fy);
+                const g = grey(b, cc, rr, ox, oy, fx, fy);
                 if ((g < 128) !== (bitsPre[rr * b.cols + cc] === 1)) wrong++;
                 n++;
               }
@@ -236,7 +259,7 @@ function readOne(bitmap, spec) {
     const samples = [];
     for (let rr = 0; rr < b.rows; rr++) {
       for (let cc = 0; cc < b.cols; cc++) {
-        const g = moduleGray(r, b, cc, rr, bestOx, bestOy, bestFx, bestFy);
+        const g = grey(b, cc, rr, bestOx, bestOy, bestFx, bestFy);
         samples.push(g);
         n++;
       }
