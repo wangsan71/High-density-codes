@@ -110,7 +110,7 @@ export function findTileOffset(img, plan, layout, t, opts = {}) {
   let chosen = null;
   for (let dy = -searchPx; dy <= searchPx; dy++) {
     for (let dx = -searchPx; dx <= searchPx; dx++) {
-      const h = headerAt(img, plan, layout, t, dpi, dx, dy);
+      const h = headerAt(img, plan, layout, t, dpi, dx, dy, 0);
       if (!h) continue;
       if (h.index !== t || h.count !== expectedCount) continue;
       const cost = Math.abs(dx) + Math.abs(dy);
@@ -121,8 +121,37 @@ export function findTileOffset(img, plan, layout, t, opts = {}) {
   return { ...refined, score: best.score, maxScore, px, source: 'centroid', coarseOffset: { dx: best.dx, dy: best.dy }, findersUsed: n };
 }
 
+/** Module coordinates under a rotation of the tile: 0, 90, 180 or 270 degrees. */
+export function turn(m, n, modules, rot) {
+  if (rot === 90) return [modules - 1 - n, m];
+  if (rot === 180) return [modules - 1 - m, modules - 1 - n];
+  if (rot === 270) return [n, modules - 1 - m];
+  return [m, n];
+}
+
+/**
+ * Which way up is this tile? Answered by the format itself rather than by geometry: sample the tile as if
+ * it were rotated by each of the four amounts and keep the one whose CRC16 validates. That is the same
+ * criterion readTile() trusts, so the detector cannot disagree with the reader -- and it needs no
+ * assumption about which corner a hollow pattern "should" be in.
+ */
+export function detectTileRotation(img, plan, layout, t, opts = {}) {
+  const dpi = opts.dpi === undefined ? img.dpi : opts.dpi;
+  const tried = [];
+  for (const rot of [0, 90, 180, 270]) {
+    try {
+      const tile = readTile(img, plan, layout, t, dpi, { dx: 0, dy: 0, rot });
+      return { rot, ok: true, length: tile.length, tried };
+    } catch (e) {
+      tried.push({ rot, why: String(e.message).slice(0, 60) });
+    }
+  }
+  throw new RangeError('tile-read: tile ' + t + ' validates in none of the four orientations -- ' +
+    tried.map((x) => x.rot + ': ' + x.why).join(' | '));
+}
+
 /** Sample just the 32 header bits at a candidate offset; null when it cannot be sampled. */
-function headerAt(img, plan, layout, t, dpi, dx, dy) {
+function headerAt(img, plan, layout, t, dpi, dx, dy, rot) {
   const px = modulePixels(plan.tileMm, layout.modules, dpi);
   const toPx = (mm) => Math.round((mm * dpi) / 25.4);
   const pos = plan.positions[t];
@@ -156,9 +185,12 @@ export function readTile(img, plan, layout, t, dpi, offset) {
   const pos = plan.positions[t];
   const ox = toPx(pos.x) + (offset ? offset.dx : 0);
   const oy = toPx(pos.y) + (offset ? offset.dy : 0);
+  const rot = (offset && offset.rot) || 0;
   const bits = new Uint8Array(layout.dataCells.length);
   for (let i = 0; i < bits.length; i++) {
-    const c = layout.dataCells[i];
+    const cell = layout.dataCells[i];
+    const t2 = turn(cell.x, cell.y, layout.modules, rot);
+    const c = { x: t2[0], y: t2[1] };
     const x = ox + c.x * px + (px >> 1);
     const y = oy + c.y * px + (px >> 1);
     if (x >= img.width || y >= img.height) throw new RangeError('tile-read: tile ' + t + ' reaches outside the image (' + x + ',' + y + ')');

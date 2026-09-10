@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planTiles, tileLayout } from '../../core/tiles.js';
 import { renderTilePage } from '../../core/render/tilepage.js';
-import { readTile, findTileOffset } from '../../core/decode/tile-read.js';
+import { readTile, findTileOffset, detectTileRotation } from '../../core/decode/tile-read.js';
 import { tilePageTiles } from '../../tools/make-tile-page.mjs';
 
 const sheetW = 210;
@@ -62,4 +62,47 @@ test('tile-read: a tile shifted by a few pixels is still found and still reads',
 test('tile-read: a blank image is refused by name, not read as zeros', () => {
   const blank = { width: 2480, height: 3508, dpi, pixels: new Uint8Array(2480 * 3508 * 4).fill(255) };
   assert.throws(() => findTileOffset(blank, plan, layout, 0, { dpi }), /no tile found near position 0/);
+});
+
+test('tile-read: the CRC decides which way up a rotated tile is', () => {
+  const payload = new Uint8Array(1500);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 17 + 9) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const px = 10;
+  const side = layout.modules * px;
+  const toPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const pos = plan.positions[5];
+  const ox = toPx(pos.x);
+  const oy = toPx(pos.y);
+  // Rotate the tile slot counter-clockwise by q quarter turns (the direction turn() compensates for --
+  // measured with a probe, not assumed: see STATUS round 176).
+  const spin = (img, q) => {
+    const copy = new Uint8Array(side * side * 4);
+    for (let y = 0; y < side; y++) {
+      for (let x = 0; x < side; x++) {
+        const s = ((oy + y) * img.width + ox + x) * 4;
+        const d = (y * side + x) * 4;
+        copy[d] = img.pixels[s]; copy[d + 1] = img.pixels[s + 1]; copy[d + 2] = img.pixels[s + 2]; copy[d + 3] = 255;
+      }
+    }
+    for (let y = 0; y < side; y++) {
+      for (let x = 0; x < side; x++) {
+        let sx = x, sy = y;
+        for (let i = 0; i < q; i++) { const ny = side - 1 - sx; sx = sy; sy = ny; }
+        const s = (sy * side + sx) * 4;
+        const d = ((oy + y) * img.width + ox + x) * 4;
+        img.pixels[d] = copy[s]; img.pixels[d + 1] = copy[s + 1]; img.pixels[d + 2] = copy[s + 2]; img.pixels[d + 3] = 255;
+      }
+    }
+  };
+  assert.equal(detectTileRotation(base, plan, layout, 5, { dpi }).rot, 0, 'an upright tile needs no rotation');
+  for (const [quarterTurns, expected] of [[1, 90], [2, 180], [3, 270]]) {
+    const img = { width: base.width, height: base.height, dpi, pixels: Uint8Array.from(base.pixels) };
+    spin(img, quarterTurns);
+    const found = detectTileRotation(img, plan, layout, 5, { dpi });
+    assert.equal(found.rot, expected, 'a slot spun ' + quarterTurns + ' quarter turn(s) CCW');
+    const tile = readTile(img, plan, layout, 5, dpi, { dx: 0, dy: 0, rot: found.rot });
+    assert.deepEqual(Array.from(tile.slice), Array.from(payload.subarray(410, 492)), 'tile 5 carries bytes 410..491');
+  }
 });
