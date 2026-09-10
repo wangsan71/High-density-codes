@@ -126,6 +126,15 @@
 
 ## 已知风险 / 待办
 
+### 第 162 轮（**第 5 轮一次的死代码复查：无新增死代码；但如实记下一件事 —— P4/P2b 的新模块目前**只有测试在用**）**
+
+**① 复查结果（工具 `tools/find-dead-exports.mjs`，本轮为第 50 轮，正好是 5 的倍数）**：「除自己文件外无人提及」= **19 个**（与第 159 轮相同，**最近 5 轮没有新增死代码**），其中 3 个确认保留（出现在 `docs/` 里，文档即接口）、16 个多行定义按第 159 轮定下的规则**不自动化删除**。
+
+**② 复查顺带量到的一件真话（必须写下来）**：`core/tiles.js`（`planTiles`/`tileLayout`/`tileCapacity`/`fillTileModules`）与 `core/render/tilepage.js`（`renderTilePage`/`modulePixels`）目前**只被单测引用，没有任何产品调用方** —— 它们还没有接进 CLI 或手机端。⇒ **P4 现在是一条"有砖没墙"的线**：几何、位映射、渲染都实测过，但**还没有一条命令能产生瓦片页**。同样地，`core/image/jpegish.js` 的部分导出（`zigzag`/`magnitude`/`scanSymbols`/`parseHeader`）也只有测试在用（产品走的是 `container.js` 的整条链）。
+
+**③ 这意味着什么（不粉饰）**：按 5 轮复查的用途，这些**不算死代码**（P4 是计划内的在建功能），但**如果 P4 被砍掉，这 6 个导出 + 2 个文件就是下一批要清的东西**。⇒ **下一块砖应该是"把瓦片页接出来"**（哪怕先只给 CLI 一个 `--tiles` 让它写出一张 PNG），这样 P4 才有产品调用方，也才谈得上"能用"。
+
+**④ 门限**：本轮零代码改动 ⇒ 单测/门限沿用第 161 轮（`tests 417 · pass 417 · fail 0`、`build-web` exit 0、`check-dist` 13 pass / 0 fail、`check-docs-tables` clean）。
 ### 第 161 轮（**P4 第四块砖：`core/render/tilepage.js` —— 瓦片页真的画出来了（A4/300dpi = 2480x3508，10 px/模块）**）
 
 **① 做了什么**：新增 `core/render/tilepage.js`：`modulePixels(tileMm, modules, dpi)` 与 `renderTilePage({plan, layout, tiles, dpi, sheetW, sheetH})` ⇒ 把 `core/tiles.js` 算出的几何画成像素 —— 每块瓦片先画数据格、**再画定位图形盖在上面**（载荷即便越界也绝不会盖住识读所需的图形），实心图形画成 7 环 + 3x3 实心、空心图形画成 7 环 + 单点实心。几何一行都没有在这里重算。配 `tests/unit/tilepage.test.mjs` 2 条。
