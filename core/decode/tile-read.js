@@ -12,6 +12,7 @@
 
 import { modulePixels } from '../render/tilepage.js';
 import { crc16 } from '../crc.js';
+import { homographyFromQuad, apply } from './transform.js';
 import { rsDecode } from '../rs.js';
 
 const HEADER_BYTES = 4;
@@ -122,6 +123,20 @@ export function findTileOffset(img, plan, layout, t, opts = {}) {
 }
 
 /** Module coordinates under a rotation of the tile: 0, 90, 180 or 270 degrees. */
+/**
+ * Page-level mapping: where does the sheet's own pixel grid land in this photograph?
+ *
+ * The per-tile offset search absorbs a nudge; it cannot absorb perspective, because every row of the page
+ * moves by a different amount (measured in STATUS round 180: 12-16 px at 300 dpi, then refusals). Given the
+ * four corners of the sheet in the image, ONE homography maps the whole grid and every tile is read through
+ * it. Points must be {x, y} objects -- transform.js destructures them (STATUS round 182).
+ */
+export function pageMapper(quad, srcW, srcH) {
+  if (!Array.isArray(quad) || quad.length !== 4) throw new RangeError('tile-read: pageMapper needs the four sheet corners as {x,y} objects');
+  const H = homographyFromQuad([{ x: 0, y: 0 }, { x: srcW, y: 0 }, { x: srcW, y: srcH }, { x: 0, y: srcH }], quad);
+  return (sx, sy) => { const p = apply(H, sx, sy); return [p.x, p.y]; };
+}
+
 export function turn(m, n, modules, rot) {
   if (rot === 90) return [modules - 1 - n, m];
   if (rot === 180) return [modules - 1 - m, modules - 1 - n];
@@ -177,7 +192,7 @@ function headerAt(img, plan, layout, t, dpi, dx, dy, rot) {
 }
 
 /** Read one tile's data cells as bytes. Returns the header fields plus this tile's slice. */
-export function readTile(img, plan, layout, t, dpi, offset) {
+export function readTile(img, plan, layout, t, dpi, offset, opts = {}) {
   if (!img || !plan || !layout) throw new RangeError('tile-read: needs an image, a plan and a layout');
   if (!(t >= 0 && t < plan.positions.length)) throw new RangeError('tile-read: tile ' + t + ' is outside 0..' + (plan.positions.length - 1));
   const px = modulePixels(plan.tileMm, layout.modules, dpi === undefined ? img.dpi : dpi);
@@ -186,14 +201,21 @@ export function readTile(img, plan, layout, t, dpi, offset) {
   const ox = toPx(pos.x) + (offset ? offset.dx : 0);
   const oy = toPx(pos.y) + (offset ? offset.dy : 0);
   const rot = (offset && offset.rot) || 0;
+  const map = (opts && opts.map) || null;
   const bits = new Uint8Array(layout.dataCells.length);
   for (let i = 0; i < bits.length; i++) {
     const cell = layout.dataCells[i];
     const t2 = turn(cell.x, cell.y, layout.modules, rot);
     const c = { x: t2[0], y: t2[1] };
-    const x = ox + c.x * px + (px >> 1);
-    const y = oy + c.y * px + (px >> 1);
-    if (x >= img.width || y >= img.height) throw new RangeError('tile-read: tile ' + t + ' reaches outside the image (' + x + ',' + y + ')');
+    let x = ox + c.x * px + (px >> 1);
+    let y = oy + c.y * px + (px >> 1);
+    // Through a homography the coordinates are fractional, and an unrounded index into a typed array is
+    // undefined -- which reads as "light" and silently corrupts bits (that is what broke this twice:
+    // STATUS rounds 181/183). Round to the nearest pixel here; bilinear sampling is the upgrade path.
+    if (map) { const p = map(x, y); x = Math.round(p[0]); y = Math.round(p[1]); }
+    if (!(x >= 0 && y >= 0 && x < img.width && y < img.height)) {
+      throw new RangeError('tile-read: tile ' + t + ' reaches outside the image (' + x + ',' + y + ')');
+    }
     bits[i] = img.pixels[(y * img.width + x) * 4] < 128 ? 1 : 0;
   }
   const bytes = new Uint8Array(bits.length >> 3);
@@ -231,22 +253,22 @@ export function readTile(img, plan, layout, t, dpi, offset) {
  * Read one tile the way a stranger with a phone would: straight, then nudged, then turned. Every attempt
  * is judged by the same CRC the reader trusts, so "it read" means "it validated" and nothing else.
  */
-function readTileAuto(img, plan, layout, t, dpi) {
+function readTileAuto(img, plan, layout, t, dpi, opts = {}) {
   try {
-    return { tile: readTile(img, plan, layout, t, dpi), how: 'straight' };
+    return { tile: readTile(img, plan, layout, t, dpi, null, opts), how: 'straight' };
   } catch (e) {
     try {
       const found = findTileOffset(img, plan, layout, t, { dpi });
-      return { tile: readTile(img, plan, layout, t, dpi, found), how: found.rot ? 'found+rot' + found.rot : 'found+' + found.dx + ',' + found.dy };
+      return { tile: readTile(img, plan, layout, t, dpi, found, opts), how: found.rot ? 'found+rot' + found.rot : 'found+' + found.dx + ',' + found.dy };
     } catch (e2) {
       const rot = detectTileRotation(img, plan, layout, t, { dpi });
-      return { tile: readTile(img, plan, layout, t, dpi, { dx: 0, dy: 0, rot: rot.rot }), how: 'rot' + rot.rot };
+      return { tile: readTile(img, plan, layout, t, dpi, { dx: 0, dy: 0, rot: rot.rot }, opts), how: 'rot' + rot.rot };
     }
   }
 }
 
 export function readTilePage(img, plan, layout, dpi, opts = {}) {
-  const first = readTileAuto(img, plan, layout, 0, dpi);
+  const first = readTileAuto(img, plan, layout, 0, dpi, opts);
   const per = first.tile.bytesPerTile;
   const out = new Uint8Array(first.tile.length);
   const tiles = [{ index: first.tile.index, bytes: first.tile.bytes.length, how: first.how }];
@@ -257,7 +279,7 @@ export function readTilePage(img, plan, layout, dpi, opts = {}) {
   for (let t = 1; t < first.tile.count; t++) {
     let got;
     try {
-      got = readTileAuto(img, plan, layout, t, dpi);
+      got = readTileAuto(img, plan, layout, t, dpi, opts);
     } catch (e) {
       missing.push(t);
       continue;

@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planTiles, tileLayout, tileCapacity } from '../../core/tiles.js';
 import { renderTilePage } from '../../core/render/tilepage.js';
-import { readTile, readTilePage } from '../../core/decode/tile-read.js';
+import { readTile, readTilePage, pageMapper } from '../../core/decode/tile-read.js';
 import { tilePageTiles } from '../../tools/make-tile-page.mjs';
 
 const sheetW = 210;
@@ -130,4 +130,33 @@ test('tile-read: straight, nudged and turned tiles all read, and a hole is refus
   const partial = readTilePage(img, plan, layout, dpi, { allowPartial: true });
   assert.equal(partial.partial, true);
   assert.ok(partial.missing.includes(7), 'the wrecked tile is reported: ' + JSON.stringify(partial.missing));
+});
+
+test('tile-read: one page homography absorbs a shear the per-tile search cannot', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const W = base.width;
+  const H = base.height;
+  const shearPx = 40;
+  const sheared = { width: W, height: H, dpi, pixels: new Uint8Array(W * H * 4).fill(255) };
+  for (let y = 0; y < H; y++) {
+    const shift = Math.round((shearPx * y) / (H - 1));
+    for (let x = 0; x < W; x++) {
+      const sx = x - shift;
+      if (sx < 0 || sx >= W) continue;
+      const s = (y * W + sx) * 4;
+      const d = (y * W + x) * 4;
+      sheared.pixels[d] = base.pixels[s];
+      sheared.pixels[d + 1] = base.pixels[s + 1];
+      sheared.pixels[d + 2] = base.pixels[s + 2];
+      sheared.pixels[d + 3] = 255;
+    }
+  }
+  assert.throws(() => readTilePage(sheared, plan, layout, dpi), /unreadable|reaches outside|refusing/);
+  const quad = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W + shearPx, y: H }, { x: shearPx, y: H }];
+  const back = readTilePage(sheared, plan, layout, dpi, { map: pageMapper(quad, W, H) });
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a 40 px page shear must read once the corners are given');
+  assert.deepEqual(back.missing, []);
 });
