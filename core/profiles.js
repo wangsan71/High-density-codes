@@ -223,7 +223,7 @@ export function getProfile(id) {
   return p;
 }
 
-const SHEETS = {
+export const SHEETS = {
   A4: { w: 210, h: 297 },
   // PLAN v5: the target is more data on less paper, so the smaller sheets are first-class. The
   // lattice is derived from the sheet inside planPage (region = sheet - 2*margin, minus the quiet
