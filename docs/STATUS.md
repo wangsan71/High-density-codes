@@ -126,6 +126,11 @@
 
 ## 已知风险 / 待办
 
+### 第 139 轮（**手册与实现对齐：`docs/USE.md` 改成一条命令的写法（`--image-mode lossy`），两步走降为备选**）
+
+**① 做了什么**：第 138 轮把两条命令并成一条之后，手册里还写着"先 `fit-image` 再 `send`" ⇒ **文档过期就是缺陷**（用户照 docs 走会多绕一步）。本轮改成：主路径 `send photo.png --image-mode lossy --pages N` + `receive … --out photo-back.psk`；两步走保留为"想先看载荷多大再决定"的备选；并注明**收回来的不是原 PNG 而是 `.psk` 图片载荷**。本轮**零代码改动**。
+
+**② 门限**：`check-docs-tables` **clean（503 行 / 88 张表）**；本轮只改文档 ⇒ 单测/门限沿用上一轮（`tests 409 · pass 409 · fail 0`、`usability` exit 0）。下一块砖仍是把 `.psk` 载荷接进手机端（PWA 显示成图）。
 ### 第 138 轮（**`send --image-mode lossy` 落地：两条命令并成一条；实测与两步走**逐字节同一份载荷**）
 
 **① 做了什么**：`cli/pskit.mjs` 的 `cmdSend` 新增 `--image-mode lossy [--min-quality N]`：读入 PNG → `pageBudgetFor(profile, --pages)` 取预算（**第 137 轮抽出的那个纯函数，与 `--pages` 检查同一份实现，不会漂移**）→ `packImageWithin()` 打包 → 其余流程一字未改（编码/渲染/写盘/清单）。消息里明说这是**有损**、且**摘要算在这份载荷上、不是原文件的 sha256**。
