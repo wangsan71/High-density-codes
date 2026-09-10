@@ -99,6 +99,7 @@ function parseArgs(argv) {
     else if (a === '--sheet') out.sheet = next();
     else if (a === '--out') out.out = next();
     else if (a === '--max-factor') out.maxFactor = next();
+    else if (a === '--min-scale') out.minScale = next();
     else if (a === '--help' || a === '-h') out.help = true;
     else if (a.startsWith('-')) throw new Error('unknown option ' + a);
     else out._.push(a);
@@ -127,7 +128,15 @@ try {
     if (prof.medium !== 'paper') throw new Error('fit-image: ' + profileId + ' is not a paper profile');
     const pages = Number(args.pages);
     if (!Number.isInteger(pages) || pages < 1 || pages > 255) throw new Error('fit-image: --pages must be 1..255, got ' + args.pages);
-    const maxFactor = args.maxFactor ? Number(args.maxFactor) : 16;
+    // G-IMG (PLAN-V5 section 4) asks for PSNR >= 30 dB AND a linear resolution of at least a quarter of
+    // the original, because a thumbnail passes PSNR on smooth content (measured: 77x109 scored 35.25 dB).
+    // The floor is enforced here as a hard cap on the downscale factor; --min-scale 0 lifts it for
+    // someone who explicitly accepts a coarser picture.
+    const minScale = args.minScale === undefined ? 0.25 : Number(args.minScale);
+    if (!(minScale >= 0 && minScale <= 1)) throw new Error('fit-image: --min-scale must be 0..1, got ' + args.minScale);
+    const floorFactor = minScale > 0 ? Math.max(1, Math.floor(1 / minScale)) : Infinity;
+    const maxFactor = Math.min(args.maxFactor ? Number(args.maxFactor) : 16, floorFactor);
+    if (minScale > 0) console.log('  floor     G-IMG: at most 1/' + floorFactor + ' downscale (' + (minScale * 100).toFixed(0) + '% linear resolution) unless --min-scale 0');
 
     const img = decodePNG(new Uint8Array(readFileSync(inPath)));
     const geom = planPage(profileId, { sheet: args.sheet });
@@ -146,7 +155,12 @@ try {
       console.log('  factor ' + String(k).padStart(2) + ': ' + small.width + 'x' + small.height + '  png ' + bytes.length + ' B  compressed ' + zipped + ' B' + (zipped <= budget ? '  <- fits' : ''));
       if (zipped <= budget && !chosen) { chosen = { k, small, bytes, zipped }; break; }
     }
-    if (!chosen) throw new Error('fit-image: even 1/' + maxFactor + ' does not fit ' + pages + ' page(s) (budget ' + budget + ' B); raise --pages, use a denser profile, or shrink the picture elsewhere');
+    if (!chosen) {
+      const why = minScale > 0 && maxFactor === floorFactor
+        ? 'fitting ' + pages + ' page(s) would need a downscale below the G-IMG floor of 1/' + floorFactor + ' -- raise --pages, use a denser profile (or a smaller sheet), or pass --min-scale 0 to accept a coarser picture on purpose'
+        : 'even 1/' + maxFactor + ' does not fit ' + pages + ' page(s) (budget ' + budget + ' B)';
+      throw new Error('fit-image: ' + why);
+    }
     const outPath = resolve(args.out || join(dirnameOf(inPath), basename(inPath).replace(/\.png$/i, '') + '-fit' + chosen.k + '.png'));
     writeFileSync(outPath, chosen.bytes);
     const psnr = psnrAgainst(img, chosen.small);
