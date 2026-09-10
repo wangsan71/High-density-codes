@@ -151,14 +151,20 @@ node cli/pskit.mjs verify --gate all     # 进程内门限；会打印本次未�
 & .\tools\usability.ps1                  # 端到端冒烟（一条命令走完 文件→页→模拟扫→还原）
 node tools/check-docs-tables.mjs         # 台账表格自检（提交前必跑）
 node tools/mtf-matrix.mjs --selftest     # G10 矩阵读数器自证（四喷嘴 + 两条对照）
+node tools/check-module-scans.mjs --kit 验收包目录 --scans 扫描父目录   # P-MX-300-6/5/4 一键核对
 # 真实使用
 node cli/pskit.mjs send FILE --profile P-M1-300 --format png,pdf --out DIR
 node cli/pskit.mjs receive DIR --photo --out OUT.bin
+& .\tools\jpeg-to-png.ps1 -Source DIR -Out DIR-png   # Windows CLI：JPEG 照片转 PNG
 & .\tools\acceptance-kit.ps1             # 生成给用户的硬件验收包（含 README.txt）
 ```
 
 **命令行口径**：不加 `--profile` 时 `send` 默认纸面档 `P-M1-300`；一次传输最多 **255 页**（页头是 u8）；
 超过就用 `split`/`join`。**打印一律 100% 缩放。**
+
+**JPEG 责任边界**：`core/` 的图片解码器保持 PNG/TIFF-only，不加入第三方 JPEG codec。
+浏览器接收端用 `createImageBitmap` + canvas 解 JPEG；Windows CLI 用户先用 `tools/jpeg-to-png.ps1`
+（System.Drawing）转成 PNG，再跑 `receive`。不要为了 CLI 的 JPEG 输入而扩大 `core/` 的依赖或打破纯 ESM 约束。
 
 ---
 
