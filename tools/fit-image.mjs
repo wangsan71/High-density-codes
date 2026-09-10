@@ -23,6 +23,7 @@ import { decodePNG } from '../core/decode/png-read.js';
 import { encodePNG } from '../core/render/png.js';
 import { compress } from '../core/deflate.js';
 import { planPage, PROFILES } from '../core/profiles.js';
+import { packImageWithin, unpackImage } from '../core/image/container.js';
 
 /** How many data pages N total pages leave, given the inter-page parity percentage. */
 function maxDataPages(want, pct) {
@@ -100,6 +101,8 @@ function parseArgs(argv) {
     else if (a === '--out') out.out = next();
     else if (a === '--max-factor') out.maxFactor = next();
     else if (a === '--min-scale') out.minScale = next();
+    else if (a === '--lossy') out.lossy = true;
+    else if (a === '--min-quality') out.minQuality = next();
     else if (a === '--help' || a === '-h') out.help = true;
     else if (a.startsWith('-')) throw new Error('unknown option ' + a);
     else out._.push(a);
@@ -111,6 +114,10 @@ const USAGE = [
   'fit-image -- downscale a PNG so it fits a page budget (LOSSY)',
   '',
   '  node tools/fit-image.mjs <in.png> --pages N [--profile P-MX-300-5] [--sheet A4] [--out fitted.png]',
+  '  node tools/fit-image.mjs <in.png> --pages N --lossy [--min-quality 5] [--out fitted.psk]',
+  '      --lossy keeps the FULL resolution and spends the budget on quality instead of pixels, using',
+  '      the self-written codec (core/image/). The payload is a .psk image payload, not a PNG: send it',
+  '      with the same send command. Lossy either way -- the difference is what it costs you.',
   '',
   '  Prints what it gave up (dimensions, bytes, page budget) and writes the fitted PNG.',
   '  It never guesses: if even the largest allowed factor cannot fit, it refuses and says so.',
@@ -146,6 +153,29 @@ try {
 
     console.log('fit-image: ' + basename(inPath) + '  ' + img.width + 'x' + img.height + '  ' + originalBytes + ' B');
     console.log('  budget    ' + pages + ' page(s) of ' + profileId + ' (' + (args.sheet || 'A4') + ') = ' + dataPages + ' data x ' + geom.ecc.netBytesPerPage + ' B = ' + budget + ' B');
+
+    if (args.lossy) {
+      // The other trade: full resolution, quality spent against the same budget. This is measured, not
+      // estimated -- packImageWithin() encodes for real until something fits, and the PSNR below is
+      // measured by decoding what we just wrote, not predicted.
+      const minQ = args.minQuality === undefined ? 5 : Number(args.minQuality);
+      if (!(minQ >= 1 && minQ <= 100)) throw new Error('fit-image: --min-quality must be 1..100, got ' + args.minQuality);
+      const within = packImageWithin(img.pixels, img.width, img.height, budget, { minQuality: minQ });
+      const dec = unpackImage(within.bytes);
+      let se = 0;
+      for (let i = 0; i < img.pixels.length; i += 4) {
+        for (let c = 0; c < 3; c++) { const d = img.pixels[i + c] - dec.rgba[i + c]; se += d * d; }
+      }
+      const mse = se / (img.width * img.height * 3);
+      const psnr = mse === 0 ? Infinity : 10 * Math.log10((255 * 255) / mse);
+      const outPath = resolve(args.out || join(dirnameOf(inPath), basename(inPath).replace(/\.png$/i, '') + '-lossy.psk'));
+      writeFileSync(outPath, within.bytes);
+      console.log('  LOSSY: full ' + img.width + 'x' + img.height + ' kept, chose q' + within.quality + ' after ' + within.tried + ' encode(s)');
+      console.log('  quality   PSNR ' + (psnr === Infinity ? 'inf' : psnr.toFixed(2)) + ' dB at full resolution (no downscaling)' + (psnr >= 30 ? '  (G-IMG criterion >= 30 dB: met)' : '  (G-IMG criterion >= 30 dB: NOT met -- raise --pages or --min-quality)'));
+      console.log('  wrote     ' + outPath + ' (' + within.bytes.length + ' B, budget ' + budget + ' B)');
+      console.log('  next      node cli/pskit.mjs send "' + outPath + '" --profile ' + profileId + (args.sheet ? ' --sheet ' + args.sheet : '') + ' --format png,pdf --out <dir>');
+      process.exit(0);
+    }
 
     let chosen = null;
     for (let k = 2; k <= maxFactor; k++) {
