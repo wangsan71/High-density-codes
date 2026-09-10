@@ -1,31 +1,23 @@
 /**
- * PSKT sender -- encode a file into printable pages, entirely in the browser.
+ * PSKT 发送端 — 浏览器内把文件编码成可打印产物。
  *
- * Why this page exists: a phone cannot run cli/pskit.mjs. Everything the CLI does after
- * `encodeTransfer` is pure core/ ESM (raster, PNG, PDF, mesh), so the browser can do it
- * too. PLAN's "no external source" rule is honoured even more strictly here: nothing leaves
- * the device, and downloads are `data:` URLs -- no blob handling, so the page's CSP needs
- * no `blob:` allowance.
+ * 存在的原因：手机跑不了 cli/pskit.mjs。CLI 在 encodeTransfer 之后做的所有事（raster、PNG、
+ * PDF、网格）都是 core/ 里的纯 ESM，浏览器同样能做。PLAN 的「无外部源」在这里更严：什么
+ * 都不出设备，下载走 data: URL，不申请 blob: 许可，所以 CSP 不用放宽。
  *
- * Structure is dictated by verification, not taste: buildArtifacts() is pure and DOM-free
- * so `tools/smoke-sender.mjs` can execute the exact same code path in Node. Without that
- * split, the only way to test this file was to click it in a browser, and there is no
- * browser on this machine -- which is how the previous version shipped three invented
- * profile fields (`p.plate.mm`, `p.sheet`, `prof.palette`, none of which exist in
- * core/profiles.js) and a boolean passed where {w,h} was required.
+ * 结构由可测性决定，不是审美：buildArtifacts() 是纯函数、不碰 DOM，
+ * tools/smoke-sender.mjs 才能在 Node 里跑同一段代码。这台机器没浏览器，而 click 测不到时，
+ * 上一版发出去过三个臆造的字段（`p.plate.mm` / `p.sheet` / `prof.palette`，core/profiles.js
+ * 里一个都没有），还有个 boolean 填到了 {w,h} 位置上。
  *
- * The refusal rules are the CLI's, not reinterpreted: paper profiles get no relief model,
- * and projectionReport / stlSelfCheck / selfCheck3MF must pass or no model is offered. A
- * relief that cannot reproduce its own raster mask belongs to the same family of failure as
- * a misaccepted frame.
+ * 拒绝规则和 CLI 同一份：纸面档不浮雕；浮雕档要 projectionReport / stlSelfCheck / selfCheck3MF
+ * 全过才给模型。一个浮雕不能复现自己的栅格掩码，与一个被错接受的帧是同族的失败。
  *
- * No performance work, by instruction: pages are rendered serially, PNGs re-encoded for
- * each download, and the mesh is rebuilt on every click.
+ * 性能不做（按口径）：页顺序渲染、PNG 每下载一次重编、网格每次点击重算。
  */
 import { PROFILES, planPage, isUnqualifiedPaper, profileOptionLabel } from '../core/profiles.js';
-// Re-exported so the page keeps its own surface and tests/unit/profile-picker-warning.test.mjs can
-// import either the page or the core module; the implementation lives in core (round 82) so the
-// receiver page cannot drift from it.
+// 在 core 里实现、这里再 re-export：让页面有自己的 surface，也让 tests/unit/profile-picker-warning.test.mjs
+// 可以从页面或 core 任一处 import，两边不会漂移。
 export { isUnqualifiedPaper, profileOptionLabel };
 import { encodeTransfer } from '../core/protocol.js';
 import { pageLayout } from '../core/render/layout.js';
@@ -37,33 +29,29 @@ import { encodeSTLSolid, stlSelfCheck } from '../core/mesh/stl.js';
 import { encode3MF, selfCheck3MF, buildZip } from '../core/mesh/threeMF.js';
 import { sha256Hex } from '../core/hash.js';
 import { getPalette } from '../core/palette.js';
-// header.kind is a u8 (0 = data page, 1 = parity page), so the constant has to come from the
-// frame module rather than be remembered here -- this file used to compare it against a
-// string and silently counted zero parity pages forever (docs/DEFECTS.md D15).
+// header.kind 是 u8（0 = 数据页，1 = 校验页），常量要从 frame 模块取，不能在这里记一份
+// — 上一版就把它当成字符串比，结果校验页数永远是 0（docs/DEFECTS.md D15）。
 import { PAGE_KIND } from '../core/frame.js';
 
 /**
- * Page-count policies, as pure functions, so tools/smoke-sender.mjs can check the arithmetic.
+ * 页数策略，都写成纯函数，tools/smoke-sender.mjs 才能在进程内核对算术。
  *
- * The DOM handlers that apply them sit behind a `document` guard and cannot be reached in process --
- * which is exactly how round 67's print warning ended up printing AFTER the new window had already
- * been written: the cost was paid first and the user was told afterwards. Everything that decides
- * "how many pages is too many" lives here instead, and the handlers only obey.
+ * 套在「document 守卫」后面的 DOM 处理器在 Node 里跑不到 —— 这正是第 67 轮那个 printPlan
+ * 在新窗口已经写出来之后才警告的原因：成本先付、用户后知。所有「多少页算太多」的判断都住
+ * 在这里，处理器只负责照办。
  *
- * The numbers are measured, not guessed. A page at A4/300dpi is 2480x3508 px, so one RGBA raster is
- * 34.8 MB; round 66's tools/sender-memory-probe.mjs measured 30.6 MB of RSS per page in Node for the
- * same rasters, and a page's base64 PNG is ~0.47 MB of JS string. A browser decodes an <img> to a
- * raster whether or not it is on screen (loading="lazy" is a hint, not a promise), so one preview
- * costs ~35 MB decoded plus ~0.5 MB of string, and a print window holding every page is the same
- * arithmetic with no cap at all: 168 pages is ~5.8 GB. That is why the print path now refuses instead
- * of warning, and why previews are capped. Nothing is lost by refusing -- pack.pdf carries every page
- * at true physical size and is already what docs/USE.md tells users to print.
+ * 数字是量出来的，不是猜的：A4/300 dpi 一页 2480×3508 px，RGBA 光栅 34.8 MB；第 66 轮的
+ * tools/sender-memory-probe.mjs 在 Node 里量到 30.6 MB/页；PNG 的 base64 约 0.47 MB 的 JS 字符串。
+ * 浏览器把 <img> 解码成位图，不管它有没有上屏（loading="lazy" 是 hint 不是承诺），所以一张预览
+ * 要 ~35 MB 解码后位图 + ~0.5 MB 字符串；一个把每页都装进去的 print 窗口是这个算术的 168 倍
+ * ≈ 5.8 GB ⇒ 这就是为什么 print 路径现在直接拒绝、不再「先花掉再警告」。预览也限张数。
+ * 失去的什么也没有：pack.pdf 每页按真实物理尺寸摆好，正是 docs/USE.md 告诉用户打印用的。
  */
-const PAGE_RASTER_MB = 35; // 2480 x 3508 x 4 B at A4/300dpi, rounded; probe measured 30.6 MB/page RSS
+const PAGE_RASTER_MB = 35; // 2480×3508×4 B @ A4/300dpi，向上取整；probe 实测 30.6 MB/页 RSS
 export const PREVIEW_CAP = 8;
 export const PRINT_WINDOW_PAGE_CAP = 8;
 
-/** How many previews to build, and what to tell the user about the pages that get none. */
+/** 画几张预览，没画到的怎么告诉用户。 */
 export function previewPlan(pageCount, cap = PREVIEW_CAP) {
   const n = Math.max(0, pageCount | 0);
   const shown = Math.min(n, Math.max(0, cap | 0));
@@ -71,7 +59,7 @@ export function previewPlan(pageCount, cap = PREVIEW_CAP) {
   return {
     shown,
     hidden,
-    // No markdown here: say() writes textContent, so asterisks would show up literally.
+    // 不写 markdown：say() 走 textContent，星号会原样显示。
     note: hidden
       ? `预览只画了前 ${shown} 页，还有 ${hidden} 页没有预览：每张预览都是 base64 图片（约 0.5 MB 字符串），浏览器还会把它解码成位图（A4/300dpi 每页约 ${PAGE_RASTER_MB} MB），页数一多手机发送端会卡。所有页都在 pack.pdf 和 PNG（zip）里，一页不缺；要逐页看请下载它们。`
       : '',
@@ -79,61 +67,51 @@ export function previewPlan(pageCount, cap = PREVIEW_CAP) {
 }
 
 /**
- * Whether a download is big enough that the browser might not deliver it, and what to say if so.
+ * 下载体量会不会让浏览器拖不住，拖不住时怎么说。
  *
- * This page downloads through data: URLs (no blob handling, so the CSP needs no blob: allowance), and
- * that has a cost the page cannot hide: b64() builds the whole artifact as a JS string, btoa() makes a
- * second one 4/3 the size, and the href template makes a third -- so a 63 MB zip means roughly 295 MB
- * of transient string data before the browser even starts. Whether the download then succeeds is not
- * something this page can observe; there is no event for "the file landed", so a failure here is
- * silent, and silence is the one outcome this project refuses. DEFECTS D58 was the same shape: the log
- * claimed N downloads had happened and the browser had quietly dropped most of them.
+ * 本页下载走 data: URL（不走 blob:，所以 CSP 不用放宽），这是有代价的：b64() 把整个产物
+ * 变成 JS 字符串，btoa() 再乘 4/3，href 模板再乘 1 倍 —— 一个 63 MB 的 zip，瞬时字符串数据
+ * ~295 MB，浏览器才开始下载。下载是否落地浏览器不告诉本页（没有「文件落地」事件），失败就是
+ * 静默的，而「静默」是本项目拒绝的那一种失败。DEFECTS D58 是同一种病：那版日志说下载了 N 个，
+ * 浏览器悄悄丢了大多数。
  *
- * So above a threshold this says the size, says that the page cannot know whether it worked, and names
- * the route that has no browser in it. Below the threshold it stays quiet, because a warning on every
- * three-page transfer teaches the user to ignore the log. The threshold is a judgement and not a
- * measurement: there is no browser on this machine to measure with. It sits where the transient
- * strings reach a few hundred MB, i.e. where a phone tab plausibly dies. Exported so the arithmetic is
- * testable in process and the judgement is visible instead of buried in a comparison.
+ * 所以超过一个阈值就明说：体量、能否成功不知道、点名不经过浏览器的路径；阈值以下就不出声，
+ * 因为三页的传输也警告的话，用户就学会忽略日志了。阈值是判断不是测量：本机没浏览器能量。
+ * 阈值落在瞬时字符串几百 MB 的位置，也就是手机标签页大概率死的那个点。export 出来是为了让算
+ * 术在进程内可测、让判断不埋在比较里。
  */
 export const DATA_URL_RISK_BYTES = 32 * 1024 * 1024;
 
 /**
- * The limit that actually decides how much one transfer can carry, and the numbers a user needs when they
- * hit it.
+ * 一次传输能装多少的真正限制（以及用户撞上时该看到什么）。
  *
- * It is not a browser limit and not a judgement: a page header stores totalPages in ONE byte
- * (core/frame.js:19), so one transfer is at most 255 pages, and core/protocol.js:318-320 spends some of
- * those pages on inter-page parity and refuses whatever is left -- `too many pages: N data pages leave no
- * room for parity`. At P-M1-300 with its default 20% parity that ceiling is 212 data pages of 7490 B, so
- * about 1.5 MB of data deflate cannot shrink. Measured, not derived: 1 MiB encodes to 168 pages in
- * ~180 ms and 2 MiB is refused in 48 ms. Everything else in this section is about browsers; this one is
- * about the protocol, so it binds the CLI and the web page identically, and switching between them
- * changes nothing -- which the wording below has to say out loud, because "use the CLI instead" is this
- * project's usual escape and here it is not one.
+ * 不是浏览器限制，也不是判断：页头 totalPages 是 1 字节（core/frame.js:19），所以一次传输
+ * 最多 255 页，core/protocol.js:318-320 还会用掉一部分做页间校验，剩下的用满就拒：
+ * `too many pages: N data pages leave no room for parity`。P-M1-300 默认 20% 校验下
+ * 上限是 212 数据页 × 7490 B ≈ 1.5 MB 的不可压数据。量出来的，不是算出来的：1 MiB 编出
+ * 168 页 ~180 ms，2 MiB 在 48 ms 拒。下面这些是浏览器的故事，这条是协议的事，所以 CLI
+ * 和网页口径一致，切换路径不变 —— 措辞得说出来，因为「用 CLI 替代」是本项目常用的逃生口，
+ * 这里它不是逃生口。
  */
-export const PROTOCOL_PAGE_LIMIT = 255; // core/frame.js:19, totalPages is a u8
-const PAGE_RENDER_MS = 202; // ACCEPTANCE G6: render+PNG per A4/300dpi page, measured
-// Reading a file into a tab is one synchronous allocation of its entire size. Above this, say so before
-// doing it. A judgement and not a measurement -- there is no browser here to measure with -- and it only
-// ever produces a sentence, never a refusal, so being wrong costs nothing but noise.
+export const PROTOCOL_PAGE_LIMIT = 255; // core/frame.js:19，totalPages 是 u8
+const PAGE_RENDER_MS = 202; // ACCEPTANCE G6：A4/300dpi 渲染+PNG/页，量出来的
+// 把文件读进标签页是一次性同步分配它的整个大小。超过这个数，先说。这是个判断不是测量（本机没
+// 浏览器能量），它只产生一句话、不会拒，所以猜错也只是多一句噪音。
 const BIG_READ_BYTES = 64 * 1024 * 1024;
 
 /**
- * {dataPages, parityPages, pages, over, limit, maxPayloadBytes, perDataPageBytes, parityPct}, or null when
- * the geometry is unknown -- no numbers means no sentence, never a guess.
+ * {dataPages, parityPages, pages, over, limit, maxPayloadBytes, perDataPageBytes, parityPct}，
+ * 几何未知时返 null —— 没数就别说话，更不能猜。
  *
- * This mirrors core/protocol.js:307-321: dataPages = ceil(payload / geom.ecc.dataBytes), parity =
- * max(2, ceil(dataPages * pct / 100)), total capped by the one-byte header field. tools/smoke-sender.mjs
- * pins the mirror against the encoder's own output instead of trusting it: at 1 MiB and default parity
- * both say 168 pages, and at 2 MiB both say 280 data pages.
+ * 镜像 core/protocol.js:307-321：dataPages = ceil(payload / geom.ecc.dataBytes)，
+ * parity = max(2, ceil(dataPages * pct / 100))，总页被 1 字节的页头字段封顶。
+ * tools/smoke-sender.mjs 拿这个镜像去钉编码器自己产出的数：1 MiB 默认校验下两边都说 168 页，
+ * 2 MiB 两边都说 280 数据页。
  *
- * It assumes deflate achieves nothing, so `pages` over-states the truth for any file that compresses, by
- * an unbounded factor: this project's own deflate turns 4 MiB of zeroes into 6 pages. That is why these
- * numbers may warn and may NOT refuse. Round 71's first version refused on an estimate of this shape and
- * the smoke caught it before it shipped -- a 20 MB log that compresses into a few hundred pages would
- * have been turned away at the file picker, which is a false refusal, and the kind that teaches a user
- * the tool is broken. Refusing belongs to core/protocol.js, where the compressed length is a fact.
+ * 假设 deflate 一无所获，所以 `pages` 对任何可压文件都是高估，上界不限：本项目自己的 deflate
+ * 把 4 MiB 的全 0 压到 6 页。这条规则可以警告、不能拒 —— 第 71 轮第一版在估计量上拒了，smoke
+ * 在发版前抓住：20 MB 的日志压成几百页，本来能传，被卡在选文件上，这是误拒，是教用户「这工具
+ * 是坏的」的那种。拒的事归 core/protocol.js，压缩后长度是事实。
  */
 export function transferBudget(byteLength, geom, parityPct) {
   const D = geom && geom.ecc && geom.ecc.dataBytes > 0 ? geom.ecc.dataBytes : 0;
@@ -142,10 +120,9 @@ export function transferBudget(byteLength, geom, parityPct) {
     ? (geom.ecc.inter ? Number(geom.ecc.inter.parityPct) || 0 : 0)
     : Number(parityPct);
   const n = Math.max(0, Math.floor(Number(byteLength) || 0));
-  const dataPages = Math.ceil(n / D) || 1; // protocol.js:307 has the same `|| 1`
+  const dataPages = Math.ceil(n / D) || 1; // protocol.js:307 也是 `|| 1`
   const parityPages = Math.max(2, Math.ceil((dataPages * pct) / 100));
-  // The largest payload that still fits, found by asking the question the encoder asks: walk data pages
-  // down until the parity they would demand leaves the total inside the one-byte field.
+  // 最大载荷是这样问出来的：往回走 dataPages，直到它要的校验页让总数还塞在 1 字节字段里。
   let maxData = 0;
   for (let d = PROTOCOL_PAGE_LIMIT - 2; d >= 1; d--) {
     if (d + Math.max(2, Math.ceil((d * pct) / 100)) <= PROTOCOL_PAGE_LIMIT) { maxData = d; break; }
@@ -162,27 +139,21 @@ export function transferBudget(byteLength, geom, parityPct) {
   };
 }
 
-/**
- * The sentence for core/protocol.js:320's page-limit refusal, with real numbers in it. '' when the
- * geometry is unknown, so the caller keeps whatever generic hint it had rather than showing a blank.
- */
+/** core/protocol.js:320 那次拒的整句用户语，带真数字。几何未知就空串，让调用方保留原 hint。 */
 export function pageLimitHint(byteLength, geom, parityPct) {
   const b = transferBudget(byteLength, geom, parityPct);
   if (!b) return '';
   const mb = (v) => (v / 1048576).toFixed(2);
   const at0 = transferBudget(byteLength, geom, 0);
-  // No markdown: say() writes textContent, so asterisks would show up literally.
-  return `装不下，而且是协议装不下、不是浏览器的问题：页头的 totalPages 只有一个字节（core/frame.js:19）⇒ 一次传输最多 ${b.limit} 页，校验页挤到没位置时 core/protocol.js:320 就拒绝。这个文件按当前档（每页净 ${b.perDataPageBytes} B）与 ${b.parityPct}% 校验页需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而当前配置一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：① 把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB，代价是丢页时的恢复能力下降）；② 换每页装得更多的档（如 600 dpi 或四色档，代价是对打印与扫描的要求更高）；③ 把它切成几份分别传，这一条有现成命令：node cli/pskit.mjs split 你的文件（默认每份 ≤1.4 MB，写出 part-NNN.bin 与 parts.json）⇒ 每份各自发送、打印、扫描，接收时写回同一目录、用同一个 part 名字 ⇒ node cli/pskit.mjs join 那个目录 --out 文件名（逐份校验摘要、再校验整文件摘要，缺一份或错一位就拒绝并退出 1，绝不交出一个"短一点的文件"）。注意：CLI 受同一个 255 页限制（它走同一个 encodeTransfer），所以"改用 CLI"解决不了这一条 —— 解决它的是切分。`;
+  // 不写 markdown：say() 走 textContent，星号会原样显示。
+  return `装不下，而且是协议装不下、不是浏览器的问题：页头的 totalPages 只有一个字节（core/frame.js:19）⇒ 一次传输最多 ${b.limit} 页，校验页挤到没位置时 core/protocol.js:320 就拒绝。这个文件按当前档（每页净 ${b.perDataPageBytes} B）与 ${b.parityPct}% 校验页需要 ${b.pages} 页（${b.dataPages} 个数据页 + ${b.parityPages} 个校验页），而当前配置一次最多约 ${mb(b.maxPayloadBytes)} MB。三条路：① 把校验页 % 调低（0% 时约 ${at0 ? mb(at0.maxPayloadBytes) : '更多'} MB，代价是丢页时的恢复能力下降）；② 换每页装得更多的档（如 600 dpi 或四色档，代价是对打印与扫描的要求更高）；③ 把它切成几份分别传，这一条有现成命令：node cli/pskit.mjs split 你的文件（默认每份 ≤1.4 MB，写出 part-NNN.bin 与 parts.json）⇒ 每份各自发送、打印、扫描，接收时写回同一目录、用同一个 part 名字 ⇒ node cli/pskit.mjs join 那个目录 --out 文件名（逐份校验摘要、再校验整文件摘要，缺一份或错一位就拒绝并退出 1，绝不交出一个「短一点的文件」）。注意：CLI 受同一个 255 页限制（它走同一个 encodeTransfer），所以「改用 CLI」解决不了这一条 —— 解决它的是切分。`;
 }
 
 /**
- * {warn, note}: what to say BEFORE the file is read into the tab. A warning and never a refusal -- see
- * transferBudget for why an estimate must not refuse.
+ * {warn, note}：读文件进标签页前该说的话。只警告不拒 —— 看 transferBudget 为什么「估计量不该拒」。
  *
- * Two things are worth saying early, because both happen before the exact page count exists: the file may
- * be too big for one transfer at all, and reading it is a synchronous one-shot allocation of its whole
- * size, as is the render that follows (DEFECTS D65). A user who has been told why the tab is about to
- * stop answering is inconvenienced; one who has not been told thinks the tool broke.
+ * 两件事值得提前说，因为都发生在确切页数算出来之前：文件可能一次装不下，以及读是一次性同步分配
+ * 整份（DEFECTS D65）。知道为什么标签页即将不响的只是被打扰；不知道的会以为工具坏了。
  */
 export function earlySizePlan(byteLength, geom, parityPct) {
   const n = Math.max(0, Math.floor(Number(byteLength) || 0));
@@ -201,20 +172,20 @@ export function earlySizePlan(byteLength, geom, parityPct) {
   return { warn: parts.length > 0, note: parts.join(' ') };
 }
 
-/** {risk, note}: note is '' unless the artifact is big enough that a data: URL download is doubtful. */
+/** {risk, note}：note 在产物大到 data: URL 下载可疑时才有。 */
 export function downloadPlan(name, byteLength) {
   const n = Math.max(0, Math.floor(Number(byteLength) || 0));
   if (n < DATA_URL_RISK_BYTES) return { risk: false, note: '' };
   const mb = (v) => (v / 1048576).toFixed(1);
   const b64Bytes = Math.ceil(n / 3) * 4;
-  // No markdown: say() writes textContent, so asterisks would show up literally.
   return {
     risk: true,
+    // 不写 markdown：say() 走 textContent，星号会原样显示。
     note: `「${name}」有 ${mb(n)} MB。这一页是把它变成约 ${mb(b64Bytes)} MB 的 data: URL 文本再交给浏览器下载的，这个体量可能很慢、也可能直接失败，而页面无法知道下载有没有成功（浏览器不给这个事件）。如果没落地：电脑上有 Node 就用 CLI 直接写盘、不经浏览器 —— node cli/pskit.mjs send 你的文件 --profile P-M1-300 --format png,pdf --out 目录；或者把文件切小、分几次传。`,
   };
 }
 
-/** Whether the browser-print path may write its window at all, and if not, what to say instead. */
+/** 浏览器打印这条路能不能开新窗、不能开时怎么说。 */
 export function printPlan(pageCount, cap = PRINT_WINDOW_PAGE_CAP) {
   const n = Math.max(0, pageCount | 0);
   if (n <= Math.max(0, cap | 0)) return { write: true, note: '' };
@@ -226,12 +197,11 @@ export function printPlan(pageCount, cap = PRINT_WINDOW_PAGE_CAP) {
 
 export const isPlate = (id) => !!PROFILES[id] && PROFILES[id].medium === 'plate';
 
-// profileOptionLabel / isUnqualifiedPaper now live in core/profiles.js and are re-exported above.
+// profileOptionLabel / isUnqualifiedPaper 现在住在 core/profiles.js，在文件顶上 re-export。
 
 /**
- * Ported verbatim from cli/pskit.mjs pickPalette (a page cannot import from cli/, and a
- * diverged copy would mean the web sender and the CLI sender produce different ink for the
- * same profile -- so keep this in sync if that function ever changes).
+ * 原样从 cli/pskit.mjs 的 pickPalette 搬过来 —— 页面没法 import cli/，而一份漂走的副本意味
+ * 着网页发送端与 CLI 发送端对同一档位印出不同的墨。若 pickPalette 改，本函数也要改。
  */
 export function pickPalette(profileId, explicit) {
   if (explicit) return explicit;
@@ -242,8 +212,8 @@ export function pickPalette(profileId, explicit) {
 }
 
 /**
- * The whole data path, no DOM. Returns { ok, ... } or { ok:false, stage, error, hint }.
- * Callers must treat ok:false as "produce nothing", never as "warn and continue".
+ * 整条数据路径，无 DOM。返回 { ok, ... } 或 { ok:false, stage, error, hint }。
+ * 调用方必须把 ok:false 当成「什么都不出」，不能当成「警告一下然后继续」。
  */
 export async function buildArtifacts(bytes, opts = {}) {
   const profileId = opts.profile || 'P-M1-300';
@@ -269,27 +239,26 @@ export async function buildArtifacts(bytes, opts = {}) {
       passphrase: pass || undefined,
     });
   } catch (e) {
-    // "too many pages: N data pages leave no room for parity" is core/protocol.js:320's own RangeError.
-    // It is true, and it is not a sentence a user can act on: it never says what the limit is, why it
-    // exists, what the file needs, or which knob to turn. The CLI has said this properly since round 47
-    // ("needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile"); this page
-    // showed the raw exception plus a generic hint instead (DEFECTS D65). The numbers come from
-    // transferBudget, whose arithmetic smoke-sender pins against the encoder's real output.
+    // core/protocol.js:320 的 "too many pages: N data pages leave no room for parity" 是 RangeError，
+    // 是真的，但不是用户能照做的句子：它不说上限、为什么、文件要多少、哪个旋钮。
+    // CLI 从第 47 轮起就把这句话说完整（"needs 1120 pages > 255 (inter-page RS limit): shrink payload or use a denser profile"），
+    // 这一页以前只把异常原文 + 一句通用提示（DEFECTS D65）。数字从 transferBudget 算，
+    // smoke-sender 把这套算术钉在编码器自己产出的数上。
     let hint = '常见原因：载荷超出该剖面单页容量，或校验页比例吃光预算。换更大剖面、调低校验页 %，或先分割文件。';
     if (/too many pages/i.test(e.message)) {
       try {
         const g = planPage(profileId, { nozzle: opts.nozzle ? Number(opts.nozzle) : undefined, plateMm });
         hint = pageLimitHint(bytes.length, g, opts.parityPct) || hint;
       } catch {
-        // A failing explanation must not replace a true error: keep the generic hint.
+        // 解释失败不能盖住真错误：保留通用提示。
       }
     }
     return { ok: false, stage: 'encode', error: e.message, hint };
   }
 
-  // sheetMm must be {w,h} taken from the geometry the encoder just chose (cli/pskit.mjs:156);
-  // a boolean here makes pageLayout's fit check compare against `true` and never fail --
-  // the previous version of this file did exactly that.
+  // sheetMm 必须是 {w,h}，从编码器刚选的 geom 取（cli/pskit.mjs:156）；
+  // 这里如果传 boolean，pageLayout 的 fit 检查会拿它和 `true` 比，永远不失败
+  // —— 上一版正是这么写的。
   let layout;
   try {
     layout = pageLayout(t.geom, dpi, { plateMm, sheetMm: plate ? undefined : t.geom.sheetMm });
@@ -302,10 +271,9 @@ export async function buildArtifacts(bytes, opts = {}) {
     for (let i = 0; i < t.pages.length; i++) {
       const p = t.pages[i];
       const bitmap = renderPageBitmap({ geom: t.geom, levels: p.levels, layout, palette: paletteId, mono, echoBits: echoBitsOf(p.header) });
-      // The PNG a browser offers for printing is the paper: margins, the code area centred, crop and
-      // registration marks (DEFECTS D45). `bitmap` itself stays the code area, because
-      // encodePDFDocument below centres it and strokes its own vector marks -- handing it an
-      // already-sheeted bitmap would centre the sheet on the sheet.
+      // 浏览器拿去打印的是纸：边距、码区居中、裁切与套准标记（DEFECTS D45）。`bitmap` 本身留作
+      // 码区，因为下面的 encodePDFDocument 会自己居中并描自己的矢量标记 —— 给它一个已带白边的
+      // 位图会变成「在白边上居中白边」。
       const png = encodePNG(bitmap.sheetMm ? renderSheetBitmap(bitmap) : bitmap);
       pages.push({ tag: `page-${String(i).padStart(3, '0')}`, bitmap, png, header: p.header, headerBytes: p.headerBytes, levels: p.levels });
     }
@@ -313,15 +281,12 @@ export async function buildArtifacts(bytes, opts = {}) {
     return { ok: false, stage: 'render', error: e.message, hint: `渲染 ${paletteId} 色板时失败：单色出图请把色板留在 PAPER1。` };
   }
 
-  // Hand the writer one raster at a time and drop each one the moment it has been consumed, so the
-  // peak is one page's raster plus the encoded streams instead of every page's raster. Measured
-  // before this change (tools/sender-memory-probe.mjs, same command): 42 pages held 1.30 GB of
-  // arrayBuffers with all 42 rasters still referenced by the returned result, while heapUsed stayed
-  // at 5 MB -- a 256 KiB file, an entirely ordinary document, needing more memory than a phone has.
-  // `pages[i].bitmap` is null afterwards BY DESIGN: the artifacts a user downloads are the page PNGs
-  // and pack.pdf, and the raster was only ever an intermediate. Anything that needs to look at a page
-  // again decodes its PNG, which is the artifact that actually gets printed -- that is what
-  // tools/smoke-sender.mjs now does, and it is the stronger test, not a weaker one.
+  // 一次喂给 writer 一张位图，用完就丢：峰值 = 一页的位图 + 编码流，而不是每页都留。
+  // 改之前量过（tools/sender-memory-probe.mjs，同一命令）：42 页持着 1.30 GB arrayBuffer，
+  // 42 张位图仍被返回结果引用着；heapUsed 才 5 MB —— 一个 256 KiB 的普通文档，要的内存比手机
+  // 还多。`pages[i].bitmap` 之后被故意置 null：用户拿到的是 PNG 与 pack.pdf，位图只是中间。
+  // 想再看就重新解它的 PNG（这才真正是要打印的那一份 —— tools/smoke-sender.mjs 现在这么干，
+  // 那是更强的测试，不是更弱的）。
   const pdf = encodePDFDocument(
     (function* rasters() {
       for (const p of pages) {
@@ -332,7 +297,7 @@ export async function buildArtifacts(bytes, opts = {}) {
     })(),
   );
 
-  // The relief path is per page and must survive the same three guards the CLI insists on.
+  // 浮雕路径逐页走 CLI 坚持的那三道关。
   const models = [];
   if (plate) {
     for (let i = 0; i < pages.length; i++) {
@@ -398,18 +363,17 @@ export async function buildArtifacts(bytes, opts = {}) {
   };
 }
 
-/* ------------------------------------------------------------------ DOM wiring ----
- * Everything below touches the page. The guard is what lets tools/smoke-sender.mjs import
- * this module under Node: without it, `document` at module scope is a ReferenceError and
- * the only testable thing about this file would be its syntax.
+/* ----------------------------------------------------------------- DOM --------
+ * 守卫让 tools/smoke-sender.mjs 能在 Node 里 import 本模块：没有它，模块作用域里的 `document`
+ * 立即 ReferenceError，唯一能测的就剩语法。
  */
 if (typeof document !== 'undefined' && typeof document.getElementById === 'function' && document.getElementById('sfile')) {
   const $ = (id) => document.getElementById(id);
   const log = $('slog');
   const say = (msg, cls = '') => {
-    const line = document.createElement('div');
-    if (cls) line.className = cls;
-    line.textContent = msg;
+    const line = document.createElement('span');
+    if (cls) line.className = 'l' + (cls ? ' ' + cls : '');
+    line.textContent = msg + '\n';
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
   };
@@ -419,9 +383,8 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     return btoa(s);
   };
   const give = (bytes, name, mime) => {
-    // Said before the attempt, because the page cannot observe whether a download lands (downloadPlan
-    // above, DEFECTS D63). One place for it: every artifact on this page -- zip, pdf, 3mf, stl -- goes
-    // through give(), so a per-button warning would miss one eventually.
+    // 先说，再下：浏览器不告诉页面下载是否落地（downloadPlan 同源、DEFECTS D63）。
+    // 一处发：所有产物（zip、pdf、3mf、stl）都走 give()，所以「按按钮才警告」迟早漏一个。
     const plan = downloadPlan(name, bytes.length);
     if (plan.note) say(plan.note, 'hint');
     const a = document.createElement('a');
@@ -449,24 +412,50 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     $('sheetbox').hidden = plate;
     $('dl3mf').disabled = $('dlstl').disabled = !plate || !state;
     if (!state) for (const id of ['doprint', 'dlpng', 'dlpdf']) $(id).disabled = true;
+    $('opts').setAttribute('data-state', state ? 'ok' : 'idle');
   };
   sel.addEventListener('change', syncEnabled);
   syncEnabled();
 
+  // 文件选择 + 拖放（与接收端同一套：拖进 / 点开都走同一路径）。
+  const sendDrop = $('send-drop');
+  if (sendDrop) {
+    ['dragenter', 'dragover'].forEach((ev) => sendDrop.addEventListener(ev, (e) => { e.preventDefault(); sendDrop.classList.add('is-drag'); }));
+    ['dragleave', 'drop'].forEach((ev) => sendDrop.addEventListener(ev, (e) => { e.preventDefault(); sendDrop.classList.remove('is-drag'); }));
+    sendDrop.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const f = dt.items ? (Array.from(dt.items).find((i) => i.kind === 'file')?.getAsFile()) : (Array.from(dt.files || [])[0]);
+      if (!f) return;
+      const inp = $('sfile');
+      try {
+        const dt2 = new DataTransfer();
+        dt2.items.add(f);
+        inp.files = dt2.files;
+      } catch {
+        // 老 Safari 不支持 DataTransfer 构造；只更新文字提示，不强行塞 input.files。
+      }
+      say(`已选 ${f.name} · ${(f.size / 1024).toFixed(1)} KB`, 'hint');
+    });
+  }
+
   async function encode() {
-    log.innerHTML = '';
+    log.textContent = '';
     $('pages').innerHTML = '';
     state = null;
+    setPill('send-pill', '编码中…', 'busy');
+    setPill('preview-pill', '—', 'idle');
+    $('opts').setAttribute('data-state', 'busy');
     const file = $('sfile').files[0];
-    if (!file) return say('先选一个文件（任何格式，我们只搬字节）。', 'bad');
-    // Say what a big file costs BEFORE reading it, but never refuse here. The page count depends on how
-    // much of the payload deflate removes and compression has no upper bound, so any byte threshold that
-    // refuses would eventually turn away a file that fits -- a false refusal (DEFECTS D65; see
-    // transferBudget, whose comment records the version of this block that got it wrong). Refusing is
-    // core/protocol.js's job, at the 255-page limit, where the compressed length is a fact. Reading is one
-    // synchronous allocation of the whole file and the render that follows is synchronous too, so the user
-    // gets the numbers before the tab stops answering. If planPage rejects this option combination there
-    // is no estimate to offer and nothing is said.
+    if (!file) {
+      say('先选一个文件（任何格式，我们只搬字节）。', 'bad');
+      $('opts').setAttribute('data-state', 'idle');
+      setPill('send-pill', '未编码', 'idle');
+      return;
+    }
+    // 大文件的代价先说、再读。这一页只警告、不能拒（看 transferBudget：deflate 不可压的
+    // 估计量拒了就会让一个 20 MB 的日志被卡在选文件上 —— 误拒，D65）。读是一次性同步分配
+    // 整份，渲染也是，所以用户得在标签页停转之前看到数字。planPage 拒过的选项组合就别说。
     try {
       const g = planPage(sel.value, {
         nozzle: Number($('snozzle').value) || undefined,
@@ -475,7 +464,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
       const early = earlySizePlan(file.size, g, $('sparity').value);
       if (early.warn) say(early.note, 'hint');
     } catch {
-      // No estimate for this option combination; the encoder still refuses what does not fit.
+      // 这个选项组合没估计量；编码器会自己拒。
     }
     say(`读入 ${file.name} · ${file.size.toLocaleString()} B`);
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -495,13 +484,14 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
       if (r.hint) say(r.hint, 'hint');
       say('没有产出任何文件：宁可不出，不出半成品。', 'hint');
       syncEnabled();
+      $('opts').setAttribute('data-state', 'err');
+      setPill('send-pill', '失败', 'err');
       return;
     }
     state = r;
-    // Previews are capped (previewPlan above). Each one is ~0.5 MB of base64 string and, once the
-    // browser decodes it, up to ~35 MB of raster -- so an uncapped preview is the cost round 66
-    // removed from pack.pdf, reintroduced in the DOM (DEFECTS D61). loading/decoding are hints that
-    // keep offscreen previews from being decoded eagerly; the cap is what actually bounds it.
+    // 预览限张（previewPlan）。每张 ~0.5 MB base64 字符串，浏览器解了再 +~35 MB 位图 —— 不限张就
+    // 是把第 66 轮从 pack.pdf 上拿掉的代价又从 DOM 那边加回来（DEFECTS D61）。loading/decoding
+    // 是 hint，cap 才是上限。
     const plan = previewPlan(r.pages.length);
     for (let i = 0; i < plan.shown; i++) {
       const p = r.pages[i];
@@ -512,7 +502,9 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
       img.decoding = 'async';
       img.src = `data:image/png;base64,${b64(p.png)}`;
       const fig = document.createElement('figcaption');
-      fig.textContent = `${p.tag} · ${i + 1}/${r.pages.length}`;
+      fig.innerHTML = '';
+      const t = document.createElement('span'); t.textContent = p.tag; fig.appendChild(t);
+      const c = document.createElement('span'); c.className = 'muted'; c.textContent = `${i + 1}/${r.pages.length}`; fig.appendChild(c);
       card.append(img, fig);
       $('pages').appendChild(card);
     }
@@ -523,22 +515,25 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     say(r.plate ? `实体码牌 ${r.models.length} 个已过对拍 + STL 自检 + 3MF 自检（三角形 ${r.models.map((m) => m.triangles).join('/')}）。` : '纸面剖面：无实体盘，STL/3MF 按钮保持禁用（与 CLI 相同的拒绝规则）。', 'hint');
     for (const id of ['doprint', 'dlpng', 'dlpdf']) $(id).disabled = false;
     $('dl3mf').disabled = $('dlstl').disabled = !r.plate;
+    $('opts').setAttribute('data-state', 'ok');
+    setPill('send-pill', '已编码', 'ok');
+    setPill('preview-pill', `${r.pages.length} 页`, 'ok');
+    $('ssheetinfo').textContent = r.plate ? `${r.plateMm}×${r.plateMm} mm` : `${r.sheetMm.w}×${r.sheetMm.h} mm`;
   }
 
   const printableCss = () => {
     const paper = state.plate ? `${state.plateMm}mm ${state.plateMm}mm` : state.sheetMm ? `${state.sheetMm.w}mm ${state.sheetMm.h}mm` : 'A4';
     const pageW = state.plate ? state.plateMm : state.sheetMm ? state.sheetMm.w : 210;
-    return `@page{size:${paper};margin:0}@media print{html,body{margin:0;padding:0;background:#fff}nav,#opts,.no-print,.notice{display:none!important}figure{margin:0;page-break-after:always}img{width:${pageW}mm;height:auto}}`;
+    return `@page{size:${paper};margin:0}@media print{html,body{margin:0;padding:0;background:#fff}nav,#opts,.no-print,.notice,#out,header,footer{display:none!important}figure{margin:0;page-break-after:always}img{width:${pageW}mm;height:auto}}`;
   };
 
   $('doencode').addEventListener('click', () => encode().catch((e) => say(`异常：${e.message}`, 'bad')));
   $('doprint').addEventListener('click', () => {
     if (!state) return say('先编码。', 'bad');
-    // Decide BEFORE spending anything. Round 67 put a warning here, but it ran after window.open and
-    // document.write had already pushed every page into the new window, so the user learned the cost
-    // only once it had been paid -- and at 168 pages (~5.8 GB of decoded raster in one window) the tab
-    // may never come back to say anything at all, which is the silent failure this project refuses.
-    // printPlan() is pure, so tools/smoke-sender.mjs checks this refusal in process.
+    // 先决定、再花。第 67 轮在这个位置放过 warning，但那是 window.open + document.write 已经
+    // 把每页塞进新窗口之后 —— 用户是花了钱才知道的，168 页 ≈ 5.8 GB 的解码位图塞一窗，标签页
+    // 也许再也不会回来说话，那是本项目拒绝的静默失败。printPlan() 是纯函数，smoke-sender
+    // 在进程内就把这条拒掉了。
     const plan = printPlan(state.pages.length);
     if (!plan.write) return say(plan.note, 'bad');
     const w = window.open('', '_blank');
@@ -553,17 +548,12 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   });
   $('dlpng').addEventListener('click', async () => {
     if (!state) return say('先编码。', 'bad');
-    // One zip, one download. This used to call give() once per page, i.e. N automatic downloads from
-    // a single click, and browsers block that after the first couple behind a "allow multiple
-    // downloads?" prompt -- so a 168-page transfer could land two files in the Downloads folder
-    // while the log below claimed "N 张 PNG 逐个下载". A claim this code cannot verify is exactly the
-    // silent partial success the project forbids: the user has no way to know 166 were dropped.
-    // The zip writer is our own (core/mesh/threeMF.js packs 3MF with it), so this adds no dependency,
-    // and entries are STORED rather than deflated because PNGs already are compressed. buildZip is
-    // imported statically at the top of this file, and please leave it there: tools/build-web.mjs
-    // refuses dynamic import() in web/*.js, and the first version of this handler used one -- the
-    // guard fired and the build went red, which is the guard working. (A lazy './core/...' specifier
-    // would also be wrong in the source tree, where the core modules live at ../core/.)
+    // 一个 zip、一次下载。以前是每页一次 give()，等于一次点击 N 次自动下载，浏览器到第 2 个
+    // 就开始弹「是否允许多次下载」——168 页的传输可能只落地两张，日志却写「N 张 PNG 逐个下载」。
+    // 这一次点击页面看不见的话，就是项目禁止的「半成品假装成功」。zip 写入器是我们自己的
+    // （core/mesh/threeMF.js 打包 3MF 用的就是它），不引依赖；条目走 STORED 而非 deflated，
+    // 因为 PNG 已经压过。buildZip 在文件顶上静态 import，麻烦别动：tools/build-web.mjs 拒绝
+    // web/*.js 里的 dynamic import()，第一版用了就红过，这是护栏在工作。
     const zip = buildZip(state.pages.map((p) => ({ name: `${p.tag}.png`, data: p.png, method: 'store' })));
     give(zip, `pskt-pages-${state.pages.length}.zip`, 'application/zip');
     say(`${state.pages.length} 张 PNG 打成一个 zip（${zip.length.toLocaleString()} B）：一次下载，不必跟浏览器的批量下载拦截打交道。想逐张看就用上面的预览或 pack.pdf。`);
@@ -581,4 +571,19 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   $('dlstl').addEventListener('click', () => giveModels('stl'));
   $('dl3mf').addEventListener('click', () => giveModels('3mf'));
   say('这一页只负责把文件变成能打印的东西：本机完成，不出网。接收端在 index.html。', 'hint');
+
+  // 状态 pill 工具。
+  function setPill(id, text, state) {
+    const p = $(id);
+    if (!p) return;
+    p.textContent = text;
+    if (state) {
+      // 找到包含这个 pill 的 card 并打 data-state，让整张卡也跟着变色。
+      let n = p.parentElement;
+      while (n && n !== document.body) {
+        if (n.classList && n.classList.contains('card')) { n.setAttribute('data-state', state); break; }
+        n = n.parentElement;
+      }
+    }
+  }
 }

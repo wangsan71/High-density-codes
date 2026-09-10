@@ -8,51 +8,148 @@
 <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-<h1>PSKT 发送端</h1>
-<p class="lede">选文件 → 出可打印页 / <code>pack.pdf</code> / <code>.3mf</code>·<code>.stl</code> 实体码牌。<b>全程在本机浏览器内完成，不上传、不出网、不含任何第三方资源</b>：这里没有 URL，只有你打印出来的那张纸。</p>
-<nav class="tabs"><a href="./index.html">→ 接收端（扫描/解码）</a></nav>
 
-<form id="opts" onsubmit="return false">
-  <label>文件 <input id="sfile" type="file"></label>
-  <label>剖面
-    <select id="sprofile"></select>
-  </label>
-  <label>dpi <input id="sdpi" type="number" inputmode="numeric" placeholder="剖面默认"></label>
-  <label id="s3d">喷嘴
-    <select id="snozzle"><option value="">0.4</option><option>0.2</option><option>0.6</option><option>0.8</option></select>
-  </label>
-  <label>色板
-    <select id="spalette"><option value="">自动（按剖面）</option><option>INK2</option><option>INK4</option><option>PAPER1</option></select>
-  </label>
-  <label id="sheetbox">纸张（由剖面决定）
-    <span id="ssheetinfo" class="tag">编好后显示在下方日志</span>
-  </label>
-  <label>打印幅面 mm <input id="splate" type="number" inputmode="numeric" placeholder="剖面默认"></label>
-  <label>校验页 % <input id="sparity" type="number" inputmode="numeric" step="1" placeholder="剖面默认"></label>
-  <label>口令（可选，加密载荷） <input id="spw" type="text" autocomplete="off" spellcheck="false">
-  </label>
-  <label>单色可还原
-    <select id="smonosafe"><option value="">按剖面</option><option>full</option><option>partial</option><option>off</option></select>
-  </label>
-  <label class="chk"><input id="smono" type="checkbox"> 直接以单色出图（验证 G7 兜底）</label>
-  <div class="btns">
-    <button id="doencode" type="button" class="primary">编码</button>
-    <button id="doprint" type="button" disabled>打印</button>
-    <button id="dlpng" type="button" disabled>PNG（zip）</button>
-    <button id="dlpdf" type="button" disabled>pack.pdf</button>
-    <button id="dl3mf" type="button" disabled>3MF</button>
-    <button id="dlstl" type="button" disabled>STL</button>
+<header class="appbar">
+  <h1><span class="mark" aria-hidden="true"></span> PSKT 发送端</h1>
+  <p class="lede">选文件 → 出可打印页 / <code>pack.pdf</code> / <code>.3mf</code>·<code>.stl</code> 实体码牌。全程在本机浏览器内完成，不上传、不出网、不含任何第三方资源。</p>
+  <nav class="tabs">
+    <a href="./index.html" id="nav-receive">← 接收端（扫描/解码）</a>
+  </nav>
+</header>
+
+<main class="shell">
+
+  <form id="opts" class="card" onsubmit="return false" data-state="idle">
+    <div class="card-head">
+      <span class="step">01</span>
+      <h2>文件与档位</h2>
+      <span class="state-pill" id="send-pill">未编码</span>
+    </div>
+
+    <label class="drop" tabindex="0" id="send-drop">
+      <span class="ico" aria-hidden="true">↑</span>
+      <span class="big">点这儿选文件，或把文件拖进来</span>
+      <span class="muted sm">任何格式都行：这里只搬字节，原始类型在接收端按扩展名恢复。</span>
+      <input id="sfile" type="file">
+    </label>
+
+    <div class="row" style="margin-top: var(--gap-3)">
+      <label class="field">
+        剖面
+        <select id="sprofile"></select>
+        <span class="hint" id="sprofile-hint">档位决定能塞多少字、打印与扫描的难易。默认 <code>P-M1-300</code>（300 dpi 纸面单色）覆盖大多数场景。</span>
+      </label>
+      <label class="field" id="s3d">
+        喷嘴
+        <select id="snozzle">
+          <option value="">0.4（默认）</option>
+          <option>0.2</option>
+          <option>0.6</option>
+          <option>0.8</option>
+        </select>
+        <span class="hint">板材档才生效：节距与可画形状都按喷嘴直径算。</span>
+      </label>
+      <label class="field">
+        DPI
+        <input id="sdpi" type="number" inputmode="numeric" placeholder="剖面默认">
+        <span class="hint">不填就由剖面决定（如 <code>P-M1-300</code> = 300 dpi）。</span>
+      </label>
+      <label class="field">
+        色板
+        <select id="spalette">
+          <option value="">自动（按剖面）</option>
+          <option>INK2</option>
+          <option>INK4</option>
+          <option>PAPER1</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top: var(--gap-1)">
+      <label class="field" id="sheetbox">
+        纸张（由剖面决定）
+        <span class="tag mono" id="ssheetinfo">编好后显示在下方日志</span>
+      </label>
+      <label class="field">
+        打印幅面 mm
+        <input id="splate" type="number" inputmode="numeric" placeholder="剖面默认">
+        <span class="hint">板材档：自定义方板边长。纸面档不生效。</span>
+      </label>
+      <label class="field">
+        校验页 %
+        <input id="sparity" type="number" inputmode="numeric" step="1" placeholder="剖面默认">
+        <span class="hint">越少越能装越多字，越多越能救回缺页。0% 时只剩页内 RS 救单页内的错。</span>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top: var(--gap-1)">
+      <label class="field" style="min-width: 18rem; flex: 1 1 16rem">
+        口令（可选，加密载荷）
+        <input id="spw" type="text" autocomplete="off" spellcheck="false" placeholder="不填 = 明文；填了 = ChaCha20 + PBKDF2-SHA256 加密">
+        <span class="hint">页头会置 <code>CIPHER</code> 旗；接收端没拿到口令只会问，不会解出任何字节。</span>
+      </label>
+      <label class="field" style="min-width: 12rem">
+        单色可还原
+        <select id="smonosafe">
+          <option value="">按剖面</option>
+          <option>full</option>
+          <option>partial</option>
+          <option>off</option>
+        </select>
+      </label>
+      <label class="chk" style="align-self: flex-end">
+        <input id="smono" type="checkbox">
+        <span>直接以单色出图（验证 G7 兜底）</span>
+      </label>
+    </div>
+
+    <div class="btn-row" style="margin-top: var(--gap-3)">
+      <button id="doencode" type="button" class="btn primary">
+        <span aria-hidden="true">▷</span> 编码
+      </button>
+      <button id="doprint" type="button" class="btn" disabled>
+        <span aria-hidden="true">⎙</span> 打印
+      </button>
+      <button id="dlpng" type="button" class="btn" disabled>
+        <span aria-hidden="true">▣</span> PNG (zip)
+      </button>
+      <button id="dlpdf" type="button" class="btn" disabled>
+        <span aria-hidden="true">▤</span> pack.pdf
+      </button>
+      <button id="dl3mf" type="button" class="btn" disabled>3MF</button>
+      <button id="dlstl" type="button" class="btn" disabled>STL</button>
+    </div>
+  </form>
+
+  <div class="notice">
+    打印请优先用 <code>pack.pdf</code>：它把每页按<b>真实物理尺寸</b>摆好。浏览器的「打印」依赖你在缩放里选「实际大小/100%」，缩放一错整盘页的几何就与扫描端的期望不符（帧头会拒收，<b>不会静默出错</b>）。
   </div>
-</form>
 
-<div class="notice">打印请优先用 <code>pack.pdf</code>：它把每页按<b>真实物理尺寸</b>摆好。浏览器的"打印"依赖你在缩放里选"实际大小/100%"，缩放一错，整盘页的几何就与扫描端的期望不符（帧头会拒收，不会静默出错）。</div>
+  <section class="card" id="out" data-state="idle">
+    <div class="card-head">
+      <span class="step">02</span>
+      <h2>页面预览</h2>
+      <span class="state-pill" id="preview-pill">—</span>
+    </div>
+    <p class="lede" id="preview-lede">编好以后这里出现前几张的缩略图；所有页都在 pack.pdf 和 PNG zip 里，一页不缺。</p>
+    <div id="pages" class="pages"></div>
+  </section>
 
-<section id="out">
-  <h2>页面</h2>
-  <div id="pages" class="pages"></div>
-  <h2>日志</h2>
-  <pre id="slog" class="log" aria-live="polite"></pre>
-</section>
+  <section class="card" data-state="idle">
+    <div class="card-head">
+      <span class="step">03</span>
+      <h2>日志</h2>
+      <span class="state-pill" id="slog-pill">就绪</span>
+    </div>
+    <pre id="slog" class="log" aria-live="polite"></pre>
+  </section>
+
+  <footer class="foot">
+    <p>PSKT · 这一页只负责把文件变成能打印的东西：本机完成，不出网。</p>
+    <p class="tiny">编码核心与 CLI、Python 参考实现共用同一份源码（<code>core/</code>），不引第三方包。</p>
+  </footer>
+
+</main>
 
 <script type="module" src="./sender.js"></script>
 </body>

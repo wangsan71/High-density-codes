@@ -126,6 +126,32 @@
 
 ## 已知风险 / 待办
 
+### 第 105 轮（**前端重写：现代深色主题 + 状态驱动的卡片化 UI；后端接口（`core/` 全部 API、所有 exported 纯函数、selftest 入口、单文件 PWA 形态）一字未动**）
+
+**① 为什么改**：用户要求"重写前端，使其更现代化，也要保留后端接口和功能"。原前端是第 1–73 轮累积起来的内嵌式 + 平面化布局，控件挤成一片、状态靠 log 文本流推断。视觉与「离线工具、工程师用户」的口径不一致；功能（解码/编码/连拍/口令/分片/单色/STL/3MF/分片/拼回）一条没动。
+
+**② 改动（仅 `web/` 5 个文件 + `web/dist/` 自动重建，**`core/`、`cli/`、`tools/`、`tests/`、`docs/` 一行未动**）**：
+- **`web/app.css`** 全量重写：CSS 自定义属性驱动的设计系统（颜色/几何/字体/缓动四组变量）、自动跟随 `prefers-color-scheme` 的浅色主题、`prefers-reduced-motion` 关掉所有 transition；卡片 `data-state="idle|busy|ok|err|warn"` 五态可视化；状态点 `busy` 用脉冲；按钮三档（默认/primary/ghost）+ `.danger`；下拉控件自绘箭头；动效只用于状态过渡，不是装饰。
+- **`web/index.html`** 重新组织：sticky 顶栏（产品名 + 一句话 + 跳发送端）、5 段卡片（文件/参数/跑/结果/日志）+ 条件渲染的 selftest 卡 + 手机连拍卡；每张卡有 `step` 编号 + 标题 + 状态 pill + 旁白 lede。
+- **`web/send.html`** 同步：表单字段分组、按钮排成 `btn-row`、所有提示从纯文本升级为可读的 `b/hint/tag` 标签；保留 `autoRunGuardId`（`sfile`）的契约。
+- **`web/app.js`** 重组 DOM 控制：状态由 `setState(cardId, state, pillId, text)` 统一管；日志走 `<span>` + `textContent`（保持"不渲染 markdown"的产品口径）；所有 `core/` API 调用（`decodePNG / bootstrapDecode / TransferAssembler / feedPageWithRecalibration / sha256Hex / PROFILE_IDS,PROFILES,profileOptionLabel / advise / downloadName`）和 DOM id 契约（`files/log/status/...` 73 个）一字不改 ⇒ `tools/check-dist.mjs` 第 10/11 项断言照过。
+- **`web/sender.js`** 完整重写同时保留 `export { isUnqualifiedPaper, profileOptionLabel, pickPalette, buildArtifacts, previewPlan, printPlan, transferBudget, pageLimitHint, earlySizePlan, downloadPlan, isPlate, PREVIEW_CAP, PRINT_WINDOW_PAGE_CAP, DATA_URL_RISK_BYTES, PROTOCOL_PAGE_LIMIT }`（`tools/smoke-sender.mjs` 入口）和 `autoRunGuardId = 'sfile'`（`tools/build-web.mjs:220` 的剥离规则）。文件分两段：纯函数（`buildArtifacts`、所有 plan）放在 DOM 守卫前，Node 里可直接 `import`；DOM 控制放在 `if (typeof document !== 'undefined' && document.getElementById('sfile'))` 守卫内。每个 `give()` 路径都先调用 `downloadPlan()` 显式说风险。
+- **`web/capture.js`** 完整重写同时保留 `export { createBurstCollector }` 与 `burst*` 系列 id 契约；动态 `import('./core/...')` 保留（dist 端重写后的拼法），`tools/build-web.mjs` 的 dynamic-import 守卫只对 `app.js` / `sender.js` 起作用（capture.js 是单独复制而非 bundle）。
+
+**③ 验证（全部跑过、`core/` 一行未改 ⇒ M0–M7 门限状态未变）**：
+- `node tools/build-web.mjs` ⇒ exit 0；`single-file pskt-file.html 371.9 KiB`、`pskt-send-file.html 383.9 KiB (no sibling links)`、precache 62 条。
+- `node tools/check-dist.mjs` ⇒ **`13 pass / 0 fail`** + `G9 CHECK: all 13 assertions pass`、exit 0（含 `every getElementById in built JS exists in some built page · 73 markup ids` 与 `no built page declares the same id twice · every id unique within its own page, across 4 built page(s)`）。
+- `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ **`tests 377 · pass 377 · fail 0`、exit 0**。
+- `node tools/smoke-sender.mjs` ⇒ exit 0、71 s（web `buildArtifacts` 路径走完，与 CLI 共用 `core/`，`tools/smoke-sender.mjs` 的 decode-blind 回路验证页面 5 段 + 切分 + 拼回 + 加密 + 单色 + 板材 STL/3MF ⇒ 全部字节相等）。
+- `node tools/smoke-capture.mjs` ⇒ exit 0、17/17 PASS（合成变形照片 → 3 页传输的合成器 → `createBurstCollector` 收 4 帧去重 1 帧拿 3 页，与输入摘要一致；`stats {"frames":4,"accepted":3,"duplicates":1,"rejected":0}`）。
+- `& .\tools\usability.ps1` ⇒ 33/33 leg PASS（含 `tools/smoke-sender.mjs` 71 s、PSKT 验收包 `pskit send (paper P-M1-300, png + true-size pdf) 1s`、加密腿 `encrypted transfer came back identical once the key was given (6000 B)`、分片 `split -> 3 transfers -> join came back identical`、G8 文件级 `gate G8 --file on those .3mf 5s`）。外层 PowerShell 5.1 300 s 触顶是因为 `smoke-capture` 在 `usability.ps1` 阶段还没跑完（单跑 ~50 s 内完）—— 拆开跑都已验证。
+- `node cli/pskit.mjs verify --gate all` ⇒ **未跑整包**（G2 600 dpi 单门限 ~3 h，超工具 300 s 上限）⇒ **未评估 G2 600 dpi / G4 / G6 / G10**。本轮**没动 `core/`**，门限判决一字不变 ⇒ **G0/G1/G3/G5/G7/G8/G9 仍是上一次 `verify --gate all` 打的 `✅/🟡`**，不主张"全过"；后续轮次里有人按 AGENTS.md §0 拉一次长门限时回到此口径。
+
+**④ 没做的（避免误以为完成）**：
+- 浏览器里点一次（`?selftest=1`、双击 `pskt-file.html`、手机/桌面 `index.html`）：G9 缺的最后一条**本机无浏览器**（沙箱拦 Chrome/Edge 命名管道，§4 记录）⇒ 留与上轮同样。
+- 静态截图：CSS 改完没渲 PNG 给用户看。`tools/build-web.mjs` 出的 `web/dist` 是真实产品；按"假定"出截图就是另一份说辞，与本项目"误接受是唯一不可原谅的失败"的口径不合。
+- `web/dist/` 改动：纯构建产物不进 git，CI 也会重建（已有 `.gitignore` + `web/.gitignore`）；本轮树与第 104 轮干净度的差异只在前 5 个源文件。
+
 ### 第 104 轮（**模块档 PDF 路径加回归测试：继续用裸 RGB 行、不带 predictor 参数**）
 
 **① 为什么补**：验收包让用户打印的是模块档 `pack.pdf`。D78 的教训正是 PDF 行距参数歧义会剪坏整页；模块档是新的渲染分支，必须单独钉住它没有重新引入 `/DecodeParms`、`/Predictor` 或 `/Columns`。

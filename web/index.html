@@ -3,97 +3,189 @@
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Print-scan file transfer receiver. Decodes PSKT pages entirely in this browser. No uploads, no network, no URLs.">
 <title>PSKT 接收端 · 打印—扫描文件还原</title>
 <link rel="stylesheet" href="./app.css">
 <link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#101317">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="data:,">
 </head>
 <body>
-<header>
-  <h1>PSKT 接收端</h1>
-  <p class="sub">把打印出来的页码拍照或扫描成 PNG，在这里还原成原始文件。<b>页面不联网、不上传、不需要任何 URL</b> —— 解码全在你本机的 JavaScript 里完成。</p>
-  <p class="nav"><a href="./send.html">→ 发送端（把文件印成页码；单文件版需从站点打开才有这一页）</a></p>
+
+<header class="appbar">
+  <h1><span class="mark" aria-hidden="true"></span> PSKT 接收端</h1>
+  <p class="lede">把打印出的页拍照/扫描进来，浏览器在本机把它们还原成原文件 —— 不联网、不上传、零 URL。</p>
+  <p class="nav"><a href="./send.html" id="nav-send">→ 发送端（把文件印成页码）</a></p>
 </header>
 
-<main>
-  <section id="intake">
-    <h2>1 · 交给它几张页</h2>
-    <label class="drop">
-      <input type="file" id="files" accept="image/png" multiple>
-      <span>选择 PNG（可多选：数据页 + 校验页都给，缺页才可能补回来）</span>
-    </label>
-    <div class="row">
-      <button type="button" id="camera">用摄像头拍一页</button>
-      <span id="camera-note" class="note"></span>
+<main class="shell">
+
+  <!-- 1. 输入 -->
+  <section class="card" id="card-intake" data-state="idle">
+    <div class="card-head">
+      <span class="step">01</span>
+      <h2>把页交给它</h2>
+      <span class="state-pill" id="intake-pill">等待文件</span>
     </div>
-    <video id="video" playsinline hidden></video>
+    <p class="lede">选或拖 PNG/TIFF，多选：数据页 + 校验页都给，缺页才有可能被页间 RS 补回来。</p>
+
+    <label class="drop" id="drop-zone" tabindex="0">
+      <span class="ico" aria-hidden="true">↑</span>
+      <span class="big">把 PNG / TIFF 拖进来，或点这儿选</span>
+      <span class="muted sm">接收端支持 PNG（位深 1/2/4/8/16、调色板、灰度/RGB/带 alpha）与 TIFF 基线（II/MM、1/4/8/16 位、LZW/PackBits/Deflate、多页）</span>
+      <input type="file" id="files" accept="image/png,image/tiff,.png,.tif,.tiff" multiple>
+    </label>
+    <div id="fileline-wrap" class="row tight" hidden>
+      <span class="fileline mono sm" id="fileline"></span>
+    </div>
+
+    <div class="row" style="margin-top: var(--gap-2)">
+      <button type="button" id="camera" class="btn ghost">
+        <span aria-hidden="true">◉</span> 用摄像头拍一页
+      </button>
+      <span id="camera-note" class="muted sm"></span>
+    </div>
+    <video id="video" class="viewer" playsinline hidden></video>
     <canvas id="grab" hidden></canvas>
   </section>
 
-  <section id="opts">
-    <h2>2 · 剖面（可留空，让它自己认）</h2>
+  <!-- 2. 参数 -->
+  <section class="card" id="card-opts" data-state="idle">
+    <div class="card-head">
+      <span class="step">02</span>
+      <h2>剖面与口令（留空就自动认）</h2>
+      <span class="state-pill">可选</span>
+    </div>
+    <p class="lede">自动识别会按候选逐个整页读，纸面 600 dpi 一档每次数秒、最多十几次。指定剖面后基本一次命中。每次尝试都会在下面的日志里打出来，不静默。</p>
+
     <div class="row">
-      <label>剖面 <select id="profile"><option value="">自动识别</option></select></label>
-      <label>dpi <select id="dpi"><option value="">自动</option><option>300</option><option>600</option></select></label>
-      <label>色板 <select id="palette"><option value="">自动</option><option>INK2</option><option>INK4</option><option>PAPER1</option></select></label>
+      <label class="field">
+        剖面
+        <select id="profile"><option value="">自动识别</option></select>
+      </label>
+      <label class="field">
+        DPI
+        <select id="dpi"><option value="">自动</option><option>300</option><option>600</option></select>
+      </label>
+      <label class="field">
+        色板
+        <select id="palette"><option value="">自动</option><option>INK2</option><option>INK4</option><option>PAPER1</option></select>
+      </label>
+    </div>
+    <div class="row" style="margin-top: var(--gap-1)">
+      <label class="field" style="min-width: 16rem">
+        口令（若打印时加了口令）
+        <input type="password" id="pass" autocomplete="off" placeholder="传输是加密的：填发送时用的口令">
+        <span class="hint">加密传输必须先填；缺口令时会明说「需要口令」，不会被算作缺页。</span>
+      </label>
+      <label class="chk" style="align-self: flex-end">
+        <input type="checkbox" id="strict">
+        <span>只试我指定的组合（失败就报失败，不乱猜）</span>
+      </label>
+    </div>
+  </section>
+
+  <!-- 3. 跑 -->
+  <section class="card" id="card-run" data-state="idle">
+    <div class="card-head">
+      <span class="step">03</span>
+      <h2>开始还原</h2>
+      <span class="state-pill" id="status">等待文件</span>
     </div>
     <div class="row">
-      <label>口令（若打印时加了口令）<input type="password" id="pass" autocomplete="off"></label>
-      <label class="chk"><input type="checkbox" id="strict"> 只试我指定的组合（失败就报失败，不乱猜）</label>
+      <button type="button" id="go" class="btn primary" disabled>3 · 开始还原</button>
+      <span class="muted sm" id="run-hint">解码全在你这台机器上跑，断网也能用。</span>
     </div>
-    <p class="hint">自动识别是按候选逐个整页读，纸面 600 dpi 一档每次数秒、最多十几次；选定剖面后基本一次命中。代价会逐条打在下面的日志里，不静默。</p>
   </section>
 
-  <section id="run">
-    <button type="button" id="go" disabled>3 · 开始还原</button>
-    <span id="status" class="note">等待文件</span>
+  <!-- 4. 结果 -->
+  <section class="card result" id="out" hidden data-state="ok">
+    <div class="card-head">
+      <span class="step">04</span>
+      <h2>结果</h2>
+      <span class="state-pill">已还原</span>
+    </div>
+    <p class="lede">只有页内 RS + 帧 CRC + 明文 SHA-256 摘要全过才走到这里。半成品从不落盘。</p>
+    <p id="result-line" class="mono sm"></p>
+    <div class="row">
+      <label class="field" style="min-width: 20rem; flex: 1 1 18rem">
+        存成什么名字（可选）
+        <input id="outname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf">
+        <span class="hint">页头里没有文件名字段 —— 默认名是 <code>pskt-…B-….bin</code>，留空就用它。手机上想直接打开就带扩展名（如 <code>report.pdf</code>），iOS/Android 靠扩展名决定用什么应用打开。</span>
+      </label>
+      <span class="muted sm" id="outname-note" style="align-self: flex-end"></span>
+    </div>
+    <div>
+      <a id="download" download="received.bin" class="btn primary" style="text-decoration: none; display: inline-flex">
+        <span aria-hidden="true">↓</span> 保存还原出的文件
+      </a>
+    </div>
   </section>
 
-  <section id="out" hidden>
-    <h2>结果</h2>
-    <p id="result-line"></p>
-    <p class="row"><label>存成什么名字（可选）<input id="outname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf"></label>
-      <span id="outname-note" class="note"></span></p>
-    <a id="download" download="received.bin"><button type="button">保存还原出的文件</button></a>
-    <p class="hint">只有 SHA-256 与页头声明的摘要一致时才会出现这个按钮。部分还原从不落盘。</p>
-    <p class="hint">页头里<b>没有文件名字段</b>（只有摘要），所以默认名是从字节导出的 <code>pskt-…B-….bin</code>，留空就用它。<b>手机上想直接打开就在上面填回原来的名字带扩展名</b>（例如 <code>report.pdf</code>）：iOS/Android 靠扩展名决定用什么打开；只填 <code>.pdf</code> 也行，会把默认名的扩展名换掉。名字只在你本机用于命名下载，不会被发送、不会进页码。</p>
+  <!-- 5. 日志 -->
+  <section class="card" id="log-wrap" data-state="idle">
+    <div class="card-head">
+      <span class="step">05</span>
+      <h2>日志</h2>
+      <span class="state-pill" id="log-pill">就绪</span>
+    </div>
+    <pre id="log" class="log" aria-live="polite"></pre>
   </section>
 
-  <section id="log-wrap">
-    <h2>日志</h2>
-    <pre id="log" aria-live="polite"></pre>
+  <!-- 6. 自检（仅 ?selftest=1） -->
+  <section class="card" id="selftest-wrap" hidden>
+    <div class="card-head">
+      <span class="step">06</span>
+      <h2>自检 <span class="tag accent">?selftest=1</span></h2>
+    </div>
+    <pre id="selftest" class="log"></pre>
   </section>
 
-  <section id="selftest-wrap" hidden>
-    <h2>自检 <span class="tag">?selftest=1</span></h2>
-    <pre id="selftest"></pre>
+  <!-- 7. 手机连拍 -->
+  <section class="card" id="burst-wrap" data-state="idle">
+    <div class="card-head">
+      <span class="step">07</span>
+      <h2>手机连拍（自动挑帧）</h2>
+      <span class="state-pill" id="burst-pill">待命</span>
+    </div>
+    <p class="lede">对准打印好的页按开始：每约 0.2 秒挑一帧，能解就收、缺角标就提示「靠近一点」，收满自动停。</p>
+
+    <video id="burst-video" class="viewer portrait" playsinline muted></video>
+
+    <div class="row" style="margin-top: var(--gap-2)">
+      <button id="burst" type="button" class="btn primary">
+        <span aria-hidden="true">●</span> 开始连拍
+      </button>
+      <button id="burststop" type="button" class="btn danger" hidden>
+        <span aria-hidden="true">■</span> 停止
+      </button>
+      <span class="muted sm" id="burstprog"></span>
+    </div>
+
+    <div class="row" style="margin-top: var(--gap-2)">
+      <label class="field" style="min-width: 14rem; flex: 1">
+        口令
+        <input id="burstpass" type="password" autocomplete="off" placeholder="若打印时加了口令">
+        <span class="hint">加密传输必须先填：连拍不留已解出的页（手机上常驻每页的判读结果太贵），事后补口令要重拍。</span>
+      </label>
+      <label class="field" style="min-width: 14rem; flex: 1">
+        存成什么名字
+        <input id="burstname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf">
+        <span class="hint">收齐后按这个名字下载；留空则用摘要名 <code>pskt-…B-….bin</code>。</span>
+      </label>
+    </div>
+    <pre id="burst-log" class="log" aria-live="polite"></pre>
   </section>
+
+  <footer class="foot">
+    <p>PSKT · 离线可用：Service Worker 把所有代码与解码器预缓存到本机，断网也能继续还原。</p>
+    <p class="tiny">同一份解码核心也用于 CLI 与独立 Python 参考实现，两端交叉校验；本页不含任何第三方脚本、字体或分析代码。</p>
+  </footer>
+
 </main>
-
-<footer>
-  <p>离线可用：本页面一旦被访问过，其全部代码与解码器都已缓存到本机（Service Worker 预缓存），断网也能继续还原。</p>
-  <p class="tiny">同一份解码核心也用于 CLI 与独立 Python 参考实现，两端交叉校验；本页不含任何第三方脚本、字体或分析代码。</p>
-</footer>
-
-<section id="burst-wrap">
-  <h2>手机连拍（自动挑帧）</h2>
-  <p class="lede">对着打印好的页按开始：每约 0.2 秒挑一帧，能解就收、缺角标就提示"靠近一点"，收满自动停。</p>
-  <video id="burst-video" playsinline muted style="width:100%;max-width:520px;background:#000"></video>
-  <div class="btns">
-    <button id="burst" type="button">开始连拍</button>
-    <button id="burststop" type="button" hidden>停止</button>
-    <span id="burstprog" class="hint"></span>
-  </div>
-  <p class="row"><label>口令（若打印时加了口令）<input id="burstpass" type="password" autocomplete="off"></label>
-    <span class="hint">加密传输必须在这里填与发送时相同的口令，否则页收齐了也解不开。<b>开始连拍前先填</b>：连拍不留已解出的页，事后补口令要重拍。缺口令时页面会明说「需要口令」，不会把它报成缺页。</span></p>
-  <p class="row"><label>存成什么名字（可选）<input id="burstname" type="text" autocomplete="off" spellcheck="false" placeholder="例如 report.pdf"></label>
-    <span class="hint">收齐后按这个名字下载；留空则用摘要名 <code>pskt-…B-….bin</code>。<b>手机上想直接打开就带上扩展名</b>（只填 <code>.pdf</code> 也可以）。名字只用于本机命名下载，不发送、不进页码。</span></p>
-  <pre id="burst-log" class="log" aria-live="polite"></pre>
-</section>
 
 <script type="module" src="./app.js"></script>
 <script type="module" src="./capture.js"></script>

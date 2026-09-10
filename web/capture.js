@@ -1,45 +1,35 @@
 /**
- * Phone burst capture: decide which camera frames are worth decoding, and stop when the
- * transfer is complete.
+ * 手机连拍：决定哪些摄像头帧值得解、什么时候停。
  *
- * What this module is NOT: it does not detect markers, rectify, or decode anything.
- * core/decode/page.js already does the photo path (marker quad -> rectifyPage -> cell
- * measurement) and reports `path:'photo'`, `markerPx` and `coverage` on the way out, and
- * core/decode/bootstrap.js identifies the geometry from the page itself. Re-implementing
- * that here would be a second source of truth for geometry, which is how this project
- * acquires bugs.
+ * 这里不做的事：不检标记、不矫正、不解码任何东西。core/decode/page.js 已经把「照片」路径
+ * 做完了（marker quad → rectifyPage → cell 测量），并把 path:'photo'、markerPx、coverage
+ * 报告出来；core/decode/bootstrap.js 从页本身认几何。在这里再写一份就会变成「两份几何真
+ * 相」，正是这个项目生 bug 的方式。
  *
- * What it IS -- the part a camera loop actually needs, and the part that can be tested
- * without a camera:
- *   - a quality gate that turns "markerPx too small" and "page not fully in frame" into
- *     instructions a human can follow (step closer, get the corners in view) instead of a
- *     silent failure;
- *   - dedupe by session + page index, so holding the phone over one page does not look
- *     like progress;
- *   - missing-page reporting from the declared totalPages, because "缺第 2 页" is what
- *     makes a 3-page transfer finishable by a person.
+ * 这里做的事——相机循环真正要的、也是没相机也能测的：
+ *   - 质量门：把「角标太小」「整页没进画面」翻译成「走近一点 / 退半步」这样的人话，而不是
+ *     静默失败；
+ *   - 按 session + pageIndex 去重，手机在同一页上挂两秒不会假报「进度」；
+ *   - 按 totalPages 报缺页 ——「缺第 2 页」才是让人能把 3 页传输收完的句子。
  *
- * createBurstCollector() is pure: give it an async decode(bmp) and a feed(header,page,bmp)
- * and it stays runnable under Node -- which is exactly what tools/smoke-capture.mjs does
- * with synthetic warped photos. The DOM half below is guarded so importing this file in
- * Node costs nothing.
+ * createBurstCollector() 是纯函数：给它 async decode(bmp) + feed(header,page,bmp) 就跑，
+ * Node 也能跑 —— 这正是 tools/smoke-capture.mjs 用合成变形照片干的事。下面 DOM 那段加了
+ * 守卫，Node 下导入零成本。
  */
 import { decodeHeader } from '../core/frame.js';
-// Download-name policy, shared with app.js (DEFECTS D62). Static and spelled '../core/' like the import
-// above: tools/smoke-capture.mjs loads this file from Node, so its static imports have to resolve in the
-// source tree, and tools/build-web.mjs rewrites '../core/' to './core/' when it copies this file to
-// dist. The dynamic './core/...' imports further down are the opposite case -- they only ever run in a
-// browser, from dist, so they are spelled the way dist needs them. Do not "tidy" one set to match the
-// other; both spellings are load-bearing.
+// 下载名策略，与 app.js 共享（DEFECTS D62）。静态拼写 '../core/' 像上面那行一样：
+// tools/smoke-capture.mjs 在 Node 里 load 这文件，静态 import 得能在源码树里解析；
+// tools/build-web.mjs 复制到 dist 时把 '../core/' 改写成 './core/'。下面那几条 dynamic
+// import('./core/...') 是反过来的 —— 它们只在 dist 里的浏览器跑，所以拼成 dist 需要的
+// 形态。请勿「统一」两套拼法，都是承重的。
 import { downloadName } from '../core/naming.js';
-// The same advice table the CLI and the desktop page use. Attaching it to a rejected frame is what
-// turns "画面里没有本工具的页" into a sentence that names the physical cause and the fix (round 81:
-// the phone path was the one place that threw the reason away).
+// 同一张 advice 表，CLI 和桌面页都引用。给拒收的帧挂上它，「画面里没有本工具的页」才
+// 变成一句说出物理成因 + 怎么做的话（第 81 轮：手机路径是唯一把 reason 丢掉的那一条）。
 import { advise } from '../core/decode/advice.js';
 
 const GATE_DEFAULTS = { minMarkerPx: 14, minCoverage: 0.72, maxConsecutiveRejections: 40 };
 
-/** Read pageIndex/totalPages/sessionId from a decoded page, whatever shape the caller has. */
+/** 从解出来的页里读 pageIndex / totalPages / sessionId，调用方随便什么形状。 */
 function locate(page) {
   let h = page.header || null;
   if (!h && page.headerBytes) {
@@ -96,9 +86,8 @@ export function createBurstCollector(opts = {}) {
       return { accepted: false, kind: 'no-header', reason: loc.reason, progress: progress() };
     }
 
-    // A photo of a page held at arm's length is technically rectifiable and practically
-    // useless: the cell dots fall under the sampling floor and ECC starts erasing real
-    // information. Say "closer" rather than decoding it badly and reporting a failure.
+    // 手机伸长臂拍的照片技术上能矫正、实际上没用：cell 点掉到采样地板下，ECC 开始把真
+    // 信息当成错误擦掉。说「走近」而不是解出来再报失败。
     if (page.path === 'photo') {
       if (typeof page.markerPx === 'number' && page.markerPx < gate.minMarkerPx) {
         counters('marker-too-small');
@@ -110,8 +99,8 @@ export function createBurstCollector(opts = {}) {
       }
     }
 
-    // One transfer at a time: a page from a different session is not progress, it is a mix
-    // of two files, and the assembler would (correctly) refuse to close.
+    // 一次只跑一传输：出现另一个 session 的页不是进度，是两个文件混在一起，assembler
+    // 会（正确地）拒绝合上。
     if (current && loc.session !== current) {
       counters('other-session');
       return { accepted: false, kind: 'other-session', reason: 'other-session', hint: '这批还没收完，画面里出现了另一次传输的页（会话号不同）。', progress: progress() };
@@ -153,9 +142,9 @@ export function createBurstCollector(opts = {}) {
     addFrame,
     progress,
     stats,
-    /** Stop asking the camera once there is nothing missing; the caller closes the stream. */
+    /** 没缺页就别再问相机了，调用方自己关流。 */
     done: () => !!current && progress().missing.length === 0,
-    /** Give up after a stretch of unusable frames, with the reason that dominated. */
+    /** 连续一段不可用就放手，附上主导 reason。 */
     stuck: () => rejectsInRow >= gate.maxConsecutiveRejections,
     reset: () => {
       sessions.clear();
@@ -165,28 +154,25 @@ export function createBurstCollector(opts = {}) {
   };
 }
 
-/* ------------------------------------------------------------------ DOM wiring ----
- * Guarded for the same reason as web/sender.js: the pure logic above has to stay
- * importable under Node, where there is no camera and no document.
+/* ----------------------------------------------------------------- DOM --------
+ * 守卫同 web/sender.js：纯逻辑必须能在 Node 里 import，Node 里没相机也没 document。
  */
 if (typeof document !== 'undefined' && typeof document.getElementById === 'function' && document.getElementById('burst')) {
   const $ = (id) => document.getElementById(id);
   const logEl = $('burst-log');
   const say = (m, cls = '') => {
-    const d = document.createElement('div');
-    if (cls) d.className = cls;
-    d.textContent = m;
+    const d = document.createElement('span');
+    if (cls) d.className = 'l' + (cls ? ' ' + cls : '');
+    d.textContent = m + '\n';
     logEl.appendChild(d);
     logEl.scrollTop = logEl.scrollHeight;
   };
 
   $('burst').addEventListener('click', async () => {
-    // Not 'video'. index.html carries two video elements and the single-shot one in section 1 comes
-    // first in document order, so getElementById('video') handed this burst path THAT element: the
-    // visible preview in the burst section stayed black while the frames were read from a
-    // display:none video -- which is browser-dependent and not something iOS Safari can be relied on
-    // to decode. Duplicate ids in the shipped pages are a build check now (tools/check-dist.mjs), so
-    // this cannot quietly regress, and please do not "tidy" the two ids back into one.
+    // 不是 'video'。index.html 里有两段 video，第 1 节单张拍照的那段在文档流上更靠前，
+    // getElementById('video') 拿到的是它：连拍区的预览一片黑，帧是从 display:none 的
+    // video 读出来的 —— 这事儿因浏览器而异，iOS Safari 不能指望它解。dist 已有「同页
+    // id 不重复」护栏（tools/check-dist.mjs），这俩 id 不许被「统一」回去。
     const video = $('burst-video');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       say('这个来源拿不到摄像头 API（非 https 且非 file:// localhost）。请用手机系统相机拍照存成图片，再走文件选择解码。', 'bad');
@@ -196,13 +182,15 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, focusMode: { ideal: 'continuous' } }, audio: false });
     } catch (e) {
-      say(`摄像头被拒绝或不可用：${e.name} ${e.message}。改走"拍照存成 PNG → 文件选择"，解码不受影响。`, 'bad');
+      say(`摄像头被拒绝或不可用：${e.name} ${e.message}。改走「拍照存成 PNG → 文件选择」，解码不受影响。`, 'bad');
       return;
     }
     video.srcObject = stream;
     await video.play().catch(() => {});
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    setPill('burst-pill', '连拍中…', 'busy');
+    $('burst-wrap').setAttribute('data-state', 'busy');
     say('连拍开始：把整页拍进画面，四角对齐；系统会自动挑帧，收满自动停。', 'hint');
 
     const { bootstrapDecode } = await import('./core/decode/bootstrap.js');
@@ -211,11 +199,9 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     // 手机连拍这条路也要能救回「被页内码拒绝」的页：与 app.js、CLI、G2 门限共用同一段仲裁逻辑
     // （docs/DEFECTS.md D51）。少改这一处，手机端就仍是旧读法。
     const { feedPageWithRecalibration } = await import('./core/decode/recalibrate.js');
-    // The burst section needs its own passphrase field. The sender page offers encryption (send.html
-    // #spw) and the file-intake half of THIS page has #pass, so without it a phone could receive every
-    // page of an encrypted transfer and still be unable to open it -- with nowhere to type the key, and
-    // (before D66) a message blaming missing pages. Read once at burst start: the assembler derives the
-    // key when the batch closes, and the collected frames are not kept afterwards.
+    // 连拍区要有自己的口令。发送端（send.html 的 #spw）和本接收页的「文件选择」那半（#pass）都有，
+    // 缺这一处的话，手机收到加密传输的所有页却没地方输密码 —— 而（D66 之前）消息会怪到「缺页」。
+    // 连拍开始时读一次：assembler 合批时才派生 key，帧不留。
     const burstPass = $('burstpass');
     const asm = new TransferAssembler(burstPass && burstPass.value ? { passphrase: burstPass.value } : {});
     // 重读需要「这一帧认出来的几何」。addFrame 内部总是先 decode 再 feed、且逐帧 await，
@@ -227,8 +213,8 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
         if (b.ok) frameGeom = b.geom;
         return b;
       },
-      // The assembler lives here, not in app.js: a burst session must not depend on the
-      // receiver page's internals (an earlier draft imported a module that does not exist).
+      // assembler 住这里、不在 app.js 里：连拍会话不能依赖接收页内部（早期一稿 import 了一个
+      // 不存在的模块，就是这么踩出来的）。
       feed: (page) => feedPageWithRecalibration(asm, page, { geom: frameGeom }).then((r) => r.fed),
     });
 
@@ -248,7 +234,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
           const r = await collector.addFrame({ width: w, height: h, pixels: new Uint8Array(img.data.buffer) });
           if (r.kind === 'page') say(`第 ${r.pageIndex + 1} 页收到（${r.path}${r.markerPx ? ` · 角标 ${r.markerPx.toFixed(0)}px` : ''}）· 已有 ${r.progress.have}/${r.progress.total} · 缺 ${r.progress.missing.map((i) => i + 1).join(',') || '无'}`);
           else if (r.hint) say(r.hint, 'hint');
-          else if (r.kind === 'duplicate') { /* silent: this fires many times per second */ }
+          else if (r.kind === 'duplicate') { /* 每秒几次，静默 */ }
           else if (r.kind === 'no-page' || r.kind === 'rejected') say(r.advice && (r.advice.zh || r.advice.cause) ? (r.advice.zh || `${r.advice.cause} → ${r.advice.do}`) : '画面里没有本工具的页（或太糊/太暗）', 'hint');
           $('burstprog').textContent = `已收 ${r.progress.have}/${r.progress.total || '?'} 页 · 缺 ${r.progress.missing.map((i) => i + 1).join(',') || '无'}`;
           if (r.complete) {
@@ -258,37 +244,35 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
             const out = asm.result;
             if (!out) {
               if (asm.needPassphrase) {
-                // Every page arrived, so "未知原因" or anything about missing pages would send the user
-                // after the wrong thing (D66). No markdown: say() assigns textContent.
+                // 页都收齐，所以「未知原因」或「缺页」会把用户送去找别的东西（D66）。
+                // 不写 markdown：say() 走 textContent。
                 say('页收齐了，但这批是加密传输，而「口令」框是空的：填入口令后按「开始连拍」重来一次。没有写出任何文件。', 'bad');
                 say('如实说清代价：连拍不留已解出的页（在手机上常驻每页的判读结果太贵），所以这次要重拍 —— 下次先填口令再按开始。', 'hint');
+                setPill('burst-pill', '需要口令', 'err');
+                $('burst-wrap').setAttribute('data-state', 'err');
               } else {
                 say(`组装失败：${asm.error || '未知原因'}（页收齐但内容不完整，勿当作成功）`, 'bad');
+                setPill('burst-pill', '未完成', 'err');
+                $('burst-wrap').setAttribute('data-state', 'err');
               }
             } else {
               const a = document.createElement('a');
               const dg = sha256Hex(out);
-              // The default name still comes from the bytes: the printed header has no name field, so
-              // anything else would be a claim the pages cannot support. Typing a name is optional and
-              // changes nothing about what was decoded -- but on a phone it is the difference between a
-              // file that opens and one the OS cannot place, because the handler comes from the
-              // extension (DEFECTS D62). Policy is core/naming.js, shared with app.js, unit-tested;
-              // nothing here improvises a filename.
+              // 默认名还是从字节算：页头没名字字段，其他名字都是页面撑不住的承诺。
+              // 填名字是可选，改的不是解出来的内容 —— 在手机上它就是「能不能被应用打开」
+              // 的差别，因为 handler 来自扩展名（DEFECTS D62）。策略在 core/naming.js，
+              // 与 app.js 共享、单测钉住；这里不即兴取名。
               const nameEl = $('burstname');
               const name = downloadName({ byteLength: out.length, sha256Hex: dg, userText: nameEl ? nameEl.value : '' });
-              // Blob + createObjectURL: the same mechanism the desktop half of THIS page already ships
-              // (app.js: new Blob([asm.result]) + URL.createObjectURL). It used to be a data: URL built
-              // by btoa over a chunked String.fromCharCode loop -- the mechanism a browser is least
-              // likely to honour for `download`, on the platform where downloads are most constrained,
-              // for the last step of the phone path (decoding is worthless if the file cannot be
-              // retrieved). This is NOT a claim that blob: is verified on every phone: neither mechanism
-              // has been exercised in a real browser here, and the G4/G9 checklist says to check once on
-              // a real phone that the file lands and opens. What it does claim is that one page no longer
-              // saves two different ways. Not the D63 decision reversed either: D63 recorded the SENDER's
-              // data: URL (up to 63 MB of artifacts, send.html's CSP) and that stays untouched in the G9
-              // batch; this payload is capped by the protocol at ~1.52 MB.
-              // Deliberately not revoked: revokeObjectURL right after a programmatic click races the
-              // download in some browsers, and one blob per completed burst is not worth that risk.
+              // Blob + createObjectURL：本页桌面那段（app.js: new Blob([asm.result]) + URL.createObjectURL）
+              // 已经用同样的机制发文件。这条路以前是把 bytes 经 btoa + 分块 String.fromCharCode 编
+              // 成 data: URL 再用 `download` —— 在手机平台上最不被浏览器当回事，刚好卡在「解出来了
+              // 拿不走」那一步（要拿走的最后一步）。**不是**说 blob: 在每台手机上验过：两种机制都
+              // 还没在这台机器的真浏览器上走过，G4/G9 的清单就是要在真手机/真浏览器上点一次。这里
+              // 只保证「一个页面不再两种走法」。不是 D63 的反转：D63 记的是发送端 data: URL（最大
+              // 63 MB 的产物，send.html 的 CSP），那条没动；这里载荷被协议封顶在 ~1.52 MB。
+              // 不主动 revokeObjectURL：a.click() 之后立刻 revoke 在某些浏览器会跟下载抢，一次连
+              // 拍一个 blob 不值得冒那个险。
               const blob = new Blob([out], { type: 'application/octet-stream' });
               a.href = URL.createObjectURL(blob);
               a.download = name;
@@ -296,6 +280,8 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
               a.click();
               a.remove();
               say(`完成：${out.length.toLocaleString()} B · SHA-256 ${dg} · 已按「${name}」下载（页头没有文件名字段：留空时名字由摘要导出，填了就按你填的存；手机要靠扩展名才知道用什么打开）`, 'ok');
+              setPill('burst-pill', '完成', 'ok');
+              $('burst-wrap').setAttribute('data-state', 'ok');
             }
             return;
           }
@@ -305,6 +291,8 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
         say('连续几十帧都不合格，先停下来：检查光照（避免反光）、把四个角标都拍进画面、手机稳一点。', 'bad');
         running = false;
         stream.getTracks().forEach((t) => t.stop());
+        setPill('burst-pill', '已停止', 'err');
+        $('burst-wrap').setAttribute('data-state', 'err');
         return;
       }
       requestAnimationFrame(step);
@@ -315,6 +303,22 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
       running = false;
       stream.getTracks().forEach((t) => t.stop());
       say('已手动停止。', 'hint');
+      setPill('burst-pill', '已停止', 'warn');
+      $('burst-wrap').setAttribute('data-state', 'warn');
     };
   });
+
+  // pill 状态联动：找到所属 card 打 data-state。
+  function setPill(id, text, state) {
+    const p = $(id);
+    if (!p) return;
+    p.textContent = text;
+    if (state) {
+      let n = p.parentElement;
+      while (n && n !== document.body) {
+        if (n.classList && n.classList.contains('card')) { n.setAttribute('data-state', state); break; }
+        n = n.parentElement;
+      }
+    }
+  }
 }

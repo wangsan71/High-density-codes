@@ -1,12 +1,13 @@
 /**
- * PSKT receiver -- browser shell. Contains no decoding logic of its own: every bit of it
- * is in ../core (the same modules the CLI and the independent Python reference use), so
- * the web path cannot quietly become a second, easier-to-fool implementation.
+ * PSKT 接收端 — 浏览器外壳。
  *
- * Nothing here reaches the network. There is no fetch() except for the selftest asset
- * served from this same origin, no analytics, no font, no CDN, and the CSP header in
- * index.html (default-src 'self') is what makes that a machine-checked claim rather than
- * a promise -- tools/check-dist.mjs asserts both.
+ * 这里不含任何解码逻辑：所有解码都走 ../core（与 CLI、Python 参考实现同一份）。
+ * 网页端要重新实现，就成「两套更易骗的实现」了；本项目的硬约束是误接受 = 0，不是
+ * 「我看着也像 0」。
+ *
+ * 不出网：没有 fetch（仅 selftest 同源拉 conformance.json），没有 font、没有 CDN、没有
+ * 分析代码。CSP 在 index.html 写的是 default-src 'self'；tools/check-dist.mjs 会
+ * 把这一点变成「机器断言」而不是「我承诺」。
  */
 import { decodePNG } from './core/decode/png-read.js';
 import { bootstrapDecode } from './core/decode/bootstrap.js';
@@ -17,56 +18,121 @@ import { feedPageWithRecalibration } from './core/decode/recalibrate.js';
 import { sha256Hex } from './core/hash.js';
 import { PROFILE_IDS, PROFILES, profileOptionLabel } from './core/profiles.js';
 import { advise } from './core/decode/advice.js';
-// The download-name policy (DEFECTS D62): shared with capture.js and the CLI's users, pure, and pinned
-// by tests/unit/naming.test.mjs. Not improvised here, because a `download` attribute built from typed
-// text has to come out a single safe path component on every platform.
+// 下载名策略（DEFECTS D62）：与 capture.js、CLI 用户共享，纯函数，单测钉住。
+// 这里不即兴起名：download 属性要从用户输入的文本走出一条安全的路径分量，每个平台都认。
 import { downloadName } from './core/naming.js';
 
 const $ = (id) => document.getElementById(id);
-const logEl = $('log');
-const log = (m) => { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; };
-const setStatus = (m) => { $('status').textContent = m; };
 
+/* --------------------------------------------------------------- 状态 -------- */
+
+/** 当前接收进度：决定主区卡片右上角 pill 与整张卡的 data-state。 */
+const setState = (cardId, state, pillId, text) => {
+  if (cardId) {
+    const c = $(cardId);
+    if (c) c.setAttribute('data-state', state || 'idle');
+  }
+  if (pillId) {
+    const p = $(pillId);
+    if (p) p.textContent = text;
+  }
+};
+
+/** 带颜色等级的日志追加：所有用户可见文字都走这里（textContent，不走 innerHTML，markdown 不会被渲染）。 */
+const logEl = $('log');
+const log = (m, cls = '') => {
+  const span = document.createElement('span');
+  span.className = 'l' + (cls ? ' ' + cls : '');
+  span.textContent = m + '\n';
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+};
+const logClear = () => { logEl.textContent = ''; };
+const setStatus = (m, state) => {
+  const pill = $('status');
+  if (pill) pill.textContent = m;
+  setState('card-run', state || (m === '完成' ? 'ok' : m === '未完成' || m === '需要口令' ? 'err' : 'busy'), 'status', m);
+};
+
+/* ----------------------------------------------------------- 剖面下拉 -------- */
+
+// 与发送页共用一份 label 策略（core/profiles.js），所以接收端的下拉也带 D49 警告 + 手机提示，
+// 而不是再手写一份漏掉其中之一。
 for (const id of PROFILE_IDS) {
   const o = document.createElement('option');
   o.value = id;
-  // Same label policy as the sender page (core/profiles.js), so the receiver's dropdown carries
-  // the D49 warning and the phone hint too -- it used to hand-roll a label and show neither.
   o.textContent = profileOptionLabel(id, PROFILES[id]);
   $('profile').appendChild(o);
 }
 
+/* --------------------------------------------------------------- 文件 -------- */
+
 const files = [];
-$('files').addEventListener('change', (e) => {
+const updateFileLine = () => {
+  const wrap = $('fileline-wrap');
+  const line = $('fileline');
+  if (!files.length) {
+    wrap.hidden = true;
+    line.textContent = '';
+    $('go').disabled = true;
+    setState('card-intake', 'idle', 'intake-pill', '等待文件');
+    setStatus('等待文件', 'idle');
+    return;
+  }
+  const total = files.reduce((s, f) => s + f.size, 0);
+  const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+  line.textContent = `${files.length} 张 · ${fmt(total)} · ${files.slice(0, 3).map((f) => f.name).join(' · ')}${files.length > 3 ? ` …+${files.length - 3}` : ''}`;
+  wrap.hidden = false;
+  $('go').disabled = false;
+  setState('card-intake', 'ok', 'intake-pill', `${files.length} 张就绪`);
+  setStatus('就绪');
+};
+
+const setFiles = (list) => {
   files.length = 0;
-  files.push(...Array.from(e.target.files || []));
-  $('go').disabled = files.length === 0;
-  setStatus(files.length ? `${files.length} 个文件待还原` : '等待文件');
+  for (const f of list) files.push(f);
+  updateFileLine();
+};
+
+$('files').addEventListener('change', (e) => setFiles(Array.from(e.target.files || [])));
+
+// 拖放：单文件喂也按当前选择策略走，但允许一次拖多张。
+const drop = $('drop-zone');
+['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('is-drag'); }));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('is-drag'); }));
+drop.addEventListener('drop', (e) => {
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  const list = dt.items ? Array.from(dt.items).filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter(Boolean) : Array.from(dt.files || []);
+  if (list.length) setFiles(list);
 });
+// 让 drop 区在键盘上也能点开文件选择（按 Enter/Space 触发 input.click）。
+drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('files').click(); } });
 
-let busy = false;
-$('go').addEventListener('click', () => { if (!busy) run(); });
+/* ------------------------------------------------------------- 命名 -------- */
 
-/**
- * Naming inputs of the last completed transfer, and the one listener that uses them.
- *
- * Registered here, once, because the alternative -- adding an `input` listener inside run() -- leaks
- * one listener (and its closure over the whole assembled payload) per transfer (DEFECTS D73).
- * `null` until the first transfer completes, so typing before then changes nothing.
- */
+// 上一次完成传输的命名上下文；只存一份，避免 D73 那次的「每跑一次多挂一个监听器」。
 let currentNaming = null;
 const applyName = () => {
   if (!currentNaming) return;
   const name = downloadName({ ...currentNaming, userText: $('outname').value });
-  $('download').download = name;
+  $('download').setAttribute('download', name);
   $('outname-note').textContent = `将保存为：${name}`;
 };
 $('outname').addEventListener('input', applyName);
 
+/* ---------------------------------------------------------------- 跑 -------- */
+
+let busy = false;
+$('go').addEventListener('click', () => { if (!busy) run(); });
+
 async function run() {
   busy = true;
   $('out').hidden = true;
-  logEl.textContent = '';
+  logClear();
+  setStatus('解码中…', 'busy');
+  setState('log-wrap', 'busy', 'log-pill', '运行中');
+
   const hints = {
     profileHint: $('profile').value || null,
     dpiHint: $('dpi').value ? Number($('dpi').value) : null,
@@ -75,6 +141,7 @@ async function run() {
   };
   const asm = new TransferAssembler({ passphrase: $('pass').value || undefined });
   log(`候选：${hints.profileHint || hints.dpiHint || hints.paletteHint ? JSON.stringify(hints) : '全自动（逐个整页读，可能几十秒）'}`);
+
   let accepted = 0;
   let lastHeader = null;
   let i = 0;
@@ -85,16 +152,16 @@ async function run() {
     try {
       bmp = decodePNG(new Uint8Array(await f.arrayBuffer()));
     } catch (e) {
-      log(`  ${f.name}: 不是能读的 PNG（${e.message}）—— 只支持 PNG，TIFF 请先转 PNG`);
+      log(`  ${f.name}: 不是能读的 PNG（${e.message}）—— 只支持 PNG，TIFF 请先转 PNG`, 'bad');
       continue;
     }
     const t0 = performance.now();
     const boot = await bootstrapDecode(bmp, {
       ...hints,
-      onAttempt: (a) => log(`    试 ${a.profileId}@${a.dpi}/${a.paletteId}${a.nozzle ? '/' + a.nozzle : ''} -> ${a.stage}/${a.reason} [${a.ms}ms]`),
+      onAttempt: (a) => log(`    试 ${a.profileId}@${a.dpi}/${a.paletteId}${a.nozzle ? '/' + a.nozzle : ''} -> ${a.stage}/${a.reason} [${a.ms}ms]`, 'hint'),
     });
     if (!boot.ok) {
-      log(`  ${f.name}: 认不出来（试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`);
+      log(`  ${f.name}: 认不出来（试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`, 'bad');
       const a = adviseOr('no-geometry-matched', '这些图里没有本工具能认出的页码几何（可能被裁掉一角、分辨率过低、或来自另一套剖面）');
       log(`      成因：${a.cause}`);
       log(`      做法：${a.do}`);
@@ -107,7 +174,7 @@ async function run() {
     const fed = resc.fed;
     if (fed.duplicate) { log('      重复页（已去重）'); continue; }
     if (!fed.ok) {
-      log(`      装配拒绝：${fed.reason}`);
+      log(`      装配拒绝：${fed.reason}`, 'bad');
       if (resc.retried) log(`      已按本页实测的 ρ 切点重读过一次（切点 ${resc.estimate?.cut?.toFixed(4)}、改了 ${resc.changed} 格），仍被本页的码拒绝（${resc.secondReason}）⇒ 不写盘`);
       continue;
     }
@@ -117,69 +184,68 @@ async function run() {
     }
     accepted++;
   }
-  setStatus('核对摘要…');
+
+  setStatus('核对摘要…', 'busy');
   if (!asm.result) {
     const p = asm.progress;
     if (asm.needPassphrase) {
-      // Every page arrived, so "仍缺料" would send the user back to the printer for nothing (D66).
-      // No markdown here: log() assigns textContent, so asterisks would show up literally.
-      log(`未完成：页收齐了（数据页 ${p.dataHave}/${p.dataNeed}），但这批是加密传输，而第 2 节的「口令」是空的。`);
+      // 所有页都到齐，所以「仍缺料」会把用户送回打印机（白跑一趟，D66）。
+      // 这里不写 markdown：log() 走 textContent，星号会原样显示。
+      log('未完成：页收齐了（数据页 ' + p.dataHave + '/' + p.dataNeed + '），但这批是加密传输，而第 2 节的「口令」是空的。', 'bad');
       log('      缺的不是页、是口令：在上面填入口令，再按一次「3 · 开始还原」就行 —— 已选的文件还在，不必重新选，更不必重印重扫。');
       log('      没有写出任何文件：没有钥匙就没有明文，也就无从核对页头声明的摘要。');
       busy = false;
-      setStatus('需要口令');
+      setStatus('需要口令', 'err');
+      setState('log-wrap', 'warn', 'log-pill', '需要口令');
       return;
     }
     log(p.noSession
       ? '未完成：没有任何一页的头能读出来 —— 这是整批失败，缺页校验也帮不上（几何还没认出来）'
-      : `未完成（数据页 ${p.dataHave}/${p.dataNeed}）：${asm.error || '仍缺料'}`);
+      : `未完成（数据页 ${p.dataHave}/${p.dataNeed}）：${asm.error || '仍缺料'}`, 'bad');
     log('没有写出任何文件：本工具从不产出半成品');
     busy = false;
-    setStatus('未完成');
+    setStatus('未完成', 'err');
+    setState('log-wrap', 'err', 'log-pill', '未完成');
     return;
   }
+
   const digest = sha256Hex(asm.result);
   const blob = new Blob([asm.result], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   $('download').href = url;
-  // Named by its own digest, not by a filename: the printed header carries no name field
-  // (frame.js:14-28 lists magic..digest..crc16 and nothing else), so the only honest
-  // default is a name derived from the bytes themselves. That default is unchanged and
-  // tests/unit/naming.test.mjs pins it byte for byte. What changed is the second half of
-  // the old comment, "the user renames it after": on a phone that rename has to happen
-  // inside the OS file manager, and until it does nothing will open the file, because iOS
-  // and Android pick the handler from the extension (DEFECTS D62). So the user can type a
-  // name here instead. The policy that turns typed text into one safe path component is
-  // core/naming.js, shared with capture.js. The note says which name will be used, since a
-  // download whose name the user cannot see is a download the user cannot find afterwards.
-  // The listener is registered once at module load (below), not here: registering it inside run()
-  // added one more listener per transfer, each closing over that run's asm/digest (DEFECTS D73).
-  // The visible effect was a leak, not a wrong name -- listeners fire in registration order, so the
-  // newest one always won -- but stale closures holding a whole assembled payload are not free.
+  // 文件名由字节导出：页头没有名字字段（frame.js:14-28 只有 magic..digest..crc16），
+  // 默认名只能从字节算出来。这是单测钉死的，下面的 userText 只改扩展名/前缀。
+  // 监听器在模块加载时挂一次（D73 修的就是「run() 内挂 → 每次多挂一个」），不在 run() 里。
   currentNaming = { byteLength: asm.result.length, sha256Hex: digest };
   applyName();
-  $('result-line').textContent = `已逐字节还原：${asm.result.length} 字节 · SHA-256 ${digest.slice(0, 16)}…（与页头声明摘要一致才走到这里）· ${accepted} 页被接受`;
+
+  $('result-line').innerHTML = '';
+  const meta = document.createElement('span');
+  meta.innerHTML = `已逐字节还原：<b>${asm.result.length.toLocaleString()}</b> 字节 · SHA-256 <code>${digest.slice(0, 16)}…</code>（与页头声明摘要一致才走到这里）· <b>${accepted}</b> 页被接受`;
+  $('result-line').appendChild(meta);
   $('out').hidden = false;
-  log(`完成：${asm.result.length} 字节，摘要核对通过`);
+  setState('out', 'ok', null, null);
+  setState('card-run', 'ok', null, null);
+  log(`完成：${asm.result.length} 字节，摘要核对通过`, 'ok');
   busy = false;
-  setStatus('完成');
+  setStatus('完成', 'ok');
+  setState('log-wrap', 'ok', 'log-pill', '完成');
 }
 
 function adviseOr(reason, fallback) {
   try {
     return advise({ stage: 'markers', reason });
   } catch {
-    // advice.js maps a fixed reason set; an unmapped reason must not take the whole
-    // readout path down with it -- the point of the log is that it always says something.
+    // advice.js 映射一个固定的 reason 集合；没映射的 reason 不能让整条 readout 链都崩掉 —— 日志的价值就是「总是说点什么」。
     return { cause: fallback, do: '换一组候选（剖面/dpi/色板）重试，或改用 CLI 的 receive 带 manifest 定位。' };
   }
 }
 
-/* ---- camera: only where it can legally work, and say so where it cannot ----
- * `file://` counts as a secure context in Chrome, so isSecureContext alone is the wrong
- * test to print: the page would claim "not a secure context" while the real reason is an
- * opaque origin (no SW registration possible, and getUserMedia policy varies by browser).
- * Name the protocol, not a guess about it. */
+/* ------------------------------------------------------------- 摄像头 --------
+ * `file://` 在 Chrome 算安全上下文，所以「isSecureContext 为 false」不是真原因——
+ * 真正的限制是不透明 origin（SW 注册不到，getUserMedia 策略因浏览器而异）。
+ * 把协议名说出来，别猜。
+ */
 const isFile = location.protocol === 'file:';
 const secure = window.isSecureContext === true && !isFile;
 if (!secure) {
@@ -211,30 +277,32 @@ if (!secure) {
             const bmp = decodePNG(bytes);
             files.length = 0;
             files.push(new File([bytes], 'camera-page.png', { type: 'image/png' }));
-            log('已抓到一帧，开始还原。');
+            log('已抓到一帧，开始还原。', 'ok');
             run();
           } catch (e) {
-            log(`抓帧失败：${e.message}`);
+            log(`抓帧失败：${e.message}`, 'bad');
           }
         }, 'image/png');
       };
     } catch (e) {
-      log(`摄像头不可用：${e.name} ${e.message}`);
+      log(`摄像头不可用：${e.name} ${e.message}`, 'bad');
     }
   });
 }
 
-/* ---- service worker: offline precache, only where it is allowed ---- */
+/* ----------------------------------------------- Service Worker：离线预缓存 -- */
+
 if ('serviceWorker' in navigator && secure) {
   navigator.serviceWorker.register('./sw.js').then(
-    () => log('离线缓存已就绪（下次断网也能还原）。'),
-    (e) => log(`Service Worker 注册失败：${e.message}（不影响本次还原）`),
+    () => log('离线缓存已就绪（下次断网也能还原）。', 'hint'),
+    (e) => log(`Service Worker 注册失败：${e.message}（不影响本次还原）`, 'hint'),
   );
 }
 
-/* ---- ?selftest=1 lives in its own entry (web/selftest-page.js), loaded by index.html.
- * It is deliberately NOT imported from here: selftest.js uses dynamic import() on
- * purpose so the 200 KB conformance vector document is fetched only when a self-test is
- * actually requested, and tools/build-web.mjs refuses to bundle dynamic imports rather
- * than guess at them. Bundling it would have meant either weakening the selftest or
- * weakening the bundler -- both wrong. ---- */
+/* ------------------------------------------- ?selftest=1 的入口在 selftest-page.js，
+ * 不要从这里 import 它：selftest.js 故意用 dynamic import() 拉 conformance.json
+ * 200KB 的向量表，build-web.mjs 拒绝把 dynamic import 打进 bundle（这是契约不是 bug）：
+ * 把它打包就意味着要么 selftest 失能，要么 bundler 失能，两边一起坏。 */
+
+// 启动时给文件区一个明确的初始态。
+updateFileLine();
