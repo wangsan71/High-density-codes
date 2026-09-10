@@ -117,3 +117,20 @@ function readFast(bitmap, geom, layout, paletteId) {
 
 /**
  * Decode a list of images into page records, classifying every failure rather
+ * than aborting on the first one: a shoot with two bad frames out of seven must
+ * still deliver if the parity covers it, and the operator must be told *which*
+ * frames to retake and why.
+ */
+export function decodePages(images, ctx, opts = {}) {
+  const pages = [];
+  const failures = [];
+  for (const img of images) {
+    const r = decodePage(img.bitmap, ctx, opts);
+    if (r.ok) {
+      pages.push({ name: img.name, ...r });
+    } else {
+      failures.push({ name: img.name, stage: r.stage, reason: r.reason });
+    }
+  }
+  return { pages, failures };
+}
