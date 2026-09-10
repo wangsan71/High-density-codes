@@ -126,6 +126,13 @@
 
 ## 已知风险 / 待办
 
+### 第 145 轮（**给下一块砖（手机端认 `.psk`）先验前提：`core/image/` 五块**零** `node:` 依赖 ⇒ 能被浏览器端直接 import**）
+
+**① 做了什么**：零代码改动。下一块砖要在 PWA 接收页里 `import` `core/image/container.js` 来把 `.psk` 显示成图，所以本轮先把**这个前提验掉**：`core/image/` 下五个模块**没有任何真正的 `node:` import**（`grep "from 'node:"` ⇒ **0 处**；唯一的 3 处命中在注释里，是它们自己写的「no node: builtins」那句）。
+
+**② 顺带确认守卫存在**：`tests/unit/export-conventions.test.mjs` 本来就是**逐模块走遍 `core/**`** 检查导入的（它的注释写明：把 `core/**` 带进浏览器靠的就是这个），而单测是绿的 ⇒ 这条约束**有测试兜着**，不靠我肉眼。
+
+**③ 门限**：单测/门限沿用第 140 轮（`tests 409 · pass 409 · fail 0`、`usability` exit 0、`check-dist` 13 pass / 0 fail）；`check-docs-tables` clean。**下一块砖**：PWA 接收页认 `PSKI` 载荷并渲染成图（要动 `web/` 源码 + 重建 dist）。
 ### 第 144 轮（**按手册原样跑一遍用户会敲的那三条命令（一条命令发图 → 收 → 看），全部实测通过**）
 
 **① 做了什么**：零代码改动，本轮只做一件事 —— 把 `docs/USE.md` 里写给用户的那条命令原样跑一遍，证明手册不是「应该能行」而是**确实能行**。
