@@ -137,6 +137,122 @@ export function pageMapper(quad, srcW, srcH) {
   return (sx, sy) => { const p = apply(H, sx, sy); return [p.x, p.y]; };
 }
 
+/**
+ * Find the sheet's four corners from the tiles themselves.
+ *
+ * The tiled page carries no sheet-level markers (round 188: the legacy detector answers "no-hollow-corner"),
+ * so the tiles ARE the fiducials. Every step below was measured on a sheared page before it was written:
+ *
+ *  1. scan for the sharp per-finder signature (round 189: solid reads light-dark-dark-dark across modules
+ *     1..4, hollow reads light-light-dark-light). 137 hits on the test page.
+ *  2. three coarse extremes give a provisional affine; measured worst error over the 48 tiles: 5.7 px
+ *     (my earlier guess that it would be a module out was wrong -- round 194).
+ *  3. pair every hit with its nearest tile under that model and least-squares refit. With a 15 px
+ *     tolerance that pairs all 137 hits and puts the sheet corners within 1.6 px (round 194), which is what
+ *     turns the six unreadable tiles of round 190 into zero.
+ *
+ * The model is affine: a shear is affine and that is what the tests exercise. A perspective photograph needs
+ * the same fit with 8 unknowns instead of 6 -- NOT DONE, and written here rather than implied by the word
+ * "photo".
+ */
+export function findPageQuadFromTiles(img, plan, layout, opts = {}) {
+  const dpi = opts.dpi === undefined ? img.dpi : opts.dpi;
+  if (!(opts.sheetW > 0 && opts.sheetH > 0)) {
+    throw new RangeError('tile-read: findPageQuadFromTiles needs sheetW and sheetH in millimetres');
+  }
+  const px = modulePixels(plan.tileMm, layout.modules, dpi);
+  const step = opts.step === undefined ? Math.max(2, px >> 1) : opts.step;
+  const tolerance = opts.pairTolerance === undefined ? Math.max(6, Math.round(px * 1.5)) : opts.pairTolerance;
+  const toPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const dark = (x, y) => {
+    if (x < 0 || y < 0 || x >= img.width || y >= img.height) return 0;
+    return img.pixels[(y * img.width + x) * 4] < 128 ? 1 : 0;
+  };
+  const scoreTile = (ox, oy) => {
+    let s = 0;
+    for (const f of layout.finders) {
+      const row = (m) => dark(ox + f.x * px + Math.round((m + 0.5) * px), oy + f.y * px + Math.round(3.5 * px));
+      const m1 = row(1), m2 = row(2), m3 = row(3), m4 = row(4);
+      if (f.hollow) { if (!m1 && !m2 && m3 && !m4) s += 4; } else if (!m1 && m2 && m3 && m4) s += 4;
+    }
+    return s;
+  };
+  const span = layout.modules * px;
+  const hits = [];
+  for (let oy = 0; oy + span < img.height; oy += step) {
+    for (let ox = 0; ox + span < img.width; ox += step) if (scoreTile(ox, oy) === 16) hits.push({ ox, oy });
+  }
+  if (hits.length < 8) {
+    throw new RangeError('tile-read: only ' + hits.length + ' tile signature hit(s) in this image -- the page ' +
+      'may be missing, too small, or too blurred to find');
+  }
+  const grid = (t) => ({ x: toPx(plan.positions[t].x), y: toPx(plan.positions[t].y) });
+  const fitAffine = (pairs) => {
+    let Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0;
+    let Sxu = 0, Syu = 0, Su = 0, Sxv = 0, Syv = 0, Sv = 0;
+    for (const p of pairs) {
+      Sxx += p.gx * p.gx; Sxy += p.gx * p.gy; Syy += p.gy * p.gy; Sx += p.gx; Sy += p.gy;
+      Sxu += p.gx * p.ox; Syu += p.gy * p.ox; Su += p.ox;
+      Sxv += p.gx * p.oy; Syv += p.gy * p.oy; Sv += p.oy;
+    }
+    const n = pairs.length;
+    const solve3 = (M, r) => {
+      const A = M.map((row, i) => row.concat([r[i]]));
+      for (let i = 0; i < 3; i++) {
+        let piv = i;
+        for (let k = i + 1; k < 3; k++) if (Math.abs(A[k][i]) > Math.abs(A[piv][i])) piv = k;
+        const tmp = A[i]; A[i] = A[piv]; A[piv] = tmp;
+        for (let k = i + 1; k < 3; k++) {
+          const f = A[k][i] / A[i][i];
+          for (let j = i; j < 4; j++) A[k][j] -= f * A[i][j];
+        }
+      }
+      const out = [0, 0, 0];
+      for (let i = 2; i >= 0; i--) { let s = A[i][3]; for (let j = i + 1; j < 3; j++) s -= A[i][j] * out[j]; out[i] = s / A[i][i]; }
+      return out;
+    };
+    const M = [[Sxx, Sxy, Sx], [Sxy, Syy, Sy], [Sx, Sy, n]];
+    const ax = solve3(M, [Sxu, Syu, Su]);
+    const ay = solve3(M, [Sxv, Syv, Sv]);
+    return (gx, gy) => [ax[0] * gx + ax[1] * gy + ax[2], ay[0] * gx + ay[1] * gy + ay[2]];
+  };
+  const pick = (cmp) => hits.reduce((a, b) => (cmp(b, a) ? b : a));
+  const idxTR = plan.cols - 1;
+  const idxBL = (plan.rows - 1) * plan.cols;
+  const coarseTL = pick((b, a) => b.ox + b.oy < a.ox + a.oy);
+  const coarseTR = pick((b, a) => b.ox - b.oy > a.ox - a.oy);
+  const coarseBL = pick((b, a) => b.ox - b.oy < a.ox - a.oy);
+  const seed = [
+    { gx: grid(0).x, gy: grid(0).y, ox: coarseTL.ox, oy: coarseTL.oy },
+    { gx: grid(idxTR).x, gy: grid(idxTR).y, ox: coarseTR.ox, oy: coarseTR.oy },
+    { gx: grid(idxBL).x, gy: grid(idxBL).y, ox: coarseBL.ox, oy: coarseBL.oy },
+  ];
+  let model = fitAffine(seed);
+  const pairs = [];
+  for (const h of hits) {
+    let bestT = -1;
+    let bd = Infinity;
+    for (let t = 0; t < plan.positions.length; t++) {
+      const g = grid(t);
+      const p = model(g.x, g.y);
+      const d = Math.hypot(h.ox - p[0], h.oy - p[1]);
+      if (d < bd) { bd = d; bestT = t; }
+    }
+    if (bd > tolerance) continue;
+    const g = grid(bestT);
+    pairs.push({ gx: g.x, gy: g.y, ox: h.ox, oy: h.oy, tile: bestT });
+  }
+  if (pairs.length < 8) {
+    throw new RangeError('tile-read: only ' + pairs.length + ' of ' + hits.length + ' hits agreed with the provisional ' +
+      'grid (need at least 8) -- the page may be missing, rotated or too distorted to fit');
+  }
+  model = fitAffine(pairs);
+  const W = toPx(opts.sheetW);
+  const H = toPx(opts.sheetH);
+  const c = (gx, gy) => { const p = model(gx, gy); return { x: p[0], y: p[1] }; };
+  return { tl: c(0, 0), tr: c(W, 0), br: c(W, H), bl: c(0, H), anchors: pairs.length, hits: hits.length };
+}
+
 export function turn(m, n, modules, rot) {
   if (rot === 90) return [modules - 1 - n, m];
   if (rot === 180) return [modules - 1 - m, modules - 1 - n];

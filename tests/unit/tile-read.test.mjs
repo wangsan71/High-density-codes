@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planTiles, tileLayout, tileCapacity } from '../../core/tiles.js';
 import { renderTilePage } from '../../core/render/tilepage.js';
-import { readTile, readTilePage, pageMapper } from '../../core/decode/tile-read.js';
+import { readTile, readTilePage, pageMapper, findPageQuadFromTiles } from '../../core/decode/tile-read.js';
 import { tilePageTiles } from '../../tools/make-tile-page.mjs';
 
 const sheetW = 210;
@@ -205,4 +205,35 @@ test('tile-read: with a page map, a wrecked tile is refused instead of being "fo
   assert.throws(() => readTilePage(sheared, plan, layout, dpi, { map }), /unreadable|refusing|could not be corrected/);
   const partial = readTilePage(sheared, plan, layout, dpi, { map, allowPartial: true });
   assert.equal(partial.partial, true, 'the damaged tile must be reported, not guessed');
+});
+
+test('tile-read: the page finds and fits its own corners, and a skewed page reads with zero holes', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 37 + 11) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const W = base.width;
+  const H = base.height;
+  const shearPx = 40;
+  const sheared = { width: W, height: H, dpi, pixels: new Uint8Array(W * H * 4).fill(255) };
+  for (let y = 0; y < H; y++) {
+    const shift = Math.round((shearPx * y) / (H - 1));
+    for (let x = 0; x < W; x++) {
+      const sx = x - shift;
+      if (sx < 0 || sx >= W) continue;
+      const s = (y * W + sx) * 4;
+      const d = (y * W + x) * 4;
+      sheared.pixels[d] = base.pixels[s];
+      sheared.pixels[d + 1] = base.pixels[s + 1];
+      sheared.pixels[d + 2] = base.pixels[s + 2];
+      sheared.pixels[d + 3] = 255;
+    }
+  }
+  const quad = findPageQuadFromTiles(sheared, plan, layout, { dpi, sheetW, sheetH });
+  assert.ok(quad.anchors >= 100, 'the fit must use many anchors, got ' + quad.anchors + ' of ' + quad.hits + ' hits');
+  assert.ok(Math.abs(quad.tl.x) <= 3 && Math.abs(quad.tl.y) <= 3, 'TL ' + JSON.stringify(quad.tl));
+  assert.ok(Math.abs(quad.br.x - (W + shearPx)) <= 3, 'BR x ' + quad.br.x + ' expected ' + (W + shearPx));
+  const back = readTilePage(sheared, plan, layout, dpi, { map: pageMapper([quad.tl, quad.tr, quad.br, quad.bl], W, H) });
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a skewed page must read end to end');
+  assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
 });
