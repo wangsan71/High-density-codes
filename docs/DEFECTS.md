@@ -3,6 +3,11 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 128 轮新增（D84 · 环境 / 工具）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D84** | **把 `usability.ps1` 中途打断之后，8123 会暂时绑不上，于是"服务器那两步"整体 FAIL，看起来像产品回归**：步骤 7 用 `Start-Process node tools/serve.mjs --port 8123`（**端口是显式传的 ⇒ 绑不上就拒绝，不会自己换端口**），而被打断的那次冒烟留下的一次性出站连接会把这个端口当成自己的**临时本地端口**占住 ⇒ 下一次 `listen EADDRINUSE`。**这不是产品缺陷**：`serve.mjs` 自己把两种成因都打印出来了（含 `netstat -ano \| findstr :8123` 该看什么），`check-serve` 里 4 条"期望被拒绝"的检查还会**假绿**（拿到连接错误也算拒绝） | 在步骤 7 之前打断一次（例如外层工具 600 s 墙钟到点被杀），紧接着再跑：`& .\tools\usability.ps1` ⇒ 汇总行 **`USABILITY: 2 step(s) FAILED in …`**、`USABILITY_EXIT=1`；证据在 **`.tmp/usability/step7-serve.err.log` 首行**：`serve: cannot listen on 0.0.0.0:8123 -- listen EADDRINUSE: address already in use`；而 `Get-NetTCPConnection -LocalPort 8123` **看不到任何监听者**（选(b)：临时端口占用）。**阳性对照**：同一份代码、端口释放后原样复跑 ⇒ `USABILITY_EXIT=0` 全腿 PASS | **NOTABUG（环境行为）** ✓ 做法：等到端口释放再跑，或 `& .\tools\usability.ps1 -ServePort 8124`；**判回归前先看 `step7-serve.err.log`** |
 ## 第 23 轮闭掉的
 
 | # | 缺陷 | 复验命令 | 状态 |

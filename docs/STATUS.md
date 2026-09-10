@@ -126,6 +126,19 @@
 
 ## 已知风险 / 待办
 
+### 第 128 轮（**P2b 第一块砖：自研有损编码的"变换 + 量化"落地（5 条单测）；顺带抓到"冒烟被中途打断会假装产品坏了"这个环境陷阱 D84**）
+
+**① 做了什么**：新增 `core/image/dct.js` —— 8×8 分离 DCT（正/逆）、JPEG 标准亮度/色度量化表、`qualityScale` 用 libjpeg 那套 1..100 约定（**q1 最差、q100 近无损**，与第 127 轮 oracle 数字同源）、`quantise`/`dequantise`（**唯一有损的一步**），以及一个**只用于比较**的系数位数模型 `estimateBlockBits`。配 `tests/unit/dct.test.mjs` 5 条。**熵编码器故意还没写** —— 没有它就没有"静默错"的余地。`core/` 约束照旧：纯 ESM、零依赖、不用 `node:`。
+
+**② 怎么证的**（本轮**不新增任何纸面容量判决**）：单测 **`tests 382 · pass 382 · fail 0`、`SUITE_EXIT=0`**（第 127 轮的 377 + 本轮 5）；`node tools/build-web.mjs` exit 0；`node tools/check-dist.mjs` ⇒ **13 pass / 0 fail**、`G9 CHECK` 全过；`node cli/pskit.mjs verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（**本次未评估：G4 G6 G9 G10** —— 引用时不许省这半句）；`& .\tools\usability.ps1` ⇒ **全腿 PASS、`USABILITY_EXIT=0`**；`node tools/check-docs-tables.mjs` ⇒ **clean（481 行 / 83 张表）**。
+
+**③ 本轮钉住的三个数**（都是单测里的代码事实，**不是**纸面容量）：① **q100** 时每档步长被夹到 1 ⇒ 块内 rms 只剩"把 64 个系数取整"的地板 **0.1995**（幅度 40 的块）② 平滑块 **q70 的 rms < 12**，且 **q10 > q70 > q100** 单调 ③ 平坦块（一个 DC + end-of-block）**≤ 16 bit**。变换自身可逆性：正逆往返最大误差 **< 1e-3**；平坦块能量**只落在 DC**（`level × 8`）。
+
+**④ 没做什么 / 下一块砖**：霍夫曼熵编码，以及把 `estimateBlockBits` 换成真编码器。**仓库里目前没有可入库的照片夹具**（`**/*.png` 中非 `.tmp/` 的只有 `out/`、`scans/` 的产物与 PWA 图标）⇒ 与第 127 轮 oracle（`q70 = 73 085 B @ 46.28 dB`）的对拍，必须等"确定性照片生成器 + bench 工具"**一起入库**，**在那之前不写任何"我们能到多少 dB / 多少字节"的判决**（估算只能当警告，见 AGENTS §6.2）。
+
+**⑤ 顺带的缺陷**：**D84** —— 冒烟跑到步骤 7 之前被中途打断（外层工具 600 s 墙钟到点被杀），**8123 会暂时绑不上**，于是 `check-serve` 6/10 + `check-lan` 全 FAIL，汇总行只写 `USABILITY: 2 step(s) FAILED`，**看起来像产品回归**。同一份代码复跑 ⇒ `USABILITY_EXIT=0` 全腿 PASS ⇒ 判 **NOTABUG（环境行为）**，记它是为了下一轮别把它当回归。
+
+**⑥ 架构影响**：`defaultProfileFor()` / 纸面档位 / 密度梯子 / 验收包**一字未动**；本轮只在 `core/image/` 里多了一个还没有调用方的新模块（所以 `check-dist` 的产物断言也不变）。
 ### 第 127 轮（**P2b 的决策测量：拿第三方 JPEG 当"预言机"量出"每字节能换多少 dB" ⇒ 自研有损编码从"可选"变成"必做"**）
 
 **① 为什么先量再写**：写一个 baseline JPEG（DCT + 量化 + 霍夫曼）是几百行的活。写之前先用 **PIL 的 JPEG 当预言机**（**只用于规划测量，绝不进产品依赖** —— 产品的 `core/` 仍然零依赖）量出"同样字节预算下，有损变换编码能换到多少像素"。
