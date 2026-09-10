@@ -250,6 +250,14 @@ async function cmdSend(args) {
   console.log(`  net       ${geom.ecc.netBytesPerPage} B/page -> up to ${plan.dataPages}+${plan.parityPages} = ${plan.totalPages} pages (before compression)`);
 
   if (args['dry-run']) {
+    // A dry run has to be able to fail. It used to print a complete, plausible plan for pages the
+    // real send refuses outright: measured (round 121), a profile whose layout needs a 64 px quiet
+    // zone printed a full plan here and then died with "pageLayout: ... (need 64px)". So run the same
+    // layout preflight the real path runs -- the plan printed below is then a plan that exists.
+    mod.layoutMod.pageLayout(geom, dpi, {
+      plateMm: args.plate ? Number(args.plate) : undefined,
+      sheetMm: mod.profiles.PROFILES[profileId].medium === 'paper' ? geom.sheetMm : undefined,
+    });
     console.log('  (dry run: nothing written)');
     return;
   }
