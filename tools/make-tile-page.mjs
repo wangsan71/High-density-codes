@@ -23,6 +23,7 @@ import { encodePNG } from '../core/render/png.js';
 import { decodePNG } from '../core/decode/png-read.js';
 import { readTilePage } from '../core/decode/tile-read.js';
 import { SHEETS } from '../core/profiles.js';
+import { crc16 } from '../core/crc.js';
 
 const USAGE = [
   'make-tile-page -- draw a tiled page (QR-style: every tile has its own finder patterns)',
@@ -32,12 +33,16 @@ const USAGE = [
 ].join('\n');
 
 // index, tile count, payload length (u16) -- the length is what lets a reader trim the zero padding of
-// the last tile instead of guessing where the payload ended.
+// the last tile instead of guessing where the payload ended. The last two bytes are a CRC16 over
+// everything before them: error DETECTION before error correction, because returning wrong bytes is the
+// one failure this project does not accept, and a 16-bit check turns a misread tile into a named refusal
+// (it is also what makes the locator able to tell a good alignment from a plausible one).
 const HEADER_BYTES = 4;
+export const CRC_BYTES = 2;
 
 export function tilePageTiles(payload, plan, layout) {
   const cap = tileCapacity(plan, layout);
-  const per = cap.bytesPerTile - HEADER_BYTES;
+  const per = cap.bytesPerTile - HEADER_BYTES - CRC_BYTES;
   if (per < 1) throw new RangeError('make-tile-page: a tile of ' + cap.bytesPerTile + ' B cannot hold a ' + HEADER_BYTES + '-byte header');
   if (payload.length > per * cap.tiles) {
     throw new RangeError('make-tile-page: ' + payload.length + ' B does not fit a tiled sheet of ' + cap.tiles +
@@ -46,12 +51,15 @@ export function tilePageTiles(payload, plan, layout) {
   const tiles = [];
   for (let t = 0; t < cap.tiles; t++) {
     const slice = payload.subarray(t * per, Math.min(payload.length, (t + 1) * per));
-    const buf = new Uint8Array(HEADER_BYTES + slice.length);
+    const buf = new Uint8Array(cap.bytesPerTile);
     buf[0] = t & 0xff;
     buf[1] = cap.tiles & 0xff;
     buf[2] = (payload.length >> 8) & 0xff;
     buf[3] = payload.length & 0xff;
     buf.set(slice, HEADER_BYTES);
+    const sum = crc16(buf.subarray(0, buf.length - CRC_BYTES));
+    buf[buf.length - 2] = (sum >> 8) & 0xff;
+    buf[buf.length - 1] = sum & 0xff;
     tiles.push(fillTileModules(layout.dataCells, buf));
   }
   return { tiles, capacity: cap, bytesPerTile: per, usedBytes: payload.length };

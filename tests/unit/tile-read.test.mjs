@@ -24,7 +24,7 @@ test('tile-read: a payload survives page render and read-back byte for byte', ()
   const back = readTilePage(img, plan, layout, dpi);
   assert.equal(back.length, payload.length);
   assert.deepEqual(Array.from(back.payload), Array.from(payload));
-  assert.equal(back.bytesPerTile, 100, '104 raw bytes minus the 4-byte header');
+  assert.equal(back.bytesPerTile, 98, '104 raw bytes minus the 4-byte header and the 2-byte CRC16');
   assert.deepEqual(back.missing, []);
 });
 

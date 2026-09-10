@@ -11,8 +11,10 @@
  */
 
 import { modulePixels } from '../render/tilepage.js';
+import { crc16 } from '../crc.js';
 
 const HEADER_BYTES = 4;
+const CRC_BYTES = 2;
 
 /**
  * Find where a tile actually sits, instead of assuming it sits where the plan says.
@@ -124,15 +126,23 @@ function headerAt(img, plan, layout, t, dpi, dx, dy) {
   const pos = plan.positions[t];
   const ox = toPx(pos.x) + dx;
   const oy = toPx(pos.y) + dy;
-  let bits = 0;
-  for (let i = 0; i < 32; i++) {
+
+  // Sample the whole tile so the CRC can be checked: a correct alignment is now defined as "the tile's
+  // CRC16 validates", which is a far sharper criterion than the four header bytes alone.
+  const all = new Uint8Array(layout.dataCells.length);
+  for (let i = 0; i < all.length; i++) {
     const c = layout.dataCells[i];
     const x = ox + c.x * px + (px >> 1);
     const y = oy + c.y * px + (px >> 1);
     if (x < 0 || y < 0 || x >= img.width || y >= img.height) return null;
-    bits = (bits << 1) | (img.pixels[(y * img.width + x) * 4] < 128 ? 1 : 0);
+    all[i] = img.pixels[(y * img.width + x) * 4] < 128 ? 1 : 0;
   }
-  return { index: (bits >>> 24) & 0xff, count: (bits >>> 16) & 0xff, length: (bits >>> 8 & 0xff) << 8 | (bits & 0xff) };
+  const out = new Uint8Array(all.length >> 3);
+  for (let i = 0; i < out.length * 8; i++) if (all[i]) out[i >> 3] |= 1 << (7 - (i & 7));
+  const want = (out[out.length - 2] << 8) | out[out.length - 1];
+  const got = crc16(out.subarray(0, out.length - CRC_BYTES));
+  if (want !== got) return null;
+  return { index: out[0], count: out[1], length: (out[2] << 8) | out[3], crc: true };
 }
 
 /** Read one tile's data cells as bytes. Returns the header fields plus this tile's slice. */
@@ -159,15 +169,23 @@ export function readTile(img, plan, layout, t, dpi, offset) {
   const length = (bytes[2] << 8) | bytes[3];
   if (index !== t) throw new RangeError('tile-read: tile ' + t + ' declares index ' + index + ' -- the page and the geometry disagree');
   if (count !== plan.positions.length) throw new RangeError('tile-read: tile ' + t + ' declares ' + count + ' tiles but the plan has ' + plan.positions.length);
-  if (length > bytes.length * (count ? 1 : 1) * count) throw new RangeError('tile-read: header claims ' + length + ' bytes, which the sheet cannot hold');
-  const slice = bytes.subarray(HEADER_BYTES, HEADER_BYTES + Math.min(bytes.length - HEADER_BYTES, Math.max(0, length - t * (bytes.length - HEADER_BYTES))));
-  return { index, count, length, slice, bytes };
+  const per = bytes.length - HEADER_BYTES - CRC_BYTES;
+  if (length > per * count) throw new RangeError('tile-read: header claims ' + length + ' bytes, which the sheet cannot hold');
+  // The CRC is checked BEFORE the slice is trusted: a tile read at the wrong alignment produces
+  // plausible-looking bytes, and the only thing that distinguishes them from correct ones is this check.
+  const want = (bytes[bytes.length - 2] << 8) | bytes[bytes.length - 1];
+  const got = crc16(bytes.subarray(0, bytes.length - CRC_BYTES));
+  if (want !== got) {
+    throw new RangeError('tile-read: tile ' + t + ' fails its CRC16 (header says ' + want.toString(16) + ', the pixels say ' + got.toString(16) + ') -- the tile is misread, not empty');
+  }
+  const slice = bytes.subarray(HEADER_BYTES, HEADER_BYTES + Math.max(0, Math.min(per, length - t * per)));
+  return { index, count, length, slice, bytes, bytesPerTile: per };
 }
 
 /** Read every tile and reassemble the payload. Missing tiles are reported, never guessed. */
 export function readTilePage(img, plan, layout, dpi) {
   const first = readTile(img, plan, layout, 0, dpi);
-  const per = first.bytes.length - HEADER_BYTES;
+  const per = first.bytesPerTile;
   const out = new Uint8Array(first.length);
   const seen = new Uint8Array(first.count);
   const tiles = [];
