@@ -188,6 +188,15 @@ async function cmdSend(args) {
   if (!input) throw new Error('send: need an input file (see --help)');
   const file = resolve(input);
   if (!existsSync(file)) throw new Error(`send: no such file: ${file}`);
+  // Passing a directory used to end in the raw Node error "EISDIR: illegal operation on a directory,
+  // read", which tells the user neither what happened nor what to do (round 238, HANDOVER section 9 item 3).
+  // One transfer carries one file, so say that and name the way out.
+  if (statSync(file).isDirectory()) {
+    throw new Error(
+      `send: ${file} is a directory, and one transfer carries one file. Pack the directory into a single ` +
+        'file first (e.g. zip it) and send that -- or use split to send something too big for one transfer',
+    );
+  }
   let raw = new Uint8Array(readFileSync(file));
   const profileId = args.profile || defaultProfileFor(extname(file));
   if (args['image-mode'] === 'lossy') {
@@ -730,6 +739,11 @@ async function cmdReceive(args) {
     log: args.verbose ? (m) => console.log(`    ${m}`) : null,
   };
   const seen = new Map();
+  // Every failure is counted by stage/reason so the batch can be summarised in ONE line at the end. A
+  // folder of 40 photographs that all fail the same way used to print three lines each -- 120 lines of
+  // which the only actionable part was which class dominated (round 238, HANDOVER section 9 item 3).
+  const failures = new Map();
+  const bump = (stage, reason) => { const k = stage + '/' + reason; failures.set(k, (failures.get(k) || 0) + 1); };
   // One file may hold several pages: a scanner that writes one multi-page TIFF is the normal
   // case, not a corner case, and making the user split it by hand would be exactly the kind of
   // needless dependency this project refuses (DEFECTS D82). Each page is decoded as its own
@@ -747,6 +761,7 @@ async function cmdReceive(args) {
       }
     } catch (e) {
       console.log(`  ${name}: not a readable image (${e.message})`);
+      bump('read', 'not-an-image');
     }
   }
   for (const { label: name, bitmap } of images) {
@@ -759,6 +774,7 @@ async function cmdReceive(args) {
       console.log(`  ${name}: FAIL ${r.stage}/${r.reason} [${ms}ms]`);
       console.log(`      cause: ${a.cause}`);
       console.log(`      do:    ${a.do}`);
+      bump(r.stage, r.reason);
       continue;
     }
     // Arbitrated feed, shared with web/app.js and the G2 harness: the matched-filter read goes first
@@ -783,6 +799,7 @@ async function cmdReceive(args) {
     if (!fed.ok && !fed.duplicate) {
       const a = advise({ stage: 'assemble', reason: fed.reason });
       console.log(`  ${name}: REJECTED page ${idx ?? '?'} (${fed.reason})`);
+      bump('assemble', fed.reason);
       console.log(`      cause: ${a.cause}`);
       continue;
     }
@@ -791,6 +808,16 @@ async function cmdReceive(args) {
       `  ${name}: page ${idx === undefined ? '?' : idx} ${r.path}${r.path === 'photo' ? ` marker ${r.markerPx?.toFixed(0)}px cover ${(r.coverage * 100).toFixed(0)}%` : ''}` +
         `${r.colourAlive ? '' : ' [colour channel dead -> erasure]'} [${ms}ms]${fed.duplicate ? ' (duplicate)' : ''}`,
     );
+  }
+  // The batch's shape, in one line, with the dominant class's own advice -- the same advise() the
+  // per-file lines use, so the summary cannot contradict them (round 238).
+  if (failures.size) {
+    const ranked = [...failures.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const total = ranked.reduce((n, [, c]) => n + c, 0);
+    const [topStage, topReason] = ranked[0][0].split('/');
+    const a = advise({ stage: topStage, reason: topReason });
+    console.log(`  note: ${total} image/page(s) failed: ${ranked.map(([k, c]) => `${c} x ${k}`).join(', ')}`);
+    console.log(`      do:    ${a.do} (dominant class: ${topStage}/${topReason})`);
   }
   if (unreadable.length || pdfs.length) {
     console.log(

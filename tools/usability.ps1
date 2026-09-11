@@ -511,6 +511,47 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host ("{0}  scanner TIFF variants decode byte-identically: none/LZW/Deflate/PackBits, 8-bit gray, 1-bit, palette, 16-bit, and a 3-page file  (failed: {1})" -f $(if ($tifFails.Count -eq 0) { " PASS" } else { " FAIL" }), $(if ($tifFails.Count) { $tifFails -join ',' } else { 'none' }))
 }
 
+# 4i. Two refusals that must name the problem instead of leaking an implementation detail (round 238,
+#     HANDOVER section 9 item 3). Leg 1: `send` on a directory used to reach the user as the raw Node error
+#     "EISDIR: illegal operation on a directory, read" -- which says neither what happened nor what to do.
+$dirSendLog = Join-Path $tmp 'step4i-send-dir.log'
+$dirSendOut = Join-Path $tmp 'step4i-send-dir-must-not-exist'
+if (Test-Path $dirSendOut) { Remove-Item -Recurse -Force $dirSendOut }
+& node cli/pskit.mjs send $src --profile P-M1-300 --out $dirSendOut *> $dirSendLog
+$dirSendCode = $LASTEXITCODE
+$dirSendText = Get-Content $dirSendLog -Raw
+$dirSendWrote = Test-Path $dirSendOut
+$dirSendOk = ($dirSendCode -ne 0) -and (-not $dirSendWrote) -and ($dirSendText -match 'is a directory') -and ($dirSendText -match 'one transfer carries one file') -and ($dirSendText -notmatch 'EISDIR')
+if (-not $dirSendOk) { $script:fails++ }
+Write-Host ("{0}  send on a directory names the problem and the way out, not EISDIR  (exit {1}, output written: {2})" -f $(if ($dirSendOk) { ' PASS' } else { ' FAIL' }), $dirSendCode, $dirSendWrote)
+if (-not $dirSendOk) { Get-Content $dirSendLog -Tail 3 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+
+#     Leg 2: a batch that fails the same way must end in ONE counted line naming the dominant class (a
+#     folder of 40 photographs used to print three lines each). Blank pages are the deterministic way to
+#     produce that batch, and the positive control is the successful receive of section 3, which must print
+#     no such line at all.
+$blankDir = Join-Path $tmp 'blank-batch'
+$blankOut = Join-Path $tmp 'step4i-blank-must-not-exist.bin'
+if (Test-Path $blankDir) { Remove-Item -Recurse -Force $blankDir }
+New-Item -ItemType Directory -Force -Path $blankDir | Out-Null
+& python -c "from PIL import Image; [Image.new('RGB',(2480,3508),(255,255,255)).save(r'$blankDir\page-%03d.png' % i) for i in range(3)]" *> (Join-Path $tmp 'step4i-blank.log')
+$blankCount = @(Get-ChildItem $blankDir -Filter '*.png' -ErrorAction SilentlyContinue).Count
+if ($blankCount -ne 3) {
+  Write-Host ' SKIP  batch-summary leg: PIL could not write the blank pages to test with'
+} else {
+  if (Test-Path $blankOut) { Remove-Item -Force $blankOut }
+  $blankLog = Join-Path $tmp 'step4i-blank-recv.log'
+  & node cli/pskit.mjs receive $blankDir --photo --profile P-M1-300 --out $blankOut *> $blankLog
+  $blankCode = $LASTEXITCODE
+  $blankText = Get-Content $blankLog -Raw
+  $sumOk = ($blankCode -ne 0) -and (-not (Test-Path $blankOut)) -and ($blankText -match 'note: 3 image/page\(s\) failed:') -and ($blankText -match 'markers/blank-image') -and ($blankText -match 'dominant class:')
+  $goodText = Get-Content (Join-Path $tmp 'step3.log') -Raw
+  $sumOk = $sumOk -and ($goodText -notmatch 'image/page\(s\) failed:')
+  if (-not $sumOk) { $script:fails++ }
+  Write-Host ("{0}  a failing batch is summed up in one counted line, and a good batch says nothing  (exit {1}, output written: {2})" -f $(if ($sumOk) { ' PASS' } else { ' FAIL' }), $blankCode, (Test-Path $blankOut))
+  if (-not $sumOk) { Get-Content $blankLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload

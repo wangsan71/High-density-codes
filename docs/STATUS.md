@@ -126,6 +126,32 @@
 
 ## 已知风险 / 待办
 
+### 第 238 轮（**按 `HANDOVER` §9 第 3 条补回两处 CLI 改进，各配一条 usability 腿** —— 两处都是「把实现细节泄露给用户」的债，不是功能缺失）
+
+**① 做了什么**（`cli/pskit.mjs`）：
+
+1. `send <目录>` 以前会以 Node 裸错 `EISDIR: illegal operation on a directory, read` 结束 —— 既没说发生了什么、也没说怎么办。现在 `statSync(file).isDirectory()` 时抛一句人话：**目录 + 一次传输只装一个文件 + 出路（先打包成一个文件，或用 `split`）**，且**一个字节都不写**。
+2. `receive` 的失败批量以前**逐张打三行**（40 张照片 = 120 行），而用户真正需要的只有「哪一类占多数」。现在按 `stage/reason` 计数，循环结束后打**一行**：`note: N image/page(s) failed: 30 x markers/no-contrast, ...`，并附**主导类自己那句 `do`**（用的就是逐张行用的同一个 `advise()`，所以摘要不可能与逐张行矛盾）。计数点在**三处**：图片解码失败（`read/not-an-image`）、逐页 `FAIL`（`stage/reason`）、仲裁后 `REJECTED`（`assemble/reason`）。
+
+**② 实测（`tools/usability.ps1` 新增 §4i 两条腿，`-Skip3D -SkipMultipart -SkipCrypto -SkipServe` 下 172 s 全 PASS）**：
+
+| 腿 | 判据 | 实测 |
+|---|---|---|
+| `send` 一个目录 | 非零退出 + **不写文件** + 文案含 `is a directory`、`one transfer carries one file` + **不含 `EISDIR`** | exit **1**、wrote `False`、PASS |
+| 一批读不出的页（3 张纯白 A4） | 非零退出 + 不写文件 + `note: 3 image/page\\(s\\) failed:` + `markers/blank-image` + `dominant class:` **且** 同一次跑里成功的那次 receive **不含**该行（阳性对照） | exit **2**、wrote `False`、PASS |
+
+实测输出（手工复跑同一条命令，逐字）：
+
+```
+  note: 3 image/page(s) failed: 3 x markers/blank-image
+      do:    check that this file is a page image; retake with the whole code inside the frame (dominant class: markers/blank-image)
+```
+
+**③ 门限**：`build-web` exit 0（72 文件、build `b4c22c92c5d9362b`，与第 237 轮同哈希 ⇒ `core/`+`web/` 未动，符合预期）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass`，exit 0 · 单测 **432/432** · `verify --gate all` **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`** · `usability.ps1` **全腿 PASS、exit 0**。**本次未评估: G4 G6 G9 G10**。
+
+**④ 没做**：`send <目录>` 只在 CLI 侧拒绝；网页发送端与 `split`/`join` 的同类输入未查（`split` 早就有 `is a directory` 的具名拒绝，第 881 行）。CLI 仍**无测试钩子**（§9 第 4 条结构性债），这两处的证明仍然只有 usability 腿。
+
+**⑤ 下一块砖**：按 `HANDOVER` §12 进程内清单往下 —— 第 1 条（真平板扫描 `P-MX-300-6/5/4`）只有用户能做；第 3 条是 G10 照片侧的同款读数脚本；另一条已在第 237 轮块 §⑪ 写明（把瓦片照片入口接进 CLI）。**本次未评估: G4 G6 G9 G10**。
 ### 第 237 轮（**5° 斜拍照片第一次全自动读通：48/48 瓦片、载荷逐字节一致** —— 缺的两块是「粗糙模型的**雅可比**」与「**块号投票**」，两块都已落地并被 2 条新测试钉住）
 
 **① 做了什么**（`core/decode/tile-read.js`，一次性加全，不再分轮）：

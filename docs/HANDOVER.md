@@ -270,7 +270,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
    `acceptance-kit.ps1` 与 `check-module-scans.mjs` 已把真扫描流程降到一条命令。
    **用户最近的真实照片尝试仍失败**：`P-MX-300-6` 与默认 `P-M1-300` 都在回显条或空心角标处失败；
    JPEG 格式修复不改变这个结论。没有平板扫描或受控拍摄样本前，模块档只能算"模拟通过、真机待验"。
-3. **两处第 97 轮还原的 CLI 改进**（已验证可用，但**没有**单测/腿/门限 ⇒ 未提交）：
+3. **（CLOSED，第 238 轮）两处第 97 轮还原的 CLI 改进**：已在 `cli/pskit.mjs` 落地并各配一条 usability 腿（§4i，含阳性对照）⇒ 见 `docs/STATUS.md` 第 238 轮块。原判据保留如下：
    - `send <目录>` 现在会抛裸 Node 错误 `EISDIR: illegal operation on a directory, read`。改法：`statSync(file).isDirectory()` 时抛一句人话（"一次传输只装一个文件；先把目录打包成一个文件再发"）。
    - `receive` 一次失败的批量只逐张打印原因（40 张照片 = 120 行）。改法：按 `stage/reason` 计数，末尾打一行
      `note: N image/page(s) failed: 30 x markers/no-contrast, ...` 并附**主导类**的一句 `do`。
@@ -341,7 +341,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 1. **真平板扫描验证 `P-MX-300-6/5/4`**：小载荷、100 KB 与 1 MB 模拟均已完成；`acceptance-kit.ps1` 已打包，
    `check-module-scans.mjs` 可批量核对，先打 6px 一页。若只能拍照，继续用默认 `P-M1-300` 并按 §7 的拍摄条件重试；
    **不要用当前手机照片把模块档记成通过**。
-2. **补回 §9 第 3 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿；
+2. ~~**补回 §9 第 3 条那两处 CLI 改进**（`send <目录>` 的具名拒绝 + `receive` 的失败分类汇总行），各配一条 usability 腿~~ **第 238 轮已做**（见 §9 第 3 条、STATUS 第 238 轮块）；
 3. **G10 的照片侧读数**已经就绪（`tools/mtf-matrix.mjs`）；若想再往前，可写 **G4 的照片侧同款读数脚本**
    （把一批手机照片按"缺墨/缺角/太远"自动分类成一张表）；
 4. **G6 ② 的可行性探针**（降采样/分块粗定位能不能把 600 dpi 定位成本压到 ~1 s 量级）—— **只在产品负责人选了 §8(a)③ 时做**，不承诺成功；
