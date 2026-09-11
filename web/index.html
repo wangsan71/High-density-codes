@@ -163,6 +163,12 @@
         <span aria-hidden="true">■</span> 停止
       </button>
       <span class="muted sm" id="burstprog"></span>
+      <!-- Says BEFORE the button is pressed what this origin can and cannot do. The burst handler already
+           explains itself in the log, but only after a press -- and on a plain http LAN address the camera
+           is not merely denied, it is unavailable: browsers hand out getUserMedia only in a secure context
+           (https or localhost), so there is no permission dialog to answer and nothing to switch on in the
+           phone's settings. Round 248: the user pressed the button, saw no prompt, and had to ask. -->
+      <span class="muted sm" id="burst-note"></span>
     </div>
 
     <div class="row" style="margin-top: var(--gap-2)">

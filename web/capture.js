@@ -160,6 +160,20 @@ export function createBurstCollector(opts = {}) {
 if (typeof document !== 'undefined' && typeof document.getElementById === 'function' && document.getElementById('burst')) {
   const $ = (id) => document.getElementById(id);
   const logEl = $('burst-log');
+  // The same rule the single-shot section states up front (web/app.js), said here BEFORE the button is
+  // pressed rather than only in the log afterwards: a page served over plain http on a LAN address is not a
+  // secure context, so the camera API is not merely denied -- it is absent. No dialog will appear and there
+  // is nothing to switch on in the phone's settings. Round 248: the user pressed the button, saw no prompt,
+  // and had to ask how to enable it on iPhone and Android.
+  {
+    const note = $('burst-note');
+    const canCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices && !!navigator.mediaDevices.getUserMedia;
+    if (note) {
+      note.textContent = canCamera
+        ? '会请求摄像头权限；帧只在本机处理，不上传。'
+        : '这个来源拿不到摄像头（浏览器只在 https 或 localhost 才给）：请用手机系统相机拍照后走上面的「选择文件」，或改用 https 的接收页。',
+    }
+  }
   const say = (m, cls = '') => {
     const d = document.createElement('span');
     if (cls) d.className = 'l' + (cls ? ' ' + cls : '');
