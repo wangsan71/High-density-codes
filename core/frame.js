@@ -172,6 +172,3 @@ export function decodeEcho(echoBits) {
   return null;
 }
 
-export function profileOf(header) {
-  return getProfile(header.profile);
-}

@@ -51,12 +51,6 @@ export function quantizePitch(mm, nozzleId) {
   return { mm: round4(ew * n.ewMm), ew, ewMm: n.ewMm };
 }
 
-/** Quantise an arbitrary feature size to a whole number of EW (>= 1 EW). */
-export function quantizeFeature(mm, nozzleId) {
-  const n = getNozzle(nozzleId);
-  const ew = Math.max(1, ewCountAtLeast(mm, n.ewMm));
-  return { mm: round4(ew * n.ewMm), ew, ewMm: n.ewMm };
-}
 
 /**
  * Cell pitch for a channel at a given nozzle.
@@ -76,14 +70,6 @@ export function pitchFor(nozzleId, channel, levels = 2) {
   return { mm: round4(ew * n.ewMm), ew, ewMm: n.ewMm };
 }
 
-/** Glyph vocabulary that survives a given pitch (see docs/NOZZLES.md). */
-export function glyphsFor(nozzleId, pitchMm) {
-  const n = getNozzle(nozzleId);
-  const ew = pitchMm / n.ewMm;
-  if (ew >= 5.5) return ['dot', 'cross', 'ring', 'solid']; // 2 bits
-  if (ew >= 4) return ['ring', 'solid']; // 1 bit
-  return ['hole', 'solid']; // 1 bit, hole shrinks: only for >=3 EW with care
-}
 
 /** Inverse lookup: which nozzle would someone have to be using? (calibrate) */
 export function nozzleFromExtrusionWidth(ewMm) {

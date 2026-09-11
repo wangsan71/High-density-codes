@@ -14,9 +14,7 @@
  */
 
 const GF_POLY = 0x11d;
-export const GF_Q = 256; // field size
 const GF_M = 255; // multiplicative group order
-export const GF_PRIM = 2; // primitive element α
 
 const EXP = new Uint8Array(512);
 const LOG = new Uint8Array(256);
@@ -135,20 +133,6 @@ export function polyDerivLF(p) {
   return out;
 }
 
-/** LF: xor two polynomials (pad with zeros), returns trimmed of trailing zeros but keeps >=1 coef. */
-export function polyXorLF(a, b) {
-  const n = Math.max(a.length, b.length);
-  const out = new Uint8Array(n);
-  for (let i = 0; i < n; i++) out[i] = (a[i] || 0) ^ (b[i] || 0);
-  return out;
-}
-
-/** LF: scale every coefficient by c. */
-export function polyScaleLF(p, c) {
-  const out = new Uint8Array(p.length);
-  for (let i = 0; i < p.length; i++) out[i] = mul(p[i], c);
-  return out;
-}
 
 /** LF: number of significant coefficients (drops trailing zeros, keeps at least 1). */
 export function polyDegLF(p) {

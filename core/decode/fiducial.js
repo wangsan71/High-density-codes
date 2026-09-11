@@ -1,4 +1,3 @@
-import { sampleBilinear } from './transform.js';
 
 /**
  * PSKT decode -- corner marker detection.
@@ -747,16 +746,3 @@ function evaluateQuad(tl, tr, br, bl) {
   return { score: sideErr * 1.5 + diagErr, mirrored: positive === 0 };
 }
 
-/** Resample an arbitrary point of an image (used by the rectifier). */
-export function sampleInk(bitmap, x, y) {
-  const s = sampleBilinear(bitmap.pixels, bitmap.width, bitmap.height, 4, x, y);
-  const sub = bitmap.substrate || [255, 255, 255];
-  const dr = s.values[0] - sub[0];
-  const dg = s.values[1] - sub[1];
-  const db = s.values[2] - sub[2];
-  return {
-    rgb: [s.values[0], s.values[1], s.values[2]],
-    inkness: Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11),
-    inside: s.inside,
-  };
-}

@@ -501,6 +501,3 @@ export function densityReport(opts = {}) {
 
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
-export function getNozzleSafe(id) {
-  return getNozzle(id || '0.4');
-}

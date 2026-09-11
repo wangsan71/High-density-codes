@@ -126,6 +126,36 @@
 
 ## 已知风险 / 待办
 
+### 第 242 轮（**5 轮一次的死代码复查：19 → 3** —— 删掉 16 个「全仓库只出现在定义处」的死导出 + 2 个因此变成孤儿的 import；**web 包随之小 3.6 KiB**）
+
+**① 怎么判定的（方法写清楚，因为它决定了结论的分量）**：先跑 `tools/find-dead-exports.mjs` 得到 **19 个** `never mentioned outside their own file`；然后**逐个名字在全仓库**（`.mjs`/`.js`/`.json`/`.html`/`.ps1`/`.py`）数引用 —— **19 个全部只出现 1 次，而那 1 次就是定义处**。所以它们不是「只导出、内部还在用」，而是**谁都不用**。再按第 154 轮定下的「**文档即接口**」规则查 `docs/` 与 `ref/`。
+
+**② 保留 3 个（有依据，不是偷懒）**：`expectedRho`（出现在 `docs/ACCEPTANCE.md`/`DEFECTS.md`/`STATUS.md`，是「按页重测 ρ 表」那条修法的构件）· `decodePages` · `DEFAULT_PROFILE`（都出现在 `docs/STATUS.md`）。这与第 154/155 轮已有的判定**一致**，本轮不改判。
+
+**③ 删掉 16 个**（每个都**先 read 拿到精确文本再删**，**不用括号配对脚本** —— 第 154/155 轮两次翻车正是这么来的：脚本连**仍在使用的共享常量**一起删了，**19 个测试文件整套导入失败**）：
+
+| 文件 | 删掉的导出 |
+|---|---|
+| `core/decode/calibrate.js` | `describeCalibration` |
+| `core/decode/fiducial.js` | `sampleInk` |
+| `core/decode/ideal.js` | `nominalBandFraction` |
+| `core/decode/transform.js` | `affineToPixels` |
+| `core/frame.js` | `profileOf` |
+| `core/gf256.js` | `GF_Q` · `GF_PRIM` · `polyXorLF` · `polyScaleLF` |
+| `core/nozzles.js` | `quantizeFeature` · `glyphsFor` |
+| `core/palette.js` | `inkOf` · `isBackground` |
+| `core/profiles.js` | `getNozzleSafe` |
+| `core/render/glyphs.js` | `rhoForDotRadius` · `cellInkFraction` |
+
+**④ 级联（这一条是本轮新的教训）**：删完再扫 ⇒ 计数 **3**，但**两个 import 变成了孤儿**：`core/decode/fiducial.js` 的 `sampleBilinear`、`core/decode/ideal.js` 的 `ANNULUS_AREA` —— 在全仓库里各只剩**导入行 1 处引用**（它们的唯一使用者正是刚被删的两个函数）。两个 import 一并删掉。**规则：删完导出要再扫一遍「谁只剩导入行」**，否则死代码只是换了个位置。
+
+**⑤ 实测收益（这就是用户要的「避免运行不流畅」）**：`core exports examined` **347 → 331**；`build-web` 的包 **393.2 → 389.6 KiB**、单文件页 `pskt-file.html` **418.7 → 415.1 KiB**、`pskt-send-file.html` **387.6 → 385.0 KiB**（构建哈希 `b4c22c92c5d9362b` → `b88900a6ee4889e3`）。手机端拉的正是这两个单文件页 ⇒ **每次打开少下载约 3.6 / 2.6 KiB**。
+
+**⑥ 门限**：`build-web` exit 0（72 文件、新哈希 `b88900a6ee4889e3`）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass`，exit 0 · 单测 **433/433**（**删完两次跑都是全绿**：第一次删完 16 个，第二次删完两个孤儿 import 后）· `verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`** · `usability.ps1` **全腿 PASS、exit 0**（**363 s**，含第 241 轮新加的图片腿）· `check-docs-tables` clean（**617 rows in 110 tables**）。**本次未评估: G4 G6 G9 G10**。
+
+**⑦ 下一次复查（第 247 轮）的口径**：只剩那 3 个「文档即接口」 ⇒ 除非**先把文档里的引用改掉**（那是产品负责人的取舍：改动验收文档里的构件名），否则**计数不会再降**。**不要再把它当成待办** —— 19 → 3 就是这条线的终点。
+
+**⑧ 下一块砖**：进程内清单只剩 `HANDOVER` §12 第 3 条（G10 照片侧读数，需要真照片）与第 5 条（网页分片 UI，成本高）；其余全是只有用户能做的硬件验收。
 ### 第 241 轮（**文档体检：`docs/USE.md` 里所有本机能跑的命令**逐条真跑** —— 全部与文档一致；唯一发现是**证据缺口**：图片那条路此前没有任何端到端腿，已补成永久腿**）
 
 **① 做了什么**：把用户手册里能在本机执行的命令**逐条照抄真跑**（不是读一遍就算）：`status` · `verify --gate all` · `mtf-matrix.mjs --selftest` · `mtf-probe.ps1` · `calibrate --make-mtf` · `acceptance-kit.ps1` · `jpeg-to-png.ps1` · `fit-image.mjs`（成功与**装不下**两种）· `make-tile-page.mjs` 写页/读页/读照片 · `unpsk.mjs` · `send --image-mode lossy` + `sim/channel.py` + `receive --photo` · `split/join` · `serve/check-serve/check-lan`（后三条由冒烟腿覆盖）。

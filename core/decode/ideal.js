@@ -1,5 +1,5 @@
 import { getPalette } from '../palette.js';
-import { MEASURE, ANNULUS_AREA, levelFromRho, shapeThresholds, rhoFor, glyphMaskForLevel } from '../render/glyphs.js';
+import { MEASURE, levelFromRho, shapeThresholds, rhoFor, glyphMaskForLevel } from '../render/glyphs.js';
 import { joinCellLevels } from '../protocol.js';
 import { measureTargets } from '../render/raster.js';
 
@@ -225,10 +225,6 @@ export function matchedShapeLevel(alphaMap, templates, cellPx, opts = {}) {
   };
 }
 
-/** Nominal annulus area as a fraction of the cell, used as the rho denominator. */
-export function nominalBandFraction() {
-  return ANNULUS_AREA;
-}
 
 /**
  * Read every cell of a rendered page.

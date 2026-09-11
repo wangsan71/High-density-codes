@@ -61,12 +61,6 @@ export function getPalette(id) {
   return p;
 }
 
-/** RGB of a colour level; level 0 of a 1-ink palette is the lightest ink. */
-export function inkOf(palette, level) {
-  const p = typeof palette === 'string' ? getPalette(palette) : palette;
-  if (!p.inks.length) throw new Error('palette has no inks');
-  return p.inks[level % p.inks.length];
-}
 
 /**
  * Scale-invariant colour descriptor: (l, r, b) where l is luminance in 0..1 and
@@ -113,11 +107,3 @@ export function nearestLevel(rgb, palette, opts = {}) {
   return { level: best, distance: bestD, runnerUp: second, ambiguous: second - bestD < ambig };
 }
 
-/** True if a sampled cell is closer to the substrate than to any ink. */
-export function isBackground(rgb, palette, opts = {}) {
-  const p = typeof palette === 'string' ? getPalette(palette) : palette;
-  const d = describe(rgb);
-  const e = describe(p.background);
-  const dist = Math.hypot((d[0] - e[0]) * 0.55, d[1] - e[1], d[2] - e[2]);
-  return dist < (opts.backgroundGap ?? 0.05);
-}

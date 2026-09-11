@@ -172,8 +172,3 @@ function maxOf(a) {
   return m;
 }
 
-/** A one-line human-readable summary, for the CLI and the gate output. */
-export function describeCalibration(r) {
-  if (!r.ok) return `calibrate: ${r.reason}${Number.isFinite(r.ratio) ? ` (ratio ${r.ratio.toFixed(3)})` : ''}`;
-  return `calibrate: cut x${r.factor} -> ink/expected = ${r.ratio.toFixed(3)} (within tolerance)`;
-}

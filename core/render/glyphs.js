@@ -82,10 +82,6 @@ export function dotRadiusForRho(rho) {
   return r;
 }
 
-/** Inverse: what rho does a dot of this normalised radius represent? */
-export function rhoForDotRadius(rNorm) {
-  return (Math.PI * rNorm * rNorm) / ANNULUS_AREA;
-}
 
 /**
  * Decision thresholds for a measured rho: boundaries midway between the printed
@@ -319,12 +315,6 @@ export function glyphMaskForLevel(dx, dy, level, geo) {
   return r2 <= outer * outer;
 }
 
-/** Fraction of the cell that ends up printed at this level (ink budget). */
-export function cellInkFraction(level, geo) {
-  const g = geo || idealGeometry();
-  const dotR = g.dot ? g.dot[level] : dotRadiusForRho(rhoFor(level, g.shapeLevels));
-  return g.area + Math.PI * dotR * dotR;
-}
 
 /** The unit-cell geometry, for callers that have no nozzle information (paper, previews). */
 export function idealGeometry(shapeLevels = 2) {

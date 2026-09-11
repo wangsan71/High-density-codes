@@ -209,13 +209,3 @@ export function sampleBilinear(buf, width, height, channels, x, y) {
   };
 }
 
-/** Affine map from page millimetres to image pixels (no perspective), for tests. */
-export function affineToPixels(originX, originY, pxPerMm, angleRad = 0) {
-  const ca = Math.cos(angleRad);
-  const sa = Math.sin(angleRad);
-  return [
-    [pxPerMm * ca, -pxPerMm * sa, originX],
-    [pxPerMm * sa, pxPerMm * ca, originY],
-    [0, 0, 1],
-  ];
-}
