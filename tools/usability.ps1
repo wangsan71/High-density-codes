@@ -552,6 +552,39 @@ if ($blankCount -ne 3) {
   if (-not $sumOk) { Get-Content $blankLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
 }
 
+# 4j. A folder of page images with no manifest.json: the geometry has to come from the pages themselves.
+#     The CLI used to answer that with "pass the profile -- or use the browser receiver"; it can now run the
+#     same candidate search the browser runs (round 239), which is the difference between "remember which
+#     profile you printed" and "hand it the photographs". Positive control: the same folder without
+#     --profile must still refuse, and must NAME --profile auto as the way out.
+$autoDir = Join-Path $tmp 'auto-recv'
+$autoOut = Join-Path $tmp 'auto-got.bin'
+if (Test-Path $autoDir) { Remove-Item -Recurse -Force $autoDir }
+if (Test-Path $autoOut) { Remove-Item -Force $autoOut }
+New-Item -ItemType Directory -Force -Path $autoDir | Out-Null
+Copy-Item (Join-Path $src 'page-*.png') $autoDir -Force
+$autoNoLog = Join-Path $tmp 'step4j-none.log'
+& node cli/pskit.mjs receive $autoDir --photo --out $autoOut *> $autoNoLog
+$autoNoCode = $LASTEXITCODE
+$autoNoText = Get-Content $autoNoLog -Raw
+$autoNoOk = ($autoNoCode -ne 0) -and (-not (Test-Path $autoOut)) -and ($autoNoText -match 'profile auto')
+if (-not $autoNoOk) { $script:fails++ }
+Write-Host ("{0}  no manifest and no --profile: refuses, writes nothing, and names --profile auto  (exit {1})" -f $(if ($autoNoOk) { ' PASS' } else { ' FAIL' }), $autoNoCode)
+if (-not $autoNoOk) { Get-Content $autoNoLog -Tail 3 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+$autoLog = Join-Path $tmp 'step4j-auto.log'
+& node cli/pskit.mjs receive $autoDir --photo --profile auto --out $autoOut *> $autoLog
+$autoCode = $LASTEXITCODE
+$autoOk = ($autoCode -eq 0) -and (Test-Path $autoOut)
+$autoGeom = ''
+if ($autoOk) {
+  $autoText = Get-Content $autoLog -Raw
+  if ($autoText -match 'auto geometry ([^\s]+) @(\d+) dpi') { $autoGeom = $Matches[1] + '@' + $Matches[2] }
+  $autoOk = ($autoGeom -ne '') -and ((Get-FileHash -Algorithm SHA256 -Path $autoOut).Hash.ToLower() -eq $wantHash)
+}
+if (-not $autoOk) { $script:fails++ }
+Write-Host ("{0}  --profile auto reads the geometry off the pages and the bytes come back identical  (exit {1}, {2})" -f $(if ($autoOk) { ' PASS' } else { ' FAIL' }), $autoCode, $(if ($autoGeom) { $autoGeom } else { 'no geometry line' }))
+if (-not $autoOk) { Get-Content $autoLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload

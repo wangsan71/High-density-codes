@@ -55,7 +55,8 @@ const HELP = `pskit <command> [options]
     --out <file>         where to write the recovered payload
     --passphrase <pw>    decrypt a --passphrase transfer
     --profile/--nozzle/--dpi/--palette/--plate
-                         required only when there is no manifest.json
+                         required only when there is no manifest.json; --profile auto searches
+                         the candidate geometries and reads what the page says it is
 
   split <file>           cut a file into parts that each fit ONE transfer
     --max-bytes <n>      part ceiling (default 1400000; one transfer is at most 255
@@ -666,6 +667,7 @@ async function cmdReceive(args) {
   const { advise } = await import('../core/decode/advice.js');
   const { feedPageWithRecalibration } = await import('../core/decode/recalibrate.js');
   const { decodeTIFF } = await import('../core/decode/tiff-read.js');
+  const { bootstrapDecode } = await import('../core/decode/bootstrap.js');
   const dir = resolve(args._[0] || '.');
   const stat = statSync(dir);
   const all = stat.isDirectory() ? readdirSync(dir).sort() : [basename(dir)];
@@ -705,21 +707,29 @@ async function cmdReceive(args) {
   }
   const manifestPath = join(base, 'manifest.json');
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
-  const profileId = manifest?.profile || args.profile;
+  // `--profile auto` runs the same candidate search the browser receiver runs (core/decode/bootstrap.js):
+  // the page's own header arbitrates which geometry it is, so a folder of photographs can be received
+  // without first remembering which profile was printed (round 239). It is opt-in rather than the default
+  // when no profile is given, because the search costs seconds per page and a slow path nobody asked for is
+  // a surprise -- the browser receiver can afford it (its user is watching a spinner), a script cannot.
+  const search = args.profile === 'auto';
+  const profileId = search ? null : manifest?.profile || args.profile;
   const nozzle = manifest?.nozzle || args.nozzle;
   const dpi = args.dpi ? Number(args.dpi) : manifest?.dpi || 300;
   const paletteId = manifest?.palette || args.palette || 'INK2';
-  if (!profileId) {
+  if (!profileId && !search) {
     throw new Error(
       `receive: ${dir} has no manifest.json and no --profile was given, so the page geometry is unknown. ` +
         'Pass the profile the pages were printed with (e.g. --profile P-M1-300, or --profile PL-G --nozzle 0.4 --plate 200 for a plate) ' +
-        '-- or use the browser receiver (web/dist/pskt-file.html), which searches the candidate geometries for you.',
+        '-- or pass --profile auto to search the candidate geometries instead (the same search the browser ' +
+        'receiver runs; the page header decides, so the geometry is cross-checked rather than guessed).',
     );
   }
   const plateMm = args.plate ? Number(args.plate) : manifest?.plateMm;
-  const geom = mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
-  const layout = mod.layoutMod.pageLayout(geom, dpi, { plateMm });
-  if (manifest?.glyph) {
+  // `let`, not `const`: with --profile auto the geometry arrives per image, from that image's own search.
+  let geom = search ? null : mod.profiles.planPage(profileId, { nozzle, plateMm, monoSafe: manifest?.monoSafe });
+  const layout = search ? null : mod.layoutMod.pageLayout(geom, dpi, { plateMm });
+  if (manifest?.glyph && layout) {
     const { glyphSignature, glyphSignatureDiff } = await import('../core/render/glyphs.js');
     const diff = glyphSignatureDiff(glyphSignature(layout.glyph), manifest.glyph);
     if (diff.length) {
@@ -767,7 +777,22 @@ async function cmdReceive(args) {
   for (const { label: name, bitmap } of images) {
     bitmap.substrate = bitmap.substrate || mod.palette.getPalette(paletteId).background;
     const t0 = performance.now();
-    const r = decodePage(bitmap, { geom, layout, paletteId }, opts);
+    // With --profile auto the geometry is not known in advance: the candidate search reads the page's own
+    // header and cross-checks it against the candidate that produced it, which is what makes a folder of
+    // photographs receivable without a manifest. A failed search reports the search's own reason -- a
+    // unanimous candidate reason is promoted inside bootstrapDecode -- so the user is told the cause
+    // instead of only "nothing matched".
+    const boot = search ? await bootstrapDecode(bitmap, { maxAttempts: args['max-attempts'] ? Number(args['max-attempts']) : 64 }) : null;
+    if (boot) {
+      geom = boot.geom || geom;
+      if (boot.ok) {
+        console.log(
+          `  ${name}: auto geometry ${boot.profileId} @${boot.dpi} dpi${boot.nozzle ? ', nozzle ' + boot.nozzle : ''}` +
+            ` after ${boot.attemptCount} candidate(s)`, 
+        );
+      }
+    }
+    const r = boot ? (boot.ok ? boot.page : { ok: false, stage: 'bootstrap', reason: boot.reason }) : decodePage(bitmap, { geom, layout, paletteId }, opts);
     const ms = Math.round(performance.now() - t0);
     if (!r.ok) {
       const a = advise(r);

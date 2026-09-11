@@ -412,6 +412,7 @@ G4 手机 500×8（闭合 M4 的唯一动作）→ G9 三浏览器 × 两源 →
 **这次会话新增/改动的可复验入口**：
 
 ```powershell
+node cli/pskit.mjs receive 目录 --photo --profile auto --out 回来的文件   # 没有 manifest.json 时让页头自己说几何（第 239 轮）
 node tools/mtf-matrix.mjs --selftest                 # 矩阵读数器自证（四喷嘴点名 + 两条对照）
 & .\tools\usability.ps1                              # 含 4g（PNG 变体）与 4h（TIFF 变体）两条新腿
 & .\tools\acceptance-kit.ps1                         # 含 P-MX-300-6/5/4 三个真平板扫描 leg

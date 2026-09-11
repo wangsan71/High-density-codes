@@ -126,6 +126,29 @@
 
 ## 已知风险 / 待办
 
+### 第 239 轮（**`receive --profile auto`：没有 `manifest.json` 的照片目录也能收 —— 用浏览器接收页那套候选搜索，且是核对不是猜**）
+
+**① 做了什么**（`cli/pskit.mjs` 的 `cmdReceive`）：
+
+1. 新增 `--profile auto`：逐张图调用 `core/decode/bootstrap.js` 的 `bootstrapDecode()`——**就是网页接收页跑的那一套**（`web/app.js`/`capture.js` 一直在用）。几何由**页自己的页头**决定，并与产生它的候选**交叉核对**（页头声明的 profile/nozzle 必须与候选一致，否则该候选不算数）⇒ 这**不是猜**。
+2. 每张图成功时打印一行 `auto geometry P-M1-300 @300 dpi after 10 candidate(s)`，让「试了几个、认成了什么」是**看得见的**而不是静默。
+3. `geom` 从 `const` 改成 `let`（搜索模式下几何是**逐张**从各自搜索结果来的）；失败搜索按普通失败走同一条 `advise()` 分类与第 238 轮的批量计数。
+4. 没有 manifest 又没有 `--profile` 时的拒绝文案改了：以前让人「去用浏览器接收页」，现在**点名 `--profile auto`** 这条路。
+
+**② 为什么不做成默认**（这是产品判断，写在这里免得下个人推翻）：搜索是**每页数个候选**、每页**秒级**。浏览器接收页负担得起（对面看着转圈的人），脚本负担不起；而且「不给几何就**具名拒绝**」是本仓库的既有契约（AGENTS §2.9）。所以它是**你主动要**才跑。
+
+**③ 实测（`.tmp/auto-recv`：3 张页图、**故意不放** `manifest.json`）**：
+
+| 命令 | 实测 |
+|---|---|
+| `receive .tmp/auto-recv --photo --out …` | **exit 1**、**不写文件**、文案**点名 `--profile auto`** |
+| `receive .tmp/auto-recv --photo --profile auto --out …` | **exit 0**、`auto geometry P-M1-300 @300 dpi after 10 candidate(s)`（3 页各一行）、载荷 sha256 与原载荷**相同** |
+
+**④ usability 腿（§4j，两条）**：① 上面第一条（阳性对照：**必须**拒绝且必须点名 `--profile auto`、必须不写文件）；② 上面第二条（**必须** exit 0 + 日志里必须有 `auto geometry` + 还原出的 sha256 必须等于本次跑的载荷）。`-Skip3D -SkipMultipart -SkipCrypto -SkipServe` 下 **190 s 全 PASS**。
+
+**⑤ 门限**：`build-web` exit 0（72 文件、build `b4c22c92c5d9362b`，与第 238 轮**同哈希** ⇒ `core/`+`web/` 未动、只有 `cli/` 与台账变了）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass`，exit 0 · 单测 **432/432** · `verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`**（跳过的 G2 是因为没给 `--corpus`）· `usability.ps1` **全腿 PASS、exit 0**（330 s，含 §4j 两条新腿）· `check-docs-tables` clean（**589 rows in 106 tables**）。**本次未评估: G4 G6 G9 G10**。
+
+**⑥ 下一块砖**：按 `HANDOVER` §12 往下 —— 进程内剩 ① G10 照片侧读数（`tools/mtf-matrix.mjs` 已就绪，缺的是真照片）② 网页端分片 UI（价值中、成本高）；**瓦片格式的照片入口**（第 237 轮 §⑪）仍然没接进 CLI。
 ### 第 238 轮（**按 `HANDOVER` §9 第 3 条补回两处 CLI 改进，各配一条 usability 腿** —— 两处都是「把实现细节泄露给用户」的债，不是功能缺失）
 
 **① 做了什么**（`cli/pskit.mjs`）：
