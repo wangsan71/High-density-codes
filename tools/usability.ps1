@@ -585,6 +585,43 @@ if (-not $autoOk) { $script:fails++ }
 Write-Host ("{0}  --profile auto reads the geometry off the pages and the bytes come back identical  (exit {1}, {2})" -f $(if ($autoOk) { ' PASS' } else { ' FAIL' }), $autoCode, $(if ($autoGeom) { $autoGeom } else { 'no geometry line' }))
 if (-not $autoOk) { Get-Content $autoLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
 
+# 4k. The image path -- the flow this project was asked for first: a picture goes in, printed pages come out,
+#     they come back through the same channel, and the picture is viewable again. The smoke covered plain
+#     files, split/join and crypto, but never `--image-mode lossy` + unpsk, so the headline path had no
+#     end-to-end leg at all (round 241, found by auditing the commands docs/USE.md tells the user to type).
+$imgSrc = Join-Path $tmp 'img-src.png'
+& python -c "from PIL import Image; import random, math; random.seed(7); im=Image.new('RGB',(480,320)); px=im.load(); [px.__setitem__((x,y),(int(40+180*x/480+30*math.sin(y/9))%256,int(60+140*y/320+30*math.sin(x/13))%256,int(120+random.randint(-20,20)))) for y in range(320) for x in range(480)]; im.save(r'$imgSrc')" *> (Join-Path $tmp 'step4k-fixture.log')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $imgSrc)) {
+  Write-Host ' SKIP  image-path leg: PIL could not write the fixture'
+} else {
+  $imgSend = Join-Path $tmp 'img-send'
+  $imgScan = Join-Path $tmp 'img-scan'
+  foreach ($d in $imgSend, $imgScan) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }
+  $imgBack = Join-Path $tmp 'img-back.psk'
+  $imgPng = Join-Path $tmp 'img-back.png'
+  foreach ($f in $imgBack, $imgPng) { if (Test-Path $f) { Remove-Item -Force $f } }
+  & node cli/pskit.mjs send $imgSrc --image-mode lossy --pages 3 --profile P-MX-300-5 --format png --out $imgSend *> (Join-Path $tmp 'step4k-send.log')
+  $is1 = ($LASTEXITCODE -eq 0) -and (@(Get-ChildItem $imgSend -Filter 'page-*.png' -ErrorAction SilentlyContinue).Count -ge 3)
+  & python sim/channel.py --in $imgSend --out $imgScan --seed 7 --preset scan300 --modifier nocrop *> (Join-Path $tmp 'step4k-scan.log')
+  $is2 = ($LASTEXITCODE -eq 0)
+  & node cli/pskit.mjs receive $imgScan --photo --profile P-MX-300-5 --out $imgBack *> (Join-Path $tmp 'step4k-recv.log')
+  $recvText = Get-Content (Join-Path $tmp 'step4k-recv.log') -Raw
+  $is3 = ($LASTEXITCODE -eq 0) -and (Test-Path $imgBack) -and ($recvText -match 'MATCHES manifest')
+  & node tools/unpsk.mjs $imgBack $imgPng *> (Join-Path $tmp 'step4k-unpsk.log')
+  $is4 = ($LASTEXITCODE -eq 0) -and (Test-Path $imgPng)
+  $psnr = ''
+  $is5 = $false
+  if ($is4) {
+    $psnr = [string](& python -c "from PIL import Image, ImageChops; import math; a=Image.open(r'$imgSrc').convert('RGB'); b=Image.open(r'$imgPng').convert('RGB'); d=ImageChops.difference(a,b); h=d.histogram(); n=a.size[0]*a.size[1]; mse=sum((i%256)**2*c for i,c in enumerate(h))/(n*3); print(('%.2f' % (10*math.log10(255*255/mse))) if a.size==b.size else 'size-mismatch')")
+    $psnr = $psnr.Trim()
+    $is5 = ($psnr -match '^[0-9]+\.[0-9]+$') -and ([double]$psnr -ge 25)
+  }
+  $imgOk = $is1 -and $is2 -and $is3 -and $is4 -and $is5
+  if (-not $imgOk) { $script:fails++ }
+  Write-Host ("{0}  image path: picture -> pages -> channel -> payload matches the manifest -> viewable again  (PSNR {1} dB, same size; send {2} scan {3} receive {4} unpsk {5})" -f $(if ($imgOk) { ' PASS' } else { ' FAIL' }), $(if ($psnr) { $psnr } else { 'n/a' }), $is1, $is2, $is3, $is4)
+  if (-not $imgOk) { Get-Content (Join-Path $tmp 'step4k-recv.log') -Tail 3 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+}
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
@@ -688,6 +725,8 @@ if ($script:fails -eq 0) {
     Write-Host '           Also: an encrypted transfer refused without a key (naming the passphrase, not'
     Write-Host '           missing pages), refused with a wrong key, and came back identical with the right one.'
   }
+  Write-Host '           Also: the image path end to end -- a picture went in, its pages came back through the'
+  Write-Host '           channel, the payload matched the manifest, and unpsk made it viewable again.'
   Write-Host '           Not proven here: real ink/paper, a real phone camera, browser print scaling (D8),'
   Write-Host '           PWA install (needs https), and G4/G6/G9/G10. See docs/USE.md for those steps.'
   exit 0

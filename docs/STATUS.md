@@ -126,6 +126,30 @@
 
 ## 已知风险 / 待办
 
+### 第 241 轮（**文档体检：`docs/USE.md` 里所有本机能跑的命令**逐条真跑** —— 全部与文档一致；唯一发现是**证据缺口**：图片那条路此前没有任何端到端腿，已补成永久腿**）
+
+**① 做了什么**：把用户手册里能在本机执行的命令**逐条照抄真跑**（不是读一遍就算）：`status` · `verify --gate all` · `mtf-matrix.mjs --selftest` · `mtf-probe.ps1` · `calibrate --make-mtf` · `acceptance-kit.ps1` · `jpeg-to-png.ps1` · `fit-image.mjs`（成功与**装不下**两种）· `make-tile-page.mjs` 写页/读页/读照片 · `unpsk.mjs` · `send --image-mode lossy` + `sim/channel.py` + `receive --photo` · `split/join` · `serve/check-serve/check-lan`（后三条由冒烟腿覆盖）。
+
+**② 图片那条路（用户最先要的功能）第一次被端到端跑通并量了质量**：
+
+| 步骤（文档原文的命令形式） | 实测 |
+|---|---|
+| `send photo.png --image-mode lossy --pages 5 --profile P-MX-300-5 --format png,pdf --out DIR`（960×640 合成照片） | exit 0 · **5 页**（3 data + 2 parity）· 压缩后 **78,901 B** · 打印区 47.2% |
+| `python sim/channel.py --preset scan300 --modifier nocrop` | exit 0 · 5 页 |
+| `receive DIR --photo --profile P-MX-300-5 --out photo-back.psk` | exit 0 · **MATCHES manifest** |
+| `node tools/unpsk.mjs photo-back.psk photo-back.png` | exit 0 · **960×640 @ q85**（**未降采样**）· **PSNR 33.88 dB** |
+
+小的那一版（480×320、`--pages 3`：q90、**17,462 B / 29,082 B 预算**、**PSNR 31.74 dB**）已经变成冒烟的第 ⑤ 条腿，所以这条路以后**每轮都被证明一次**，而不是只能靠手工复跑。
+
+**③ 我自己犯的一个错，记下来因为它本该当场被抓住**：第一次算 PSNR 时读了 `ImageChops.difference` 的直方图（RGB ⇒ **768 桶**）却按 `0..767` 当误差值索引，于是报出 **PSNR −2.34 dB** —— 8 位差值最大 255 ⇒ 任何 PSNR 都 **≥ 0 dB**，这个数**数学上不可能**。按 `i % 256` 重算才是 33.88 dB。**「不可能的数」必须当场停手查，而不是记进台账。**
+
+**④ 冒烟新增腿（§4k）**：图片 → 页 → 信道 → **载荷与 manifest 相符** → `unpsk` 变回 PNG；判据是**五个都真**（send / scan / receive / unpsk / 比较），比较用 PIL 打印 **PSNR 并设 25 dB 地板 + 同尺寸**。`-Skip3D -SkipMultipart -SkipCrypto -SkipServe` 下从 190 s 变 **217 s**。
+
+**⑤ 体检没发现产品缺陷** —— 两条文档写明的**具名拒绝**也都与文档一致：`fit-image.mjs` 在判据下限（1/4）仍装不下时 exit 2 并给出三条出路；缺 `--profile` 时点名 `--profile auto`。**记录这一点同样重要**：本轮改的只有文档与冒烟，产品行为一行未动（`build-web` 哈希与前三轮**相同**）。
+
+**⑥ 门限**：`build-web` exit 0（72 文件、build `b4c22c92c5d9362b`，与前几轮同哈希）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass` · 单测 **433/433** · `verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`** · `usability.ps1` **全腿 PASS、exit 0**（**347 s**，含新增图片腿）· `check-docs-tables` clean（**600 rows in 108 tables**）。**本次未评估: G4 G6 G9 G10**。
+
+**⑦ 下一块砖**：第 242 轮是 5 轮一次的死代码复查（上次第 237 轮 = 19）；之后进程内只剩 `HANDOVER` §12 第 3/5 条（G10 照片侧读数需要真照片；网页分片 UI 成本高），**其余全部是只有用户能做的硬件验收**。
 ### 第 240 轮（**瓦片页的照片入口接上了：一条命令从照片读回载荷 —— 先量尺度、再定位、最后用瓦片自己重新拟合**）
 
 **① 做了什么**（`tools/make-tile-page.mjs`）：新增 `--read <图> --photo [--sheet A5]`，实现 `readTilePhotoFromPng()` + `estimateDpiFromInk()`。流程：**量尺度**（墨迹包围盒）→ 在该尺度与 ±3/6/9% 上各试一次**定位**（`findPageQuadFromTiles`）→ 建页映射（`pageMapper`）→ `readTilePage`（refine + 块号投票默认开）→ 写载荷。每张成功时打印：认成多少 dpi、包围盒估计值、试了几个尺度、拟合到几个锚点、块号投票几票。**这就是第 237 轮那套能力的第一个用户入口**（在那之前全仓库只有测试和一个读原样 PNG 的旧分支调用它）。

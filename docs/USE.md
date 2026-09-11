@@ -219,6 +219,10 @@ node tools/mtf-matrix.mjs --dir PHOTOS   # 你拍回来的四张照片 -> 逐张
 
 它做的是一条**用户真会走的路**：`send`（写页图 + 真实尺寸 PDF）→ `sim/channel.py`（确定性 seed 的"打印+扫描"替身）→ `receive --photo` → **SHA-256 逐字节比对** → 板材 `send --format 3mf,stl` 并用 G8 校验写出来的 `.3mf` → `tools/smoke-sender.mjs`（网页发送端的真实数据路径，盲解码）与 `tools/smoke-capture.mjs`（连拍取舍逻辑）。每步**只看 exit code** 判定，不靠 grep 关键字（"什么都没打印"不能算通过 ✗）。
 
+**这几条腿**（第 238–241 轮陆续加的，都是用户真会碰到的分岔，不是内务）：① `send` 一个目录 ⇒ **具名拒绝**而不是 `EISDIR`；② 一批读不出的页 ⇒ **一行按类计数 + 主导类的 `do`**（成功的那批**不许**打这行，是阳性对照）；③ 没有 `manifest.json` 也没有 `--profile` ⇒ **具名拒绝并点名 `--profile auto`**；④ `--profile auto` ⇒ 自己认出几何并逐字节还原；⑤ **图片那条路走通**：图片 → 页 → 信道 → **载荷与 manifest 相符** → `unpsk` 变回可看的 PNG（同尺寸、PSNR 打印出来，地板 25 dB）。
+
+**第 241 轮的文档体检**：把本文档里所有能在本机跑的命令**逐条真跑了一遍**（`status`、`verify --gate all`、`mtf-matrix --selftest`、`mtf-probe.ps1`、`calibrate --make-mtf`、`acceptance-kit.ps1`、`jpeg-to-png.ps1`、`fit-image.mjs`、`make-tile-page.mjs` 写/读/照片、`unpsk`、`send/receive/split/join`）——**全部与文档一致**，包括文档写明的两种**具名拒绝**（`fit-image` 在判据下限仍装不下时、`--profile` 缺失时）。发现的唯一缺口是**证据缺口**：图片那条路此前**没有任何端到端腿** ⇒ 已补成上面第 ⑤ 条。
+
 **它不证明**：真墨真纸、真手机摄像头、浏览器的打印缩放（D8）、PWA 安装、以及需要硬件的门限 G4 / G6 / G9 / G10 ⇒ 见 §5。
 
 ## 5. 需要你用真硬件验收的清单
