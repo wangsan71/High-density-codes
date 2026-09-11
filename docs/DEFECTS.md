@@ -3,6 +3,11 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 244 轮新增（D88 · OPEN · 门限偶发且未定位）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D88** | **`verify --gate all` 在一次「与其它重活并发」的运行里打印了 `GATE FAILURE`，但隔离复跑不通**（复跑：`VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`）。触发时的并发：同一程序里同时跑着 `build-web`（它会 `rmSync` 旧 `web/dist` 再 `renameSync` 新目录 ⇒ **存在一个 `web/dist` 不存在的窗口**）、`check-dist`、单测与 `usability.ps1`。**未能定位是哪一条腿失败 —— 这是操作错误不是产品证据**：我把 job 输出**先按关键字过滤读掉**，缓冲区随之消费且没有落盘。**缓解**：门限输出一律 `> .tmp/verify.log 2>&1` 落盘后再看；若再现，日志会点名那条腿 | `node cli/pskit.mjs verify --gate all > .tmp/verify.log 2>&1; $LASTEXITCODE`（**先落盘再看**） | **OPEN**（未复现；疑似并发/时序，非确定性） |
 ### 第 190 轮新增（D87 · OPEN · 测试偶发）
 
 | # | 缺陷 | 复现 | 状态 |

@@ -127,6 +127,29 @@
 
 ## 已知风险 / 待办
 
+### 第 244 轮（**收尾第 110 轮自己写明、一直没做的两条「退役动作」：门限计数不再跑 G7/G8/G10；验收包清掉残留的板材/MTF 脚手架**）
+
+**① 为什么是这一件**：第 132 目标轮起允许派子代理，子代理只读抽取时翻出 `docs/STATUS.md` 第 110 轮自己写下的「下一步」—— ① `verify --gate all` **仍会跑已退役的 G7/G8 并计入总数**；② `tools/acceptance-kit.ps1` **仍生成板材码牌与 MTF 板**。查证后：②的**腿**其实早在某轮就退了（脚本注释已写明 3D 线取消），但**残留没清干净** ⇒ 两条都收。
+
+**② 做了什么**：
+
+| 文件 | 改动 |
+|---|---|
+| `cli/pskit.mjs` | `all` 收窄成 **G0 G1 G2 G3 G5**；新增 `RETIRED = ['G7','G8','G10']`；`not evaluated` 那行**排除退役门限**；`all` 时**单独打一行** `retired: …`；帮助文本与结尾提示删掉「G10 needs a printer」 |
+| `tools/acceptance-kit.ps1` | 删残留：`-PlateMm` 参数与示例、`plates`/`mtf` 两个空目录、`payload-plate.bin` 与 `$plateHash`、`$plateLines`、三个 `{{PLATE_*}}` 替换；头注释改成**实际产出**的腿，并写明 3D 线已取消、`tools/mtf-probe.ps1` 仍可用 |
+| `tools/acceptance-readme.txt` | 删 `payload-plate.bin`、`{{PLATE_LINES}}`、`mtf/` 三行（它们与同一文件第 47 行「3D 线已取消」**自相矛盾**）；步骤号 4→3、5→4（原先**跳过第 3 步**） |
+| `docs/USE.md` §5 · `docs/HANDOVER.md` §7 | G10 / G8 两行**划线 + 标注 RETIRED（第 110 轮）**、写明「不用你验」；历史原文保留不改写 |
+| `docs/DONE.md` | B 节末两条退役动作标为**已收尾**并附本轮实测 |
+
+**③ 实测（含阳性对照）**：
+
+- `node cli/pskit.mjs verify --gate all` ⇒ **`ALL GATES PASS -- 4/5 evaluated, 1 skipped`** + `retired: G7 G8 G10 (the 3D plate line was cancelled; docs/ACCEPTANCE.md records the retirement). Any of them still runs on request, e.g. --gate G7` + `not evaluated by this run: G4 G6 G9` ⇒ **退役门限不再被列成「欠着的活」**。
+- **阳性对照**：`verify --gate G7` 仍能单独跑并 **PASS** ⇒ **退役 ≠ 删掉**（判据与历史判决都还在，随时可复跑）。
+- `& .\tools\acceptance-kit.ps1` 重跑 ⇒ **`KIT_EXIT=0`、7 条 PASS**；生成的 `README.txt` 实测：**未替换占位符 0 个**、不含 `payload-plate` 与 `mtf/`、**文件清单 10 行与包内实际内容逐条对上**、步骤号 1 / 1b / 2 / 3 / 4 连续。
+
+**④ 门限**：`build-web` exit 0（72 文件、build `b88900a6ee4889e3`，与第 242 轮同哈希 ⇒ `web/` 未动）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass` · 单测 **433/433** · `verify --gate all` ⇒ **隔离复跑 `VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**（首次**并发**跑出现过一次 `GATE FAILURE`、未复现 ⇒ 如实记为 **D88**；同时记下我自己的操作错误：**先按关键字过滤读掉 job 输出、没落盘**，所以定位不了是哪条腿）· `usability.ps1` **全腿 PASS、exit 0**（358 s）· `check-docs-tables` clean（**662 rows in 115 tables**）。**本次未评估: G4 G6 G9**（另有 **G7 G8 G10 已退役**）。
+
+**⑤ 下一块砖**：进程内可自证的活已经见底 —— 剩下的是 `HANDOVER` §12 第 5 条（网页端分片 UI，成本高、需产品负责人取舍）、瓦片路径要不要接进 `pskit`（同样需取舍），以及**只有用户能验证**的那六项。
 ### 第 243 轮（**用户第 132 目标轮的新要求落地：新建 `docs/DONE.md`「已完成目标台账」，并把「已完成/已否掉/只有用户能验证」三件事集中一页**）
 
 **① 为什么要这一页**（用户原话：**每 10 轮在文档上记录完成的目标，避免重复执行相关的部分，也避免上下文压缩导致丢了数据和记忆**）：`docs/STATUS.md` 到本轮已有 **240+ 个轮次块**、`docs/ACCEPTANCE.md`/`DEFECTS.md` 也都是长篇；上下文一压缩，下一个人（或下一个会话里的我）最容易犯的错就是**把已经做成的再做一遍、把已经否掉的再试一遍**。

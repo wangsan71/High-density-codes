@@ -44,7 +44,10 @@
 
 **总账（不主张完成）**：**在册** ✅ 4（G0 G1 G3 G5）· 🟡 3（G2 G6 G9）· ⬜ 1（G4）· **已退役 3（G7 G8 G10）**；`verify --gate all` 打印的 `ALL GATES PASS` **每次都会列出本次未评估的门限**，**不得引用成「全部门限通过」**。（`docs/ACCEPTANCE.md` 第 110 轮把 G7/G8/G10 划为 **RETIRED**，依据 `docs/PLAN-V5.md` §3；相应板材档位在 `core/profiles.js` 里已 `retired: true` —— 仍可解码、不再在 CLI/网页提供。）
 
-**⚠ 已记录但尚未做完的「退役动作」**（`docs/STATUS.md` 第 110 轮自己写明，别当成新问题）：① `verify --gate all` **目前仍会跑 G7/G8/G10 并计入总数**，应从 `all` 里摘掉并改打印一行 `retired: G7 G8 G10`；② `tools/acceptance-kit.ps1` **仍在生成板材码牌与 MTF 板**，应清理成「纸面 + 密度阶梯页」。**这两条是纯进程内、可自证的活**，是恢复目标后的第一选择。
+**✅ 两条「退役动作」（`docs/STATUS.md` 第 110 轮自己写明、一直没做完）第 244 轮已收尾**：
+
+- **① 门限计数**：`verify --gate all` 现在只跑 **G0 G1 G2 G3 G5**（第 244 轮前还在跑退役的 G7/G8），输出 `ALL GATES PASS -- 4/5 evaluated, 1 skipped`，并**单独打一行** `retired: G7 G8 G10 (the 3D plate line was cancelled; docs/ACCEPTANCE.md records the retirement). Any of them still runs on request, e.g. --gate G7`；`not evaluated` 那一行不再把退役门限列成「欠着的活」（实测 `--gate G7` 仍可单独跑、仍然 PASS）。
+- **② 验收包**：腿早就退了（第 110 轮之后某轮），但**残留没清** —— 脚本仍在建空的 `plates/` 与 `mtf/` 目录、仍在写 `payload-plate.bin`，用户手册模板里**还列着** `payload-plate.bin` 与 `mtf/`（和它自己第 47 行「3D 线已取消」自相矛盾），步骤号还跳过了第 3 步。第 244 轮清干净并**重跑生成验证**：`KIT_EXIT=0`、README **0 个未替换占位符**、README 的文件清单与包内实际内容**逐条对上**、步骤号 1 / 1b / 2 / 3 / 4 连续。
 
 ---
 

@@ -14,23 +14,25 @@
   reads as "the product is broken". This script writes the artifacts to print AND the commands to
   type, and verifies here everything that can be verified here:
 
-    * paper leg   P-M1-300 PNG + pack.pdf for a 200 KiB payload
-    * plate legs  PL-G at 0.2/0.4/0.6/0.8 (G10's universal-floor half) plus PL-D2 at 0.4,
-                  payload 6 B so that ONE data page is enough at every nozzle
-    * MTF plate   mtf-plate.3mf/.stl/.png + mtf-plate.json
-    * every .3mf goes through the G8 subset checker; any failure makes this script exit 1
+    * paper leg      P-M1-300 PNG + pack.pdf for a 200 KiB payload
+    * module legs    P-MX-300-6/5/4 PNG + pack.pdf for a small payload
+    * density rungs  three ladder sheets (A4@300, A5@600, A6@1200) for the real density numbers
+    * any .3mf present goes through the G8 subset checker; a failure makes this script exit 1
+
+  The 3D plate line (code plates, MTF board) was cancelled by the product owner in round 109, so this kit
+  no longer writes them; docs/ACCEPTANCE.md marks the gates that only measured that line as RETIRED.
+  tools/mtf-probe.ps1 still builds and reads an MTF board for anyone who wants that calibration.
 
   It does NOT pretend to have tested hardware: it writes artifacts and the commands. The hardware
   step is the user's, and README.txt says what to send back.
 
 .EXAMPLE
   & .\tools\acceptance-kit.ps1
-  & .\tools\acceptance-kit.ps1 -Out D:\pskt-kit -PlateMm 200
+  & .\tools\acceptance-kit.ps1 -Out D:\pskt-kit
   # Call it with &, never by dot-sourcing: the script ends in exit.
 #>
 param(
   [string]$Out = '.tmp\acceptance-kit',
-  [int]$PlateMm = 200,
   [int]$PaperBytes = 204800,
   [int]$ModuleBytes = 20000
 )
@@ -40,7 +42,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $kit = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $root $Out }
 if (Test-Path $kit) { Remove-Item -Recurse -Force $kit }
-foreach ($d in 'paper', 'plates', 'mtf', 'module-6', 'module-5', 'module-4') {
+foreach ($d in 'paper', 'module-6', 'module-5', 'module-4') {
   New-Item -ItemType Directory -Force -Path (Join-Path $kit $d) | Out-Null
 }
 
@@ -49,10 +51,6 @@ function Fail([string]$msg) { $script:fails++; Write-Host " FAIL  $msg" }
 function Ok([string]$msg) { Write-Host " PASS  $msg" }
 
 # ---- payloads -------------------------------------------------------------------------
-# 6 B for the plate legs: PL-G@0.8 has 12 B of net data per page, and a 6 B payload compresses to
-# 11 B, so ONE data page is enough at every nozzle (measured: .tmp/data-page-only4.mjs).
-$platePayload = Join-Path $kit 'payload-plate.bin'
-[IO.File]::WriteAllBytes($platePayload, [byte[]](0x50, 0x53, 0x4b, 0x54, 0x01, 0x00))
 $paperPayload = Join-Path $kit 'payload-paper.bin'
 $buf = New-Object 'byte[]' $PaperBytes
 for ($i = 0; $i -lt $PaperBytes; $i++) { $buf[$i] = [byte](($i * 167 + ($i -shr 3)) -band 255) }
@@ -61,7 +59,6 @@ $modulePayload = Join-Path $kit 'payload-module.bin'
 $moduleBuf = New-Object 'byte[]' $ModuleBytes
 for ($i = 0; $i -lt $ModuleBytes; $i++) { $moduleBuf[$i] = [byte](($i * 197 + ($i -shr 5)) -band 255) }
 [IO.File]::WriteAllBytes($modulePayload, $moduleBuf)
-$plateHash = (Get-FileHash -Algorithm SHA256 -Path $platePayload).Hash.ToLower()
 $paperHash = (Get-FileHash -Algorithm SHA256 -Path $paperPayload).Hash.ToLower()
 $moduleHash = (Get-FileHash -Algorithm SHA256 -Path $modulePayload).Hash.ToLower()
 
@@ -125,7 +122,6 @@ if ($mfCount -gt 0) { Ok "G8 subset check on $mfCount 3MF file(s)" }
 
 # ---- README for the human half ---------------------------------------------------------
 $template = Get-Content (Join-Path $PSScriptRoot 'acceptance-readme.txt') -Raw -Encoding utf8
-$plateLines = (($plateDirs | ForEach-Object { "     " + $_.profile + " @ " + $_.nozzle + "mm  ->  " + $_.dir + "\page-000.3mf / .stl" }) -join "`n")
 $moduleReadmeLines = ($moduleLines -join "`n")
 $ladderReadmeLines = ($ladderLines -join "`n")
 $readme = $template.Replace('{{PAPER_BYTES}}', "$PaperBytes")
@@ -133,9 +129,6 @@ $readme = $readme.Replace('{{PAPER_SHA}}', $paperHash)
 $readme = $readme.Replace('{{MODULE_BYTES}}', "$ModuleBytes")
 $readme = $readme.Replace('{{MODULE_SHA}}', $moduleHash)
 $readme = $readme.Replace('{{MODULE_LINES}}', $moduleReadmeLines)
-$readme = $readme.Replace('{{PLATE_SHA}}', $plateHash)
-$readme = $readme.Replace('{{PLATE_MM}}', "$PlateMm")
-$readme = $readme.Replace('{{PLATE_LINES}}', $plateLines)
 $readme = $readme.Replace('{{LADDER_LINES}}', $ladderReadmeLines)
 [IO.File]::WriteAllText((Join-Path $kit 'README.txt'), $readme, (New-Object Text.UTF8Encoding($false)))
 

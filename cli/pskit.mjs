@@ -110,8 +110,9 @@ const HELP = `pskit <command> [options]
     --corpus <dir>       G2: a corpus dir made by sim/channel.py (or --root DIR --match GLOB)
     --fast               G2: skip the photo-path decode (same as g2-corpus.mjs --fast)
     --file <a,b.3mf>     G8: check these files instead of building one in process
-                         'all' covers G0 G1 G2 G3 G5 G7 G8; G4/G9 need a phone and a browser,
-                         G6 is the long soak, G10 needs a printer -- name them to run them
+                         'all' covers G0 G1 G2 G3 G5; G4/G9 need a phone and a browser and G6
+                         is the long soak -- name them to run them. G7/G8/G10 are retired (the
+                         3D plate line was cancelled) but still run on request.
   roundtrip --selftest   encode+decode a synthetic payload, print timings
 `;
 
@@ -1639,7 +1640,13 @@ async function cmdVerify(args) {
   // G6 stays out of 'all' on purpose: its criterion is a 30-60 minute soak, so folding it into the
   // routine baseline would make every --gate all run half an hour long and hide the fast gates'
   // regressions behind it. It is opt-in, and the summary line below says so out loud.
-  const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5', 'G7', 'G8'] : [gate.toUpperCase()];
+  // G7, G8 and G10 were RETIRED in round 110, when the product owner cancelled the 3D plate line: the
+  // verdicts in docs/ACCEPTANCE.md stay where they are (with the retirement written next to them), but they
+  // are no longer part of the routine baseline and no longer counted in its total. They are NOT "pending"
+  // either -- listing them under "not evaluated" would read as work still owed on a closed line -- so they
+  // get their own line, and `--gate G7` still runs any of them on request.
+  const RETIRED = ['G7', 'G8', 'G10'];
+  const wanted = gate === 'all' ? ['G0', 'G1', 'G2', 'G3', 'G5'] : [gate.toUpperCase()];
   const runners = { G0: gateG0, G1: gateG1, G2: gateG2, G3: gateG3, G5: gateG5, G6: gateG6, G7: gateG7, G8: gateG8 };
   let allOk = true;
   const skipped = [];
@@ -1672,10 +1679,18 @@ async function cmdVerify(args) {
   // Name what this run did not cover, so a quoted "ALL GATES PASS" cannot be read as more than it
   // is. G8 joined 'all' in the round it went green; it had been held out while it was red, because
   // folding a known-red gate in would make every run red and hide regressions in the green ones.
-  const notHere = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10'].filter((g) => !wanted.includes(g));
+  const notHere = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10'].filter(
+    (g) => !wanted.includes(g) && !RETIRED.includes(g),
+  );
+  if (gate === 'all') {
+    console.log(
+      `  retired: ${RETIRED.join(' ')} (the 3D plate line was cancelled; docs/ACCEPTANCE.md records the retirement). ` +
+        'Any of them still runs on request, e.g. --gate G7',
+    );
+  }
   if (notHere.length) {
     console.log(`  not evaluated by this run: ${notHere.join(' ')}`);
-    console.log('    G4 G9 need a real phone/browser; G6 is implemented now but its criterion is a 30-60 min soak, so it stays opt-in (--gate G6); G10 needs a printer');
+    console.log('    G4 G9 need a real phone/browser; G6 is implemented now but its criterion is a 30-60 min soak, so it stays opt-in (--gate G6)');
   }
   if (!allOk) process.exitCode = 1;
 }
