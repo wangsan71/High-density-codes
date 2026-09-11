@@ -140,7 +140,7 @@
 | C | **只有用户能验证的**（G4 手机、G9 浏览器、D8 打印缩放、G10 喷嘴、G8 切片软件、三条密度梯纸 + 各自的命令） |
 | D | **已经否掉 / 别重做**（16 条，含 600 dpi 非必要、soak 时长、括号配对脚本删死代码的事故、瓦片「密度优势」不存在、合成夹具必须按自身尺度渲染、死代码复查已到终点等） |
 
-**③bis 派子代理做只读抽取（用户第 132 目标轮起允许），当场抓到我自己的一个错**：子代理逐行读 `ACCEPTANCE`/`STATUS`/`HANDOVER`/`DEFECTS` 后指出 —— **G7 / G8 / G10 在第 110 轮已是 `RETIRED`**（产品负责人第 109 轮取消 3D 板材线，依据 `docs/PLAN-V5.md` §3；板材档位在 `core/profiles.js` 里 `retired: true`），而我写 DONE.md 时照 STatus/HANDOVER 的旧导航表写成了 `G7 ✅ / G8 🟡 / G10 🟡`。**已按权威源改正**（本页 B 节：在册 ✅4 / 🟡3 / ⬜1 + 退役 3）。这正是「导航表会过期、判决只在 ACCEPTANCE」的又一次实证。
+**③bis 派子代理做只读抽取（用户第 132 目标轮起允许），当场抓到我自己的一个错**：子代理逐行读 `ACCEPTANCE`/`STATUS`/`HANDOVER`/`DEFECTS` 后指出 —— **G7 / G8 / G10 在第 110 轮已是 `RETIRED`**（产品负责人第 109 轮取消 3D 板材线，依据 `docs/PLAN-V5.md` §3；板材档位在 `core/profiles.js` 里 `retired: true`），而我写 DONE.md 时照 `STATUS`/`HANDOVER` 的旧导航表写成了 `G7 ✅ / G8 🟡 / G10 🟡`。**已按权威源改正**（本页 B 节：在册 ✅4 / 🟡3 / ⬜1 + 退役 3）。这正是「导航表会过期、判决只在 ACCEPTANCE」的又一次实证。
 
 **③ter 子代理同时翻出一条「已记录但没做完」的活**（`STATUS` 第 110 轮自己写明的下一步）：① `verify --gate all` **仍会跑 G7/G8/G10 并计入总数**，应从 `all` 摘掉、改打印一行 `retired: G7 G8 G10`；② `tools/acceptance-kit.ps1` **仍在生成板材码牌与 MTF 板**，应清理成「纸面 + 密度阶梯页」。**两条都是纯进程内、可自证的活**，已记进 `docs/DONE.md` B 节末，作为恢复目标后的第一选择。
 
@@ -150,7 +150,7 @@
 
 **⑤ 本轮不改产品代码**：只有文档（`docs/DONE.md` 新增，`AGENTS.md`/`HANDOVER.md`/`STATUS.md` 各一处指路）⇒ `build-web` 哈希不变、单测条数不变。
 
-**⑥ 门限**：`check-docs-tables` clean（**650 rows in 113 tables**）· 单测 **433/433** · `build-web` exit 0（同哈希）· `check-dist` **13 pass / 0 fail**。**本次未评估: G4 G6 G9 G10**。
+**⑥ 门限**：`check-docs-tables` clean（**656 rows in 114 tables**）· 单测 **433/433** · `build-web` exit 0（同哈希 `b88900a6ee4889e3`，本轮只有文档）· `check-dist` **13 pass / 0 fail** · `verify --gate all` ⇒ **`ALL GATES PASS -- 6/7 evaluated, 1 skipped`** · `usability.ps1` **全腿 PASS、exit 0**（**358 s**）。**本次未评估: G4 G6 G9 G10**。
 
 **⑦ 按用户新指示暂停目标**：本轮之后**剩下的都只有用户能验证**（C 节那六项）或**需要产品负责人先决定**（`HANDOVER` §8：600 dpi 判据、瓦片路径要不要接进 `pskit`、网页分片 UI）⇒ **暂停持久目标，等待用户验收**，不再自作主张往下铺。
 ### 第 242 轮（**5 轮一次的死代码复查：19 → 3** —— 删掉 16 个「全仓库只出现在定义处」的死导出 + 2 个因此变成孤儿的 import；**web 包随之小 3.6 KiB**）
