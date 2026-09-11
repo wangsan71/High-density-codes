@@ -9,6 +9,7 @@ import { planTiles, tileLayout, tileCapacity } from '../../core/tiles.js';
 import { renderTilePage } from '../../core/render/tilepage.js';
 import { readTile, readTilePage, pageMapper, findPageQuadFromTiles } from '../../core/decode/tile-read.js';
 import { tilePageTiles } from '../../tools/make-tile-page.mjs';
+import { inv3, apply } from '../../core/decode/transform.js';
 
 const sheetW = 210;
 const sheetH = 297;
@@ -272,4 +273,100 @@ test('tile-read: a strong skew (80 px) is fitted too, once the tile identity is 
   const back = readTilePage(sheared, plan, layout, dpi, { map: pageMapper([quad.tl, quad.tr, quad.br, quad.bl], W, H) });
   assert.deepEqual(Array.from(back.payload), Array.from(payload), 'an 80 px skew must read end to end');
   assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
+});
+test('tile-read: a 5 degree photograph reads once the rough quad is refined from the tiles', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 91 + 7) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const SW = base.width;
+  const SH = base.height;
+  // A 5 degree tilt of the sheet about its left edge, plus a scale so the whole sheet fits the frame.
+  const W2 = Math.round(SW * 1.4);
+  const H2 = Math.round(SH * 1.4);
+  const pxPerMm = dpi / 25.4;
+  const th = (5 * Math.PI) / 180;
+  const f = 1.6 * SW;
+  const M = [[f * Math.cos(th), 0, 0], [0, f, 0], [-Math.sin(th), 0, f / pxPerMm]];
+  const Mx = inv3(M);
+  const img = { width: W2, height: H2, dpi, pixels: new Uint8Array(W2 * H2 * 4).fill(255) };
+  for (let y = 0; y < H2; y++) {
+    for (let x = 0; x < W2; x++) {
+      const p = apply(Mx, x - W2 / 2, y - SH / 2);
+      const sx = Math.round(p.x * pxPerMm + SW / 2);
+      const sy = Math.round(p.y * pxPerMm + SH / 2);
+      if (sx < 0 || sx >= SW || sy < 0 || sy >= SH) continue;
+      const s = (sy * SW + sx) * 4;
+      const d = (y * W2 + x) * 4;
+      img.pixels[d] = base.pixels[s]; img.pixels[d + 1] = base.pixels[s + 1];
+      img.pixels[d + 2] = base.pixels[s + 2]; img.pixels[d + 3] = 255;
+    }
+  }
+  const onSheet = (mx, my) => {
+    const p = apply(M, mx - SW / 2 / pxPerMm, my - SH / 2 / pxPerMm);
+    return { x: p.x + W2 / 2, y: p.y + SH / 2 };
+  };
+  const truth = [onSheet(0, 0), onSheet(sheetW, 0), onSheet(sheetW, sheetH), onSheet(0, sheetH)];
+  // The rough model: what corner detection on a tilted photograph actually delivers. 25 px is not a guess --
+  // it is the error measured on this exact page in STATUS round 236 (TL 517.66,26.67 against a true
+  // 533.47,46.51). Everything below is judged against that figure.
+  const rough = truth.map((q, i) => ({ x: q.x + (i % 2 ? 25 : -25), y: q.y + (i < 2 ? -25 : 25) }));
+  const map = pageMapper(rough, SW, SH);
+  assert.throws(
+    () => readTilePage(img, plan, layout, dpi, { map, refine: false }),
+    /unreadable|refusing|declares/, 'positive control: the unrefined rough quad must not quietly return a payload',
+  );
+  const back = readTilePage(img, plan, layout, dpi, { map });
+  assert.equal(back.mapRefined, true, 'the default path refines the map from the tiles');
+  assert.equal(back.mapAnchors, 48, 'every tile must contribute an anchor');
+  assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a 5 degree tilt must read end to end');
+});
+test('tile-read: a 5 degree photograph reads with no synthetic input at all -- corners, map and labelling', () => {
+  const payload = new Uint8Array(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 53 + 29) & 0xff;
+  const built = tilePageTiles(payload, plan, layout);
+  const base = renderTilePage({ plan, layout, tiles: built.tiles, dpi, sheetW, sheetH });
+  const SW = base.width;
+  const SH = base.height;
+  const W2 = Math.round(SW * 1.4);
+  const H2 = Math.round(SH * 1.4);
+  const pxPerMm = dpi / 25.4;
+  const th = (5 * Math.PI) / 180;
+  const f = 1.6 * SW;
+  const M = [[f * Math.cos(th), 0, 0], [0, f, 0], [-Math.sin(th), 0, f / pxPerMm]];
+  const Mx = inv3(M);
+  const img = { width: W2, height: H2, dpi, pixels: new Uint8Array(W2 * H2 * 4).fill(255) };
+  for (let y = 0; y < H2; y++) {
+    for (let x = 0; x < W2; x++) {
+      const p = apply(Mx, x - W2 / 2, y - SH / 2);
+      const sx = Math.round(p.x * pxPerMm + SW / 2);
+      const sy = Math.round(p.y * pxPerMm + SH / 2);
+      if (sx < 0 || sx >= SW || sy < 0 || sy >= SH) continue;
+      const s = (sy * SW + sx) * 4;
+      const d = (y * W2 + x) * 4;
+      img.pixels[d] = base.pixels[s]; img.pixels[d + 1] = base.pixels[s + 1];
+      img.pixels[d + 2] = base.pixels[s + 2]; img.pixels[d + 3] = 255;
+    }
+  }
+  const quad = findPageQuadFromTiles(img, plan, layout, { dpi, sheetW, sheetH });
+  const map = pageMapper([quad.tl, quad.tr, quad.br, quad.bl], SW, SH);
+  // The detector's corners sit ~720 px -- about two tiles -- away from the true sheet corners, and that is
+  // not a tuning failure: the lattice is periodic, so it cannot know which tile it is looking at. Be honest
+  // about it here, then let the header decide.
+  const q0 = map(plan.positions[0].x * pxPerMm, plan.positions[0].y * pxPerMm);
+  const p0 = { x: q0[0], y: q0[1] };
+  const truth0 = (() => { const q = apply(M, plan.positions[0].x - SW / 2 / pxPerMm, plan.positions[0].y - SH / 2 / pxPerMm); return { x: q.x + W2 / 2, y: q.y + SH / 2 }; })();
+  assert.ok(Math.hypot(p0.x - truth0.x, p0.y - truth0.y) > 300, 'the raw detector model really is whole tiles out');
+  assert.throws(
+    () => readTilePage(img, plan, layout, dpi, { map, refine: false }),
+    /declares index|declares \d+ tiles|unreadable|refusing/, 'positive control: the raw detector model must not return a payload',
+  );
+  const back = readTilePage(img, plan, layout, dpi, { map });
+  assert.equal(back.mapRefined, true, 'the map is refined from the tiles');
+  assert.equal(back.mapAnchors, 48, 'every tile must contribute an anchor once the labelling is right');
+  assert.equal(back.mapIdentity.decided, true, 'the header vote must be decisive');
+  assert.equal(back.mapIdentity.shift, 2, 'the detector model sits two tiles out, measured through the header');
+  assert.deepEqual(back.missing, [], 'zero tiles may be left unreadable');
+  assert.deepEqual(Array.from(back.payload), Array.from(payload), 'a 5 degree photograph must read end to end');
 });

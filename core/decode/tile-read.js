@@ -138,6 +138,213 @@ export function pageMapper(quad, srcW, srcH) {
 }
 
 /**
+ * Least-squares homography from anchor pairs ({gx,gy} page-grid pixels -> {ix,iy} image pixels).
+ * 8 unknowns with h33 fixed at 1. Verified in STATUS round 235: exact anchors reproduce the transform to
+ * 0.0 px, and anchors carrying +-3 px of noise still fit to 3.5 px -- which is the accuracy the refinement
+ * below needs.
+ */
+function fitHomographyLS(pairs) {
+  if (!Array.isArray(pairs) || pairs.length < 4) {
+    throw new RangeError('tile-read: a homography needs at least 4 anchor pairs, got ' + (pairs ? pairs.length : 0));
+  }
+  const A = [];
+  for (let i = 0; i < 8; i++) A.push(new Array(9).fill(0));
+  for (const q of pairs) {
+    const r1 = [q.gx, q.gy, 1, 0, 0, 0, -q.ix * q.gx, -q.ix * q.gy];
+    const r2 = [0, 0, 0, q.gx, q.gy, 1, -q.iy * q.gx, -q.iy * q.gy];
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 8; j++) A[i][j] += r1[i] * r1[j] + r2[i] * r2[j];
+      A[i][8] += r1[i] * q.ix + r2[i] * q.iy;
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    let piv = i;
+    for (let k = i + 1; k < 8; k++) if (Math.abs(A[k][i]) > Math.abs(A[piv][i])) piv = k;
+    const tmp = A[i]; A[i] = A[piv]; A[piv] = tmp;
+    if (Math.abs(A[i][i]) < 1e-12) {
+      throw new RangeError('tile-read: these anchor pairs do not determine a homography (degenerate configuration)');
+    }
+    for (let k = i + 1; k < 8; k++) {
+      const f = A[k][i] / A[i][i];
+      for (let j = i; j <= 8; j++) A[k][j] -= f * A[i][j];
+    }
+  }
+  const h = new Array(8);
+  for (let i = 7; i >= 0; i--) {
+    let s = A[i][8];
+    for (let j = i + 1; j < 8; j++) s -= A[i][j] * h[j];
+    h[i] = s / A[i][i];
+  }
+  return [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]];
+}
+
+/**
+ * Measure one tile's origin in IMAGE space through the page model handed in.
+ *
+ * The model supplies more than a position: probing the map itself gives its LOCAL SHAPE (the 2x2 Jacobian,
+ * in image pixels per module), and the finder test points are laid out through that Jacobian instead of on
+ * a fixed axis-aligned grid. Doing this through the map is what makes the measurer work for any map.
+ *
+ * Why it matters -- measured on a 5 degree tilt, same page, same window (STATUS round 237): scoring an
+ * axis-aligned tile through a ROUGH model biases the answer by an amount that grows along the row, col1
+ * (-3.0,-2.5) px against col5 (+1.0,+2.0) px, worst 11.2 px, and 16 of the 48 tiles never reach a score at
+ * all; through the model's own Jacobian the same probe is flat (col0 (1.0,1.8) .. col5 (1.0,2.0), worst
+ * 2.2 px, 48/48 measured). The residual bias is a constant, so the homography fit absorbs it.
+ *
+ * Returns {x, y, gx, gy, score, points} or null when the tile's finder signature cannot be found.
+ */
+function measureTileOrigin(img, plan, layout, t, dpi, map, opts = {}) {
+  const px = modulePixels(plan.tileMm, layout.modules, dpi);
+  const toPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const pos = plan.positions[t];
+  const gx = toPx(pos.x);
+  const gy = toPx(pos.y);
+  const c = map(gx, gy);
+  const ax = map(gx - px, gy), bx2 = map(gx + px, gy);
+  const ay = map(gx, gy - px), by = map(gx, gy + px);
+  const jx = [(bx2[0] - ax[0]) / 2, (bx2[1] - ax[1]) / 2];
+  const jy = [(by[0] - ay[0]) / 2, (by[1] - ay[1]) / 2];
+  const dark = (x, y) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= img.width || yi >= img.height) return 0;
+    return img.pixels[(yi * img.width + xi) * 4] < 128 ? 1 : 0;
+  };
+  const score = (ox, oy) => {
+    let s = 0;
+    for (const f of layout.finders) {
+      const row = (m) => {
+        const dx = f.x + m + 0.5, dy = f.y + 3.5;
+        return dark(ox + jx[0] * dx + jy[0] * dy, oy + jx[1] * dx + jy[1] * dy);
+      };
+      const m1 = row(1), m2 = row(2), m3 = row(3), m4 = row(4);
+      if (f.hollow) { if (!m1 && !m2 && m3 && !m4) s += 4; } else if (!m1 && m2 && m3 && m4) s += 4;
+    }
+    return s;
+  };
+  const minScore = opts.minScore === undefined ? 16 : opts.minScore;
+  const reach = opts.reach === undefined ? 64 : opts.reach;
+  const coarse = opts.coarse === undefined ? Math.max(2, px >> 2) : opts.coarse;
+  let best = -1, bdx = 0, bdy = 0;
+  for (let dx = -reach; dx <= reach; dx += coarse) {
+    for (let dy = -reach; dy <= reach; dy += coarse) {
+      const s = score(c[0] + dx, c[1] + dy);
+      if (s > best) { best = s; bdx = dx; bdy = dy; }
+    }
+  }
+  if (best < minScore) return null;
+  // The optimum sits on a plateau a few pixels wide; average it at whole-pixel resolution so the answer is
+  // sub-pixel instead of quantised to the coarse grid.
+  const fine = coarse + 2;
+  let top = -1;
+  for (let dx = bdx - fine; dx <= bdx + fine; dx++) for (let dy = bdy - fine; dy <= bdy + fine; dy++) {
+    const s = score(c[0] + dx, c[1] + dy);
+    if (s > top) top = s;
+  }
+  let sx = 0, sy = 0, n = 0;
+  for (let dx = bdx - fine; dx <= bdx + fine; dx++) for (let dy = bdy - fine; dy <= bdy + fine; dy++) {
+    if (score(c[0] + dx, c[1] + dy) === top) { sx += dx; sy += dy; n++; }
+  }
+  if (n === 0) return null;
+  return { x: c[0] + sx / n, y: c[1] + sy / n, gx, gy, score: top, points: n };
+}
+
+/**
+ * Re-fit the page model from the tiles themselves, one measurement pass at a time.
+ *
+ * A quad measured off a tilted photograph is a ROUGH model: its local shape is wrong, and a wrong shape is
+ * what fills the measurement with a position-dependent bias. Measuring through the model and then fitting a
+ * homography to those anchors replaces the shape with the page's real one, and the next pass measures
+ * through that. Measured on a 5 degree tilt (STATUS round 237): pass 0 -- rough Jacobian -- 32/48 anchors,
+ * worst origin error 16.96 px; pass 1 -- fitted Jacobian -- 48/48 anchors, worst 2.75 px; pass 2, 1.62 px.
+ * The first pass is the expensive one (a rough model can be tens of pixels out); the later ones search a
+ * small window because the previous fit already put the tile within a few pixels.
+ *
+ * opts.report, when given, is called once per pass with {pass, anchors, residual, refined, H}: H is the
+ * fitted homography itself, which is what makes "where did the refinement actually put the page?" a
+ * measurable question instead of a claim (and is how the identity stage below is probed).
+ *
+ * Returns a new map function, or null when fewer than 8 tiles could be measured -- the caller keeps its own
+ * map then, and the per-tile CRC still decides what is readable.
+ */
+function refinePageMap(img, plan, layout, dpi, map, opts = {}) {
+  // Four passes, not two: the fit after the first pass still carries a couple of pixels of per-tile error,
+  // and at 25 px of corner error that is the difference between 20 unreadable tiles and none (measured in
+  // STATUS round 237). Pass 0 searches +-64 px with its own coarse step; the later ones only +-16 px, so
+  // each extra pass costs a few hundred candidate positions per tile, not thousands.
+  const passes = opts.passes === undefined ? 4 : opts.passes;
+  const report = opts.report || null;
+  let cur = map;
+  for (let pass = 0; pass < passes; pass++) {
+    const o = { coarse: opts.coarse, minScore: opts.minScore };
+    o.reach = pass === 0
+      ? (opts.reach === undefined ? 64 : opts.reach)
+      : (opts.reachFine === undefined ? 16 : opts.reachFine);
+    const pairs = [];
+    for (let t = 0; t < plan.positions.length; t++) {
+      const m = measureTileOrigin(img, plan, layout, t, dpi, cur, o);
+      if (m) pairs.push({ gx: m.gx, gy: m.gy, ix: m.x, iy: m.y });
+    }
+    if (pairs.length < 8) {
+      if (report) report({ pass, anchors: pairs.length, refined: false });
+      return null;
+    }
+    const H = fitHomographyLS(pairs);
+    let residual = 0;
+    for (const q of pairs) {
+      const p = apply(H, q.gx, q.gy);
+      residual = Math.max(residual, Math.hypot(p.x - q.ix, p.y - q.iy));
+    }
+    cur = (sx, sy) => { const p = apply(H, sx, sy); return [p.x, p.y]; };
+    if (report) report({ pass, anchors: pairs.length, residual, refined: true, H });
+  }
+  return cur;
+}
+
+/**
+ * Which slice does the model THINK it is looking at, and which one is actually there?
+ *
+ * A geometric fit cannot answer that: the tile lattice is periodic, so a model one tile out scores just as
+ * well as a correct one (that is why findPageQuadFromTiles corners can sit 719 px out and still look tidy).
+ * The tile header carries the index, so the header is what decides. Each tile that reads cleanly votes for
+ * (declared - assumed); the vote must be decisive -- at least 8 clean reads and a 60 percent majority -- or
+ * no correction is made at all. Measured on a 5 degree tilt (STATUS round 237): 32 of 40 clean reads voted
+ * +2, the rest were blank margin declaring 0, and the page read 48/48 once the model was moved back.
+ */
+function identifyShift(img, plan, layout, dpi, map, opts = {}) {
+  const minVotes = opts.minVotes === undefined ? 8 : opts.minVotes;
+  const majority = opts.majority === undefined ? 0.6 : opts.majority;
+  const tally = new Map();
+  let votes = 0;
+  for (let t = 0; t < plan.positions.length; t++) {
+    let declared = null;
+    try { declared = readTile(img, plan, layout, t, dpi, null, { map }).index; }
+    catch (e) {
+      // The index is checked before the CRC, so only the tiles that got far enough to name an index count as
+      // evidence; "could not be corrected" and "reaches outside the image" are not votes.
+      const m = /declares index (\d+)/.exec(String(e.message));
+      if (m) declared = Number(m[1]);
+    }
+    if (declared === null) continue;
+    votes++;
+    const diff = declared - t;
+    tally.set(diff, (tally.get(diff) || 0) + 1);
+  }
+  let best = 0, bestN = 0;
+  for (const [k, n] of tally) if (n > bestN) { best = k; bestN = n; }
+  if (votes < minVotes || best === 0 || bestN < majority * votes) return { shift: 0, votes, agreed: bestN, decided: false };
+  return { shift: best, votes, agreed: bestN, decided: true };
+}
+
+/** Move a source-space map by whole tiles: source coordinate s now samples what s - shift used to. */
+function shiftMapSource(map, plan, dpi, shift) {
+  const drow = Math.floor(shift / plan.cols);
+  const dcol = shift % plan.cols;
+  const pitchX = (plan.positions[1].x - plan.positions[0].x) * (dpi / 25.4);
+  const pitchY = (plan.positions[plan.cols].y - plan.positions[0].y) * (dpi / 25.4);
+  return (sx, sy) => map(sx - dcol * pitchX, sy - drow * pitchY);
+}
+
+/**
  * Find the sheet's four corners from the tiles themselves.
  *
  * The tiled page carries no sheet-level markers (round 188: the legacy detector answers "no-hollow-corner"),
@@ -151,9 +358,10 @@ export function pageMapper(quad, srcW, srcH) {
  *     tolerance that pairs all 137 hits and puts the sheet corners within 1.6 px (round 194), which is what
  *     turns the six unreadable tiles of round 190 into zero.
  *
- * The model is affine: a shear is affine and that is what the tests exercise. A perspective photograph needs
- * the same fit with 8 unknowns instead of 6 -- NOT DONE, and written here rather than implied by the word
- * "photo".
+ * The model is affine: a shear is affine, and the returned quad is only a starting point. A perspective
+ * photograph needs 8 unknowns instead of 6; that fit is refinePageMap() below, which is now the default
+ * step inside readTilePage whenever a map is supplied (STATUS round 237 -- the affine quad alone corners a
+ * 5 degree tilt 25.3 px out and reads nothing; refined, 48/48 tiles).
  */
 export function findPageQuadFromTiles(img, plan, layout, opts = {}) {
   const dpi = opts.dpi === undefined ? img.dpi : opts.dpi;
@@ -414,7 +622,39 @@ function readTileAuto(img, plan, layout, t, dpi, opts = {}) {
 }
 
 export function readTilePage(img, plan, layout, dpi, opts = {}) {
-  const first = readTileAuto(img, plan, layout, 0, dpi, opts);
+  const use = Object.assign({}, opts);
+  let mapRefined = false, mapAnchors = 0;
+  let mapIdentity = null;
+  if (use.map && use.refine !== false) {
+    // A quad taken off a tilted photograph is a rough model, and a rough model's local shape biases every
+    // tile measurement (round 237). Re-fitting the map from the tiles themselves is what makes the tilt
+    // readable, so it is the default whenever a caller has supplied a map. If the refinement cannot find
+    // anchors the caller's map is kept: the per-tile CRC below still decides what is readable, and nothing
+    // is ever accepted that does not validate.
+    const ro = Object.assign({}, use.refineOpts);
+    ro.report = (r) => { if (r.anchors >= 8) { mapAnchors = r.anchors; mapRefined = true; }
+      if (use.refineOpts && use.refineOpts.report) use.refineOpts.report(r); };
+    const refined = refinePageMap(img, plan, layout, dpi, use.map, ro);
+    if (refined) use.map = refined;
+    else { mapRefined = false; mapAnchors = 0; }
+    // Finally, the labelling. A refined map says where the page is; it cannot say WHICH tile is where, and
+    // the lattice is periodic so geometry alone never can. The header votes, and the vote moves the model
+    // back by whole tiles. Measured on a 5 degree photograph (round 237): without this the page refuses with
+    // "tile 0 declares index 2"; with it the same pixels read 48/48 byte for byte.
+    if (use.map && use.identify !== false) {
+      const id = identifyShift(img, plan, layout, dpi, use.map, use.identifyOpts);
+      mapIdentity = id;
+      if (id.decided) {
+        use.map = shiftMapSource(use.map, plan, dpi, id.shift);
+        // Now that the model samples the tiles it names, the fit can use the whole sheet instead of the
+        // part of it the shifted-away model still landed on (32 of 48 anchors before, 48 after). The map is
+        // already close, so this re-fit searches a small window instead of the +-64 px opening pass.
+        const again = refinePageMap(img, plan, layout, dpi, use.map, Object.assign({}, ro, { reach: 16, passes: 2 }));
+        if (again) use.map = again;
+      }
+    }
+  }
+  const first = readTileAuto(img, plan, layout, 0, dpi, use);
   const per = first.tile.bytesPerTile;
   const out = new Uint8Array(first.tile.length);
   const tiles = [{ index: first.tile.index, bytes: first.tile.bytes.length, how: first.how }];
@@ -425,7 +665,7 @@ export function readTilePage(img, plan, layout, dpi, opts = {}) {
   for (let t = 1; t < first.tile.count; t++) {
     let got;
     try {
-      got = readTileAuto(img, plan, layout, t, dpi, opts);
+      got = readTileAuto(img, plan, layout, t, dpi, use);
     } catch (e) {
       missing.push(t);
       continue;
@@ -444,5 +684,5 @@ export function readTilePage(img, plan, layout, dpi, opts = {}) {
       (missing.length > 8 ? ', ...' : '') + ') -- refusing rather than returning a payload with holes' +
       ' (pass { allowPartial: true } to get the readable part, labelled)');
   }
-  return { payload: out, length: first.tile.length, tiles, missing, bytesPerTile: per, hows, partial: missing.length > 0 };
+  return { payload: out, length: first.tile.length, tiles, missing, bytesPerTile: per, hows, partial: missing.length > 0, mapRefined, mapAnchors, mapIdentity };
 }
