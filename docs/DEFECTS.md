@@ -3,6 +3,17 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 249 轮新增（D90 · CLOSED · 新检查第一次运行就抓到）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D90** | **`core/decode/calibrate.js` 从第 154 轮起语法就是坏的 —— 第 154 轮删死代码时把 `calibrateInkCut()` 的闭合 `*/`、函数签名与函数体一起删掉了，只留下悬空的文档注释**（`2cbee43` 的 diff 显示删了 48 行；文件里 `function maxOf(a)` 直接接在一段没有 `*/` 的注释后面）。**7 轮无人发现**：没有任何测试 import 这个文件（`pskit calibrate` 才动态加载它），构建只拼文本不解析，`check-dist` 也不解析服务版脚本 ⇒ **`pskit calibrate` 这条「只量不改」的读数路径从第 154 轮起一直是崩的**（D51 的诊断量具就在这条路上） | `node --check core/decode/calibrate.js`（修前 **exit 1**、报 `SyntaxError: Invalid or unexpected token`）；`node tools/check-dist.mjs`（修前第 15 条断言点名 `core\decode\calibrate.js: does not parse`）| **CLOSED**（从 `2cbee43^` 取回 `calibrateInkCut()` 原文并原样恢复 —— 43 行；**修后复验**：`node --check` ⇒ **exit 0**、`check-dist` ⇒ **61 file(s) parsed / all 15 assertions pass**、`node cli/pskit.mjs calibrate .tmp/usability/pages-scan` ⇒ **exit 0**，逐页打出 ECC 与油墨比 0.90x/1.19x/1.25x）|
+### 第 249 轮新增（D89 · CLOSED · 真浏览器查出）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D89** | **服务版接收页的 `?selftest=1` 入口是一个内联 `<script type="module">`，而该页自己的 CSP 是 `script-src 'self'`（不含 `'unsafe-inline'`）⇒ 浏览器静默拦掉它，自检在真浏览器里从来没跑起来过**（`tools/build-web.mjs` 里早有同一条护栏，但**只覆盖它自己重写的单文件版**；服务版从没被检查过，`check-dist` 也只查「CSP 存在」）。**实测（headless Chrome 152）**：新鲜加载 `?selftest=1` ⇒ `#selftest-wrap` 保持隐藏、`performance` 里根本没有 `selftest-page.js`；在页面里注入一个内联 module 脚本 ⇒ `window.__inlineRan` 保持 `undefined`（被拦）；手动 `import('./selftest-page.js')` ⇒ 立刻 `13 passed / 0 failed / 0 skipped -> SELFTEST GREEN` | 修前 `node tools/check-dist.mjs` ⇒ 第 14 条断言变红并点名 `index.html: an inline <script> (95 chars) is not permitted by its own CSP`；**修后复验**：`node tools/check-dist.mjs` ⇒ **`G9 CHECK: all 14 assertions pass`**，且真浏览器新鲜加载 `?selftest=1` ⇒ 依次加载 `selftest-loader.js → selftest-page.js → selftest.js` 并**自己跑出 `SELFTEST GREEN`**（不带参数则三者一个都不加载，阴性对照 ✓） | **CLOSED**（修法：loader 落成 `web/selftest-loader.js` + `<script type="module" src=…>`，保持 CSP 严格；`build-web.mjs` 补 `writeDist`；新增 `check-dist` 第 14 条断言防复发） |
+
 ### 第 244 轮新增（D88 · OPEN · 门限偶发且未定位）
 
 | # | 缺陷 | 复现 | 状态 |

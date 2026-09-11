@@ -127,6 +127,40 @@
 
 ## 已知风险 / 待办
 
+### 第 249 轮（**用新装的真浏览器查出并修掉一个真缺陷：服务版接收页的 `?selftest=1` 入口被自己的 CSP 拦掉 —— 手册让你按的那个自检，在浏览器里根本不会跑**）
+
+**① 工具到位**：用户装了浏览器插件 ⇒ 本项目第一次能驱动**真浏览器**（`navigator.userAgent` 实测 `HeadlessChrome/152.0.0.0`）。第一个动作就用它验最有价值的一步：接收页自检。
+
+**② 查到的现象（两步，都可复现）**：① 单文件版 `pskt-file.html?selftest=1` **不触发** —— 设计如此：构建会把 loader 块剥掉，而它的动态 `import('./selftest-page.js')` 在单文件里没有兄弟文件可加载（手册 §5 没写清这一点，已补）。② 改用**服务版** `http://127.0.0.1:8137/index.html?selftest=1` —— **也不触发**，`#selftest-wrap` 保持隐藏、`performance` 里连 `selftest-page.js` 都没有。
+
+**③ 根因（实测，不是推断）**：该页的 CSP 是 `default-src 'self'; script-src 'self'; …`（**不含 `'unsafe-inline'`**），而 `?selftest=1` 的入口当时是一个**内联** `<script type="module">` ⇒ 浏览器**静默拦掉**。证据：在页面里新建并注入一个内联 module 脚本 ⇒ `window.__inlineRan` 保持 `undefined`（被拦）；而手动 `import('./selftest-page.js')` ⇒ 立刻跑出 **`13 passed / 0 failed / 0 skipped -> SELFTEST GREEN`**（同一份代码、同一个浏览器 ⇒ 差别只在内联与否）。
+
+**④ 修法（保持 CSP 严格，不加 `'unsafe-inline'`）**：把 loader 落成真实文件 **`web/selftest-loader.js`**，页面改成 `<script type="module" src="./selftest-loader.js"></script>`（`script-src 'self'` 允许来自本源的模块）；`tools/build-web.mjs` 补一行 `writeDist('selftest-loader.js', …)` —— **第一次重建时我漏了这行，`check-dist` 的「markup 引用必须能解析成产物」当场把我抓住**（这正是那条断言存在的意义）。
+
+**⑤ 新检查 + 阳性对照（台账纪律 §6.3）**：`tools/check-dist.mjs` 新增第 **14** 条断言 ——「服务版页面不得带自己 CSP 不允许的内联脚本」。**先跑未修版本 ⇒ 它变红并点名** `index.html: an inline <script> (95 chars) is not permitted by its own CSP -- the browser will block it without a word` ✓ **证明这条检查真的会咬**；修完 ⇒ **`G9 CHECK: all 14 assertions pass`**。
+
+**⑥ 端到端复验（真浏览器）**：新鲜加载 `?selftest=1` ⇒ 资源里依次出现 `selftest-loader.js → selftest-page.js → selftest.js`，自检区**自己展开**并打出 `13 passed / 0 failed / 0 skipped -> SELFTEST GREEN`；**阴性对照**：不带参数的新鲜加载 ⇒ 三个文件**一个都不加载**、自检区保持隐藏 ✓（loader 是按查询串门控的，不是常开）。
+
+**⑦ 这同时是 G9 的第一份「真浏览器」证据**（此前 100 多轮只能写「进程内跑过，未在浏览器里主张」）。**如实限定**：是 **headless Chrome 152**、**一个引擎**、**本机 http 源**；仍缺 ① 用户可见浏览器里的真实点击 ② Edge/Safari ③ `file://` 单文件版在真浏览器里的一次（D18）。
+
+**⑧ 门限**（全部在本轮所有修复落地之后重跑）：`build-web` exit 0 · `check-dist` **0 fail**（**`G9 CHECK: all 15 assertions pass`**、**61 file(s) parsed**）· 单测 **433/433** · `verify --gate all`（单独跑、日志落盘 `.tmp/verify-249b.log`）⇒ **`VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**、`not evaluated: G4 G6 G9` · `usability.ps1` **全腿 PASS、exit 0**（**359 s**）· `smoke-capture` / `smoke-sender` 各 **exit 0** · `pskit calibrate`（D90 的复验）**exit 0** · `check-docs-tables` clean（**677 rows in 119 tables**）。**本次未评估: G4 G6 G9**（**G7 G8 G10 已退役**）。
+
+**⑨ 给用户的直接后果**：手册 §5 的 G9 那一行要按**服务版 + `?selftest=1`** 跑（单文件版按设计不跑自检）—— 本轮已写进 `docs/USE.md`。
+**⑩ 顺手用真浏览器复核了第 247 轮自己的改动**（浏览器不只用来找缺陷）：服务版**发送页** `send.html` 实测 —— 档位下拉框 **7 个选项、全是纸面档、退役的 `PL-*` 一个都不出现（0 个）**、`P-M1-300` 在、且**「手机拍摄首选」出现 0 次**（证明那个死标记真的从 UI 里消失了）；600 dpi 那三档带 `⚠ 实测未达标 (D49)` 警示 ✓。另：`file://` 打开单文件接收页 ⇒ 200、标题正确、非安全上下文提示按设计显示（摄像头按钮禁用）。⇒ **这一批把「产物级断言」升级成了「真浏览器实测」。**
+
+**⑪ 同一轮的第二半：新加的一条「产物必须能解析」断言，第一次运行就连抓两个真缺陷**（其中一个是我自己的）。起因是给连拍区加常驻说明时，我在 `web/capture.js` 里**把分号打成了逗号** ⇒ 语法错误；而**构建只拼文本不解析、单测不 import 它、它也不在任何一个单文件产物里** ⇒ `build-web` 与 `check-dist` 全绿，只有**冒烟**才间接抓到（`smoke-capture` exit 1）✗。⇒ 于是**先加检查、再修**：`tools/check-dist.mjs` 新增第 **15** 条断言 ——「每个产物 JS 都必须能被 `node --check` 解析」（`spawnSync(process.execPath, ['--check', f], { stdio: 'ignore' })`，这是沙箱允许的唯一 spawn 形态）。**阳性对照**：在未修的树上跑 ⇒ 变红并点名 **`capture.js: does not parse (node --check exit 1)`** ✓；修完 ⇒ **`61 file(s) parsed`、`G9 CHECK: all 15 assertions pass`** ✓。**这条检查当场又抓出第二个、更老的缺陷**：`core/decode/calibrate.js` **自第 154 轮起语法就是坏的**（DEFECTS **D90**：那一轮删死代码时连 `calibrateInkCut()` 的 `*/` 与函数签名一起删了），7 轮无人发现 —— 没有任何测试 import 它，而 `pskit calibrate` 是动态加载它 ⇒ **那条「只量不改」的读数路径一直是崩的**。已从 `2cbee43^` 原样取回 43 行恢复，并实测 `node cli/pskit.mjs calibrate .tmp/usability/pages-scan` ⇒ **exit 0**、逐页 ECC + 油墨比 0.90x / 1.19x / 1.25x。
+
+**⑫ 如实记下我自己在这次事故里的两个错**：① 那个逗号说明我**改完没有立刻用能解析的方式验一遍**（`node --check` 一行的事）；② 第 154 轮那次历史事故的**根因，与我第 242 轮引用的教训并不完全一致** —— 我之前引的是「括号配对脚本删错」，而 `calibrate.js` 这处是**手删时多删了收尾行**，两种机制不同，本轮按实测改口径。
+
+### 第 248 轮（**补记（第 249 轮才发现 248 轮只改了代码与手册、忘了写轮次块）：手机那一步 —— 收紧「局域网 http 拿不到摄像头」的说法，并在连拍区加常驻说明**）
+
+**① 用户反馈**：G4 手机那步**没有弹摄像头权限请求**，问怎么在 iPhone / Android 上开启。
+
+**② 根因（不是权限设置问题）**：浏览器只在**安全上下文**（`https://` 或 `localhost`）把 `getUserMedia` 交给网页；`http://192.168.x.x:8123` **不是**安全上下文 ⇒ 摄像头 API **不存在**（不是「被拒绝」）⇒ **既没有弹框、也没有任何开关可开**（iOS 与 Android 都没有）。**产品本身是对的**：`web/app.js` 在非安全上下文下会**禁用**单张拍照按钮并写明原因；`web/capture.js` 在按下连拍按钮时也会把原因打进日志。**错的是手册**：§5 的 G4 行让人「打开局域网地址 → 按连拍」，这条路**走不通**。
+
+**③ 改了什么**：① `docs/USE.md` §5 的 G4 行改写成**三条真能走的路** —— (a) 手机打开**已部署的 https 接收页** `https://wangsan71.github.io/High-density-codes/pskt-file.html`（第 248 轮用 Node `fetch` 实测 **200**、374,864 字节、含连拍区）；(b) **没网**：系统相机拍照 → 接收页「选择文件」，或把照片传回电脑走 `receive --photo --profile auto`；(c) **仅 Android**：`chrome://flags/#unsafely-treat-insecure-origin-as-secure` 加白名单（**iOS Safari 无等价开关**）。② §2 更正「必须经 http」这句（经服务器 ≠ 经 http；摄像头要的是**安全上下文**）。③ `web/index.html` 连拍区加常驻 `#burst-note`，`web/capture.js` 在加载时按 `navigator.mediaDevices` 是否存在写入说明 —— 以前只有**按下按钮之后**才在日志里说。
+
+**④ 门限**：`build-web` exit 0 · `check-dist` **13 pass / 0 fail**（当时；实测 **74 个 id**、每个 `getElementById` 都能解析、无重复）· 单测 **433/433** · `usability` 全腿 PASS · 表格 clean。**本次未评估: G4 G6 G9**。
 ### 第 247 轮（**用户回来要开始硬件验收 —— 先把三处「照着手册做会撞墙」的过期指引修掉**：手机档建议指向已退役的 `PL-G`、`phoneSafe` 标记挂在一个网页端不再提供的档位、工具自己的建议文案也在劝人换板材档）
 
 **① 为什么先做这个**：目标处于 `blocked`、用户回来问「我该怎么做」。在给步骤之前先自查**他照手册做会不会撞墙** —— 结果撞了三处，全部源于第 109/110 轮取消 3D 板材线（`PL-*` 全部 `retired: true`）。

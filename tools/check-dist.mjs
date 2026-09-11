@@ -26,6 +26,7 @@
  *   node tools/build-web.mjs && node tools/check-dist.mjs [--pages .tmp/g2src]
  */
 import { readFileSync, readdirSync, existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -99,6 +100,62 @@ check('CSP default-src self on both pages', () => {
     if (!/default-src\s+'self'/.test(s)) throw new Error(`${n}: CSP lacks default-src self`);
   }
   return need.join(', ');
+});
+
+check('every built JavaScript file parses', () => {
+  // Round 249: I typed a comma where a semicolon belonged in web/capture.js. Nothing caught it. The unit
+  // suite never imports capture.js; tools/build-web.mjs stitches source text without parsing it; and
+  // capture.js is in neither single-file page, so the assertion below (inline scripts parse) never saw it.
+  // The usability smoke eventually caught it, indirectly and late -- a broken served page should fail here,
+  // where the artifact is the subject. `node --check` is the parser the runtime itself uses, and a
+  // spawnSync with stdio 'ignore' is the one spawn shape this sandbox allows (AGENTS section 5.1).
+  //
+  // Positive control: run against the tree while capture.js carried the comma and this fails naming it.
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.js')) files.push(p);
+    }
+  };
+  walk(DIST);
+  if (!files.length) throw new Error('no built JavaScript found -- the walk found nothing to check');
+  for (const f of files) {
+    const r = spawnSync(process.execPath, ['--check', f], { stdio: 'ignore' });
+    if (r.status !== 0) throw new Error(`${f.slice(DIST.length + 1)}: does not parse (node --check exit ${r.status})`);
+  }
+  return `${files.length} file(s) parsed`;
+});
+
+check('no served page carries an inline script its own CSP forbids', () => {
+  // Found in round 249 with a real browser (the DSH browser plugin): the served receiver page's ONLY
+  // inline script was the `?selftest=1` loader, and that page's CSP is `script-src 'self'` -- which does
+  // not permit inline script. The browser blocked it silently, so the documented self-test entry never
+  // ran, and nothing here noticed: the CSP assertion checked that a CSP exists, not that the page's own
+  // scripts are allowed by it (DEFECTS D89). tools/build-web.mjs already had this exact guard, but only
+  // for the single-file builds it rewrites -- the served pages were never checked.
+  //
+  // Positive control: run against the tree before the fix and this assertion fails, naming the 95-char
+  // loader. That is how it was shown to bite rather than assumed to.
+  const names = ['index.html', 'send.html'];
+  let inline = 0;
+  for (const n of names) {
+    const p = join(DIST, n);
+    if (!existsSync(p)) continue;
+    const s = text(p);
+    const csp = (s.match(/http-equiv=["']Content-Security-Policy["'][^>]*content=["']([^"']*)["']/i) || [])[1] || '';
+    const allowsInline = /script-src[^;]*'unsafe-inline'/.test(csp);
+    const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+    let m;
+    while ((m = re.exec(s))) {
+      inline++;
+      if (!allowsInline) {
+        throw new Error(`${n}: an inline <script> (${m[1].trim().length} chars) is not permitted by its own CSP -- the browser will block it without a word`);
+      }
+    }
+  }
+  return inline === 0 ? 'no inline script in the served pages' : `${inline} inline script(s), each permitted by its own CSP`;
 });
 
 check('SW precache manifest hashes match the artifacts on disk', () => {

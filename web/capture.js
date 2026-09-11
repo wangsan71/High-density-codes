@@ -171,7 +171,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     if (note) {
       note.textContent = canCamera
         ? '会请求摄像头权限；帧只在本机处理，不上传。'
-        : '这个来源拿不到摄像头（浏览器只在 https 或 localhost 才给）：请用手机系统相机拍照后走上面的「选择文件」，或改用 https 的接收页。',
+        : '这个来源拿不到摄像头（浏览器只在 https 或 localhost 才给）：请用手机系统相机拍照后走上面的「选择文件」，或改用 https 的接收页。';
     }
   }
   const say = (m, cls = '') => {

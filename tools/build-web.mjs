@@ -280,6 +280,9 @@ for (const id of [...needIds, ...allCore].sort()) {
 writeDist('pskt-bundle.js', appBundle);
 writeDist('selftest.js', selftestSrc);
 writeDist('selftest-page.js', read('web/selftest-page.js'));
+// The served site's `?selftest=1` loader, kept as its own file: an inline <script> is what the page's own
+// CSP (`script-src 'self'`) forbids, which is how the self-test entry silently stopped running (D89).
+writeDist('selftest-loader.js', read('web/selftest-loader.js'));
 for (const [src, rel] of ASSETS) writeDist(rel, read(src));
 
 // The single-file page: same markup, styles inlined, and the bundle inlined instead of the

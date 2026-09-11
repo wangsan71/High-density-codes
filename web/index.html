@@ -196,8 +196,6 @@
 <script type="module" src="./app.js"></script>
 <script type="module" src="./capture.js"></script>
 <!-- PSKT-SELFTEST-LOADER: served-site only; stripped from the single-file build. -->
-<script type="module">
-  if (new URLSearchParams(location.search).get('selftest') === '1') import('./selftest-page.js');
-</script>
+<script type="module" src="./selftest-loader.js"></script>
 </body>
 </html>
