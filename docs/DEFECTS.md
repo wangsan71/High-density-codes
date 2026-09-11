@@ -12,7 +12,7 @@
 
 | # | 缺陷 | 复现 | 状态 |
 |---|---|---|---|
-| **D87** | **`encrypt/decrypt round-trip on random data of assorted lengths` 偶发失败一次、重跑即过**（用了随机长度/随机数据的测试若依赖某个边界，就会这样）。观察到时的现象：`✖ encrypt/decrypt round-trip on random data of assorted lengths (0.3885ms)`，同一份代码立刻重跑 ⇒ `428 · pass 428 · fail 0`。**0.39 ms** 的失败时长像是**导入/夹具层面**的瞬态，而不是断言失败 | 连续跑两次 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ 第一次红、第二次绿（本轮实测） | **OPEN**：需要抓到**失败时的断言文本**才能定性（可能只是随机长度撞上某个边界，也可能是夹具瞬态）。**不要**用重跑掩盖它 —— 下一次复现时**先把完整输出留下来** |
+| **D87** | **【第 245 轮补测：200 次隔离重跑 0 失败 ⇒ 不是输入相关】** `for ($i=1; $i -le 200; $i++) { node --test --test-isolation=none "tests/unit/chacha20.test.mjs" }` ⇒ **fails=0 of 200**（该用例每次都用新的 `randomBytes` 做 key/nonce/数据，11 种长度 ⇒ 累计 **2,200 次往返**全部逐字节一致）⇒ **复现条件不在输入里**；结合观察时的 0.39 ms 时长，最可能是**当时正在编辑/并发运行**造成的夹具瞬态。**仍然不划线**（没有修法、也没有复现），但下一次再现时**先留完整输出**。原记录：**`encrypt/decrypt round-trip on random data of assorted lengths` 偶发失败一次、重跑即过**（用了随机长度/随机数据的测试若依赖某个边界，就会这样）。观察到时的现象：`✖ encrypt/decrypt round-trip on random data of assorted lengths (0.3885ms)`，同一份代码立刻重跑 ⇒ `428 · pass 428 · fail 0`。**0.39 ms** 的失败时长像是**导入/夹具层面**的瞬态，而不是断言失败 | 连续跑两次 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ 第一次红、第二次绿（本轮实测） | **OPEN**：需要抓到**失败时的断言文本**才能定性（可能只是随机长度撞上某个边界，也可能是夹具瞬态）。**不要**用重跑掩盖它 —— 下一次复现时**先把完整输出留下来** |
 ### 第 178 轮闭掉的（D86）
 
 | # | 缺陷 | 复现 | 状态 |
