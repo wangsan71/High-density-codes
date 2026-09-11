@@ -622,6 +622,46 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $imgSrc)) {
   if (-not $imgOk) { Get-Content (Join-Path $tmp 'step4k-recv.log') -Tail 3 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
 }
 
+# 4l. The density ladder -- the sheet that turns 'how fine can this printer scan' into numbers, and the one
+#     command in the acceptance README (step 2c) that produces them. Nothing covered it: not one test and no
+#     leg, so a regression here would only surface after the user had printed three sheets (round 246).
+#     The leg runs exactly the README's pipeline in process: --make, a simulated 300 dpi scan, --read.
+$dd = Join-Path $tmp 'density-ladder'
+$ddIn = Join-Path $dd 'scan-in'
+$ddScan = Join-Path $dd 'scan'
+if (Test-Path $dd) { Remove-Item -Recurse -Force $dd }
+New-Item -ItemType Directory -Force -Path $ddIn | Out-Null
+& node tools/density-ladder.mjs --make --out (Join-Path $dd 'a4') --sheet A4 --dpi 300 --pitches "0.847,0.508,0.423,0.339" *> (Join-Path $tmp 'step4l-make.log')
+$dl1 = ($LASTEXITCODE -eq 0) -and (Test-Path (Join-Path $dd 'a4\density-ladder.json'))
+Copy-Item (Join-Path $dd 'a4\density-ladder.png') (Join-Path $ddIn 'page-000.png') -Force
+& python sim/channel.py --in $ddIn --out $ddScan --seed 7 --preset scan300 --modifier nocrop *> (Join-Path $tmp 'step4l-scan.log')
+$dl2 = ($LASTEXITCODE -eq 0) -and (@(Get-ChildItem $ddScan -Filter '*.png' -ErrorAction SilentlyContinue).Count -eq 1)
+$dlLog = Join-Path $tmp 'step4l-read.log'
+& node tools/density-ladder.mjs --read $ddScan --spec (Join-Path $dd 'a4\density-ladder.json') *> $dlLog
+$dl3 = ($LASTEXITCODE -eq 0)
+$dlText = Get-Content $dlLog -Raw
+$dlRows = @($dlText -split "`n" | Where-Object { $_ -match '^\s+\d+\s+0\.' })
+$dl4 = ($dlRows.Count -eq 4) -and ($dlText -match 'band\s+pitch mm\s+px\s+modules\s+BER')
+$dlCoarse = $false
+$dlFine = $false
+if ($dlRows.Count -eq 4) {
+  # The coarsest band (10 px per module) must come back usable, and the finest (4 px per module) must show
+  # the cliff this project measured: a BER above zero. Asserting both directions keeps the leg from passing
+  # on a run that simply printed four zeros.
+  $dlCoarse = ($dlRows[0] -match 'yes')
+  $fineFields = @($dlRows[3] -split '\s+' | Where-Object { $_ -ne '' })
+  if ($fineFields.Count -ge 6) { $dlFine = ([double]$fineFields[5]) -gt 0 }
+}
+# Positive control: the READ must fail, and say why, on a directory with no images at all.
+$ddEmpty = Join-Path $dd 'empty'
+New-Item -ItemType Directory -Force -Path $ddEmpty | Out-Null
+& node tools/density-ladder.mjs --read $ddEmpty --spec (Join-Path $dd 'a4\density-ladder.json') *> (Join-Path $tmp 'step4l-empty.log')
+$dl5 = ($LASTEXITCODE -ne 0)
+$dlOk = $dl1 -and $dl2 -and $dl3 -and $dl4 -and $dlCoarse -and $dlFine -and $dl5
+if (-not $dlOk) { $script:fails++ }
+Write-Host ("{0}  density ladder: --make -> simulated scan -> --read reports numbers, coarse band usable, fine band on the cliff  (make {1} scan {2} read {3} rows {4} coarse {5} fine {6} refuses-empty {7})" -f $(if ($dlOk) { ' PASS' } else { ' FAIL' }), $dl1, $dl2, $dl3, $dl4, $dlCoarse, $dlFine, $dl5)
+if (-not $dlOk) { Get-Content $dlLog -Tail 6 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+
 # 5. The 3D side, on files this run actually wrote.
 if (-not $Skip3D) {
   # A plate page carries far less than a paper page -- PL-D2@0.4 holds on the order of 180 payload
@@ -728,7 +768,8 @@ if ($script:fails -eq 0) {
   Write-Host '           Also: the image path end to end -- a picture went in, its pages came back through the'
   Write-Host '           channel, the payload matched the manifest, and unpsk made it viewable again.'
   Write-Host '           Not proven here: real ink/paper, a real phone camera, browser print scaling (D8),'
-  Write-Host '           PWA install (needs https), and G4/G6/G9/G10. See docs/USE.md for those steps.'
+  Write-Host '           PWA install (needs https), and G4/G6/G9. See docs/USE.md for those steps.'
+  Write-Host '           (G7, G8 and G10 are retired: the 3D plate line was cancelled in round 109.)'
   exit 0
 } else {
   Write-Host ("USABILITY: {0} step(s) FAILED in {1}s -- logs in {2}" -f $script:fails, [int]$script:t0.Elapsed.TotalSeconds, $tmp)

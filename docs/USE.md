@@ -223,7 +223,9 @@ node tools/mtf-matrix.mjs --dir PHOTOS   # 你拍回来的四张照片 -> 逐张
 
 **第 241 轮的文档体检**：把本文档里所有能在本机跑的命令**逐条真跑了一遍**（`status`、`verify --gate all`、`mtf-matrix --selftest`、`mtf-probe.ps1`、`calibrate --make-mtf`、`acceptance-kit.ps1`、`jpeg-to-png.ps1`、`fit-image.mjs`、`make-tile-page.mjs` 写/读/照片、`unpsk`、`send/receive/split/join`）——**全部与文档一致**，包括文档写明的两种**具名拒绝**（`fit-image` 在判据下限仍装不下时、`--profile` 缺失时）。发现的唯一缺口是**证据缺口**：图片那条路此前**没有任何端到端腿** ⇒ 已补成上面第 ⑤ 条。
 
-**它不证明**：真墨真纸、真手机摄像头、浏览器的打印缩放（D8）、PWA 安装、以及需要硬件的门限 G4 / G6 / G9 / G10 ⇒ 见 §5。
+⑥ **密度梯那条路**（`--make` → 模拟扫描 → `--read`）：粗档（10 px/模块）必须报 **usable**、细档（4 px/模块）必须报出**非零 BER**（那正是本项目量到的悬崖），空目录必须**具名拒绝**（阳性对照）——实测四个档全出、两个方向都对。
+
+**它不证明**：真墨真纸、真手机摄像头、浏览器的打印缩放（D8）、PWA 安装、以及需要硬件的门限 G4 / G6 / G9 ⇒ 见 §5。（**G7 / G8 / G10 已退役**：3D 板材线第 109 轮取消，`docs/ACCEPTANCE.md` 记 RETIRED。）
 
 ## 5. 需要你用真硬件验收的清单
 

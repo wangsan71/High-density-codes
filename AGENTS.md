@@ -112,6 +112,7 @@
 | 源码注释变成 U+FFFD | `Get-Content`+`Set-Content` 走 CP1252 往返 | **改文件只用 edit/write 工具**；出事跑 `node tools/fix-mojibake.mjs --write` |
 | `SUITE_EXIT=0` 但按 `^# ` 过滤一条也不中 | Node 24 在非 TTY 下用 **spec 报告器**（汇总行以 `ℹ` 开头） | **判"跑没跑"只看 exit code**；要数字就按内容过滤或加 `--test-reporter=tap` |
 | 包装脚本结尾的 `exit 0` 让失败看起来成功 | 掩盖内层失败 | 看脚本打印的 `*_EXIT=` 与 job 的 exit code |
+| `& .\tools\usability.ps1 > log 2>&1` 得到 **0 字节**日志（exit code 仍对） | 脚本以 `exit` 结尾 ⇒ 宿主在重定向目标 flush 前就退了。**只对「结尾 exit 的 .ps1」成立**：`node … > log`（如 `verify`）重定向正常 | 要**逐条腿**的输出就别用 PS 重定向：让 harness 的 job 缓冲区接（不加 `>`），或用 `[IO.File]::ReadAllText` 直读；`> file` 只用来判 exit code（第 246 轮实测） |
 | `git` 刷一屏 CRLF warning | 缺 `.gitattributes` | 已有 `* text=auto eol=lf`；**不要**加 `core.autocrlf=true` |
 | npm 装不了东西 | 缓存目录不可写 | 本来就不允许依赖（§2.1） |
 

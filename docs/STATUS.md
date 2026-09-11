@@ -127,6 +127,32 @@
 
 ## 已知风险 / 待办
 
+### 第 246 轮（**用户验收第 2 步（密度梯）的那条命令以前没有任何覆盖 —— 本轮把它接成冒烟腿；随手量到的一组真数字也进了台账**）
+
+**① 为什么是这一件**：`acceptance-kit` 生成的 `density-a4-300` / `a5-600` / `a6-1200` 三张阶梯页，用户扫回来之后要跑 `node tools/density-ladder.mjs --read 扫描目录 --spec …/density-ladder.json`（README 第 2 步 2c）—— **这条命令是全套验收里唯一「由用户产出真数字」的一步**，可是 `tests/` 里**一条都没有**、冒烟腿也没有 ⇒ 它要是坏了，用户得**打完三张纸、扫完**才会发现。本轮先把整条流水线手工跑通，再钉成永久腿。
+
+**② 手工实测（A4@300dpi 档，模拟扫描 seed=7 preset=scan300 modifier=nocrop）**：
+
+| 档 | pitch mm | px/模块 | 模块数 | BER | 净 B/页 | bit/mm² | usable |
+|---|---|---|---|---|---|---|---|
+| 0 | 0.8467 | 10 | 18,778 | 0.000000 | 1,878 | 1.4 | **yes** |
+| 1 | 0.5080 | 6 | 52,716 | 0.000000 | 5,272 | 3.9 | **yes** |
+| 2 | 0.4233 | 5 | 75,735 | 0.000000 | 7,574 | 5.6 | **yes** |
+| 3 | 0.3387 | **4** | 118,818 | **0.001262** | 11,882 | 8.7 | **marginal** |
+
+⇒ 这张表**独立复现了第 117 轮量到的悬崖**：10 / 6 / 5 px 每模块 BER 全 0，**4 px 才开始出错**（1.26e-3），`marginal` 的判词也与「usable 要 BER 远低于 ~1e-3」一致 ⇒ **工具读得对、数字可信**。
+
+**③ 新冒烟腿（§4l，全流程照 README 的写法）**：`--make` → 把 PNG 当扫描件喂 `sim/channel.py` → `--read`；判据**两个方向都要对**：粗档必须 `yes`、细档 BER 必须 **> 0**（否则一条「四行全零」的运行也能骗过这条腿）；再加**阳性对照**：对**空目录** `--read` 必须**非零退出**。实测 `make True scan True read True rows True coarse True fine True refuses-empty True` ⇒ **PASS**；`-Skip3D -SkipMultipart -SkipCrypto -SkipServe` 下 **232 s**（比加腿前多约 15 s）。
+
+**④ 顺手改正两处过期文案**：`tools/usability.ps1` 结尾的「不证明」清单仍写着 `G4/G6/G9/G10`（G10 第 110 轮已退役）、`docs/USE.md` §4 同一句也一样 ⇒ 都改成 `G4/G6/G9` 并注明 G7/G8/G10 已退役；§4 补上第 ⑥ 条腿的说明。
+
+**⑤ 门限**（按 D88 的教训：**本轮门限全部单独跑、输出先落盘**）：`verify --gate all` ⇒ **`VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**、`retired: G7 G8 G10 …`、`not evaluated by this run: G4 G6 G9`（**D88 未再现**；日志留在 `.tmp/verify-246.log`）· `build-web` exit 0（72 文件）· `check-dist` **13 pass / 0 fail** + `G9 CHECK: all 13 assertions pass` · 单测 **433/433** · `usability.ps1` **全腿 PASS、exit 0**（**367 s**，含新腿 §4l —— 作业里实测到这一行：`PASS density ladder: --make -> simulated scan -> --read reports numbers, coarse band usable, fine band on the cliff (make True scan True read True rows True coarse True fine True refuses-empty True)`）· `check-docs-tables` clean（**672 rows in 117 tables**）。
+
+**⑤bis 本轮踩到并已记进 `AGENTS.md` §5.3 的一个新陷阱**：第一次跑冒烟时写成 `& .\tools\usability.ps1 > .tmp/usability-246.log 2>&1`，**日志文件是 0 字节**（exit code 仍正确）—— 因为该脚本**以 `exit` 结尾**，宿主在重定向目标 flush 之前就退出了。**只对「结尾 exit 的 .ps1」成立**：同一轮里 `node cli/pskit.mjs verify … > .tmp/verify-246.log` 的日志是正常的。⇒ 要**逐条腿**的输出就别用 PS 重定向（用 job 缓冲区，或 `[IO.File]::ReadAllText` 直读）；`> file` 只用来判 exit code。本轮因此**重跑了一次冒烟**（不重定向）才拿到上面那行证据。**本次未评估: G4 G6 G9**（**G7 G8 G10 已退役**）。
+
+**⑥ 目标状态（按用户第 134/135 目标轮指示）**：本轮**再次尝试**把持久目标标记为 `blocked`，运行时**再次拒绝**（`complete and blocked require a direct human turn or the current goal round`）⇒ **目标仍 active**，理由与清单已写进本轮块与 `docs/DONE.md` C 节，等用户在**直接对话轮**里说一句即可落定。
+
+**⑦ 下一块砖**：进程内可自证且不是过度设计的活已经见底；建议等用户把五项硬件验收结果发回来（G4 手机 / G9 三浏览器 / D8 打印尺寸 / 三条密度梯纸 / `P-MX-300-4/5/6` 真平板扫描），我按门限表如实记账。
 ### 第 245 轮（**把 D87 这条「偶发」用 200 次隔离重跑钉住：不是输入相关；目标按用户指示标记 `blocked` 交回用户验收**）
 
 **① 做了什么**：D87（`encrypt/decrypt round-trip on random data of assorted lengths` 偶发失败一次、重跑即过）是台账里**唯一一条未定性的测试偶发**，而它落在**加密往返**上 —— 按本项目的硬约束（误接受为 0），这种偶发**必须查清**，不能靠重跑掩盖。本轮做了一次**限时的复现尝试**：`tests/unit/chacha20.test.mjs` **隔离重跑 200 次**（该用例每次都用 `node:crypto` 的 `randomBytes` 生成 key/nonce/数据，11 种长度：0/1/2/63/64/65/128/129/999/4096/10001）。

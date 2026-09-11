@@ -20,6 +20,7 @@
 | 单色兜底 / 3MF / soak | 见 B 节门限 | `--gate G7`、`--gate G8`、`node tools/soak.mjs --minutes 30` |
 | Web 产物（PWA + 两个单文件页） | 产物级全绿 | `node tools/build-web.mjs`（72 文件）· `node tools/check-dist.mjs`（**13 pass / 0 fail**） |
 | 文档体检（用户手册每条命令真跑） | 完成 | 第 241 轮：USE.md 里所有本机可跑的命令逐条执行，**全部与文档一致**（含两种具名拒绝） |
+| **密度梯（用户验收第 2 步）** | 完成，**有进程内等价腿** | 第 246 轮：`--make` → 模拟扫描 → `--read` 全流程进冒烟（§4l）；实测 A4@300 四档 BER 0/0/0/**1.26e-3**、净 1,878/5,272/7,574/11,882 B 每页 ⇒ **独立复现第 117 轮的 4 px 悬崖** |
 | 死代码复查 | 完成（这条线到终点） | 第 242 轮：**19 → 3**；剩下 3 个是「文档即接口」⇒ 除非改验收文档否则不会再降 |
 
 **当前基线数字（第 242 轮末，全部本机实测）**：单测 **433/433** · `verify --gate all` ⇒ `ALL GATES PASS -- 6/7 evaluated, 1 skipped`（列出未评估 G4 G6 G9 G10）· `check-dist` 13/0 · `build-web` bundle **389.6 KiB**（单文件页 415.1 / 385.0 KiB）· `usability.ps1` 全腿 PASS（约 330–360 s）。
