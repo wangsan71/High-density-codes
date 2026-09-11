@@ -137,13 +137,19 @@ export const PROFILES = {
     channels: [{ name: 'shape', levels: 2 }], intra: { k: 127, nsym: 127 },
     parityPct: 33, note: 'universal floor: readable on any nozzle 0.2-0.8 and any phone',
     /**
-     * The one profile PLAN §2/§3 calls readable by any phone. Measured in round 80 through the
-     * phone40 channel preset (a whole 200mm plate inside a 1600x1200 phone frame): 8/8 transfers
-     * byte-exact, while the paper profile P-M1-300 -- whose cells land at ~2.7 px in the same
-     * framing -- was 0/8. Surfaced in the sender's profile picker so the choice is made with the
-     * measurement in view, and pinned by tests/unit/profile-picker-warning.test.mjs.
+     * NO profile carries `phoneSafe` any more (round 247). It used to sit here, on the strength of a round-80
+     * measurement: a whole 200 mm plate inside a 1600x1200 phone frame came back 8/8 byte-exact while the
+     * paper profile P-M1-300 was 0/8 in the same framing. The product owner then cancelled the 3D plate line
+     * (round 109) and every PL-* profile is retired, so the marker pointed at a profile the picker no longer
+     * offers: the label rendered nothing, and USE.md told the reader to choose 'the one marked 手机拍摄首选'.
+     *
+     * The marker is not moved to a paper profile, because moving it would overturn a measurement with an
+     * estimate. The estimate is worth writing down anyway: cells across the frame = (pixels of paper width
+     * in the photo / 210 mm) x 0.847 mm, so the round-80 2.7 px/cell came from a 1280x960 capture, while a
+     * current phone at full resolution puts the sheet across ~3000 px -> ~12 px/cell, clear of the 5-6 px
+     * cliff. Until the phone leg of G4 is actually run (the user's, and it is the one gate with no evidence),
+     * nothing here claims a profile is phone-friendly -- see docs/USE.md section 2.
      */
-    phoneSafe: true,
   },
   // RETIRED (round 109): the product owner cancelled the 3D plate line. Kept so already-printed
   // plates still decode and so the history stays readable; hidden from the CLI help and the web

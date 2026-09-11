@@ -50,25 +50,22 @@ test('every flagged profile carries the warning, and keeps its id and medium in 
 });
 
 
-test('exactly the phone-safe profile carries the phone hint, and no other label does (round 80)', () => {
+test('no profile is advertised as phone-friendly any more, and the picker renders no such hint (round 247)', () => {
+  // What changed: the marker used to sit on PL-G, measured 8/8 in a 1600x1200 phone frame in round 80. The
+  // 3D plate line was cancelled in round 109 and every PL-* profile is retired, so the marker pointed at a
+  // profile the picker no longer offers -- the hint rendered nothing and USE.md said to pick 'the one marked
+  // 手机拍摄首选'. It is NOT moved to a paper profile: that would overturn a measurement with an estimate.
   const phoneSafe = entries.filter(([, p]) => p.phoneSafe);
-  // Anti-vacuity: an empty set would make the rest pass without labelling anything.
-  assert.equal(phoneSafe.length, 1, 'expected exactly one phoneSafe profile (PL-G, PLAN §2/§3)');
-  assert.equal(phoneSafe[0][0], 'PL-G');
-  for (const [id, p] of phoneSafe) {
-    const label = profileOptionLabel(id, p);
-    assert.match(label, /手机拍摄首选/, `${id}: label lost the phone hint: ${label}`);
-    assert.ok(!/未达标/.test(label), `${id}: the phone-safe profile must not also carry the unqualified warning`);
-  }
-  // Negative control: every other profile stays without the hint, so the hint means something.
-  let checked = 0;
+  assert.equal(phoneSafe.length, 0, `whoever holds phoneSafe must be measured with a phone first: ${phoneSafe.map(([id]) => id).join(', ')}`);
+  // The mechanism itself stays, and must still be wired: a hint that is not rendered on demand would make
+  // the assertion above pass for the wrong reason.
+  const probe = profileOptionLabel('P-M1-300', { ...PROFILES['P-M1-300'], phoneSafe: true });
+  assert.match(probe, /手机拍摄首选/, 'profileOptionLabel dropped the phone hint entirely');
+  // And nothing renders it today -- including the paper profile the round-80 measurement failed on, which
+  // must not be advertised as phone-friendly on the strength of an estimate.
   for (const [id, p] of entries) {
-    if (p.phoneSafe) continue;
     assert.ok(!/手机拍摄首选/.test(profileOptionLabel(id, p)), `${id}: got the phone hint without being phoneSafe`);
-    checked++;
   }
-  assert.ok(checked >= 5, `only ${checked} profiles checked -- the negative control is vacuous`);
-  // The paper profile the round-80 measurement failed on must NOT be advertised as phone-friendly.
   assert.ok(!/手机拍摄首选/.test(profileOptionLabel('P-M1-300', PROFILES['P-M1-300'])));
 });
 test('qualified profiles are NOT warned (negative control)', () => {

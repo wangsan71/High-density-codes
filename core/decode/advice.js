@@ -22,7 +22,7 @@ const ADVICE = {
   },
   'no-square-candidates': {
     cause: 'no isolated square blob was found, so the corner markers are not resolvable -- usually defocus, extreme blur, or a print whose features are smaller than the camera can resolve',
-    do: 'move closer or use 2x optical zoom, hold still, and wipe the lens; if the plate is FDM, print the next coarser nozzle profile',
+    do: 'move closer or use 2x optical zoom, hold still, and wipe the lens; if the print itself is finer than the camera can resolve, reprint the pages with P-M1-300 (the coarsest paper profile) or scan at 300 dpi instead of photographing',
   },
   'no-marker-size-cluster': {
     cause: 'squares were found but not four of the same size -- the page is partly out of frame or strongly perspective-distorted, so markers differ in apparent size',
@@ -73,7 +73,7 @@ const ADVICE = {
   'echo-no-contrast': {
     cause:
       'the header echo strip had no usable contrast in this capture: its two levels sit only ~15% apart (a readable strip is 50%+). The strip is the finest feature on the page -- 1-bit cells half a data cell wide -- so it is the first thing a coarse or soft capture loses, well before the code area does.',
-    do: 'get closer or use 2x optical zoom, make sure the top margin is inside the frame and in focus, and if the page still will not read use a coarser profile (600 dpi or a plate) or scan at 300 dpi instead of photographing',
+    do: 'get closer or use 2x optical zoom, make sure the top margin is inside the frame and in focus, and if the page still will not read scan at 300 dpi instead of photographing (P-M1-300 is already the coarsest paper profile; the plate profiles are retired)',
   },
   'echo-short-header': {
     cause: 'not enough echo cells were readable to form a header (too few bits recovered)',
@@ -224,8 +224,8 @@ const ADVICE = {
  */
 const ZH = {
   'no-contrast': '照片没有墨/纸对比度（过曝、反光，或离得太远把格子拍糊了）：降曝光、关闪光、避开反光，再靠近一点重拍 —— 但**四个角标必须还在画面里**（拍近到角标出画就彻底定位不了）。重新取景没用。',
-  'echo-no-contrast': '页顶那条回显条（页上最细的特征）糊了：让**整页含四角**进画面、页顶边对上焦；还是不行就改用更粗的档（板材 PL-G）或换成扫描仪 300 dpi。',
-  'no-square-candidates': '一个方形角标都认不出来：多半是失焦/太糊，或者打印的特征比相机能分辨的更小。靠近、2× 变焦、擦镜头；板材档请换更粗的喷嘴档。',
+  'echo-no-contrast': '页顶那条回显条（页上最细的特征）糊了：让整页含四角进画面、页顶边对上焦；还是不行就换成扫描仪 300 dpi（P-M1-300 已是在册最粗的纸面档，板材线已退役）。',
+  'no-square-candidates': '一个方形角标都认不出来：多半是失焦/太糊，或者打印的特征比相机能分辨的更小。靠近、2× 变焦、擦镜头；纸面档里 P-M1-300 已是最粗的（板材线已退役）。',
   'no-marker-size-cluster': '找到了方块但不是四个同样大的：页面有一部分在画面外，或者透视太强。把整页（含四角）框进画面，相机尽量与纸面平行。',
   'no-hollow-corner': '四个角标都找到了，但没有一个是空心的（朝向标）：朝向标被磨花、过曝，或拍的是板材的反面。用正面重拍，别让空心角反光。',
   'no-rectangular-quad': '角标候选凑不出一个像样的矩形：可能有手指/页边遮挡。清掉遮挡、把纸放平再拍。',
