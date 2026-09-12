@@ -290,7 +290,9 @@ async function run() {
   // 文件名由字节导出：页头没有名字字段（frame.js:14-28 只有 magic..digest..crc16），
   // 默认名只能从字节算出来。这是单测钉死的，下面的 userText 只改扩展名/前缀。
   // 监听器在模块加载时挂一次（D73 修的就是「run() 内挂 → 每次多挂一个」），不在 run() 里。
-  currentNaming = { byteLength: asm.result.length, sha256Hex: digest };
+  // An image payload was just decoded into a PNG, so the default name should end in .png: a phone
+  // opens a file by its extension, and "….bin" for a picture is a file the user cannot open (D96).
+  currentNaming = { byteLength: asm.result.length, sha256Hex: digest, defaultExt: outType === 'image/png' ? 'png' : null };
   applyName();
 
   $('result-line').innerHTML = '';

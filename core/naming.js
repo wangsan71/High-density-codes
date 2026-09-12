@@ -99,6 +99,14 @@ export function sanitizeFileName(text) {
 export function downloadName(opts) {
   const o = opts || {};
   const fallback = digestName(o.byteLength, o.sha256Hex);
+  // The receiver may KNOW what the bytes are: the browser receiver decodes a .psk image payload into a
+  // PNG before offering it. A phone decides how to open a file from its extension, so an image handed
+  // over as ".bin" is a file the user cannot open -- measured in round 278, where the page said "将保存为
+  // pskt-815B-403fea4f59a6.bin" for a picture it had just turned into a 96x64 PNG one line earlier.
+  // defaultExt moves ONLY the fallback: anything the user typed still wins, and the value is validated
+  // here, so a hostile hint cannot smuggle a path separator into a download attribute.
+  const hint = String(o.defaultExt === undefined || o.defaultExt === null ? '' : o.defaultExt);
+  const fallbackExt = /^[A-Za-z0-9]{1,10}$/.test(hint) ? fallback.replace(/\.bin$/, `.${hint}`) : fallback;
   const cleaned = sanitizeFileName(o.userText);
   if (cleaned) return cleaned;
   // A bare extension is what a phone user types when they mean "make this openable": `.pdf`. Read it
@@ -106,5 +114,5 @@ export function downloadName(opts) {
   // invented -- the receiver still does not claim to know what the sender called the file.
   const ext = /^\.([A-Za-z0-9]{1,10})$/.exec(String(o.userText === undefined || o.userText === null ? '' : o.userText).trim());
   if (ext) return fallback.replace(/\.bin$/, `.${ext[1]}`);
-  return fallback;
+  return fallbackExt;
 }

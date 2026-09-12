@@ -72,3 +72,31 @@ test('naming: a bare extension means "the default name, but openable"', () => {
   // An extension that is not alphanumeric is not an extension; fall back instead of guessing.
   assert.equal(downloadName({ byteLength: 12, sha256Hex: 'deadbeefcafe', userText: '.p f' }), 'pskt-12B-deadbeefcafe.bin');
 });
+
+test('naming: a receiver that KNOWS the payload is an image may say so, and it moves only the fallback', () => {
+  // Round 278 (D96): the browser receiver decodes a .psk image payload into a PNG, and a phone decides how
+  // to open a file from its extension -- so the default name should be openable. Measured before the fix:
+  // "将保存为 pskt-815B-403fea4f59a6.bin" for a picture the same page had just turned into a 96x64 PNG.
+  assert.equal(
+    downloadName({ byteLength: 815, sha256Hex: '403fea4f59a69ea5', defaultExt: 'png' }),
+    'pskt-815B-403fea4f59a6.png',
+  );
+  // A name the user typed still wins, and so does a bare extension they typed.
+  assert.equal(
+    downloadName({ byteLength: 815, sha256Hex: '403fea4f59a69ea5', defaultExt: 'png', userText: 'report.pdf' }),
+    'report.pdf',
+  );
+  assert.equal(
+    downloadName({ byteLength: 815, sha256Hex: '403fea4f59a69ea5', defaultExt: 'png', userText: '.jpg' }),
+    'pskt-815B-403fea4f59a6.jpg',
+  );
+  // A hostile or malformed hint is REFUSED, not sanitised: it cannot smuggle a path or a hidden name into
+  // a download attribute, and it cannot change the default the pages have always produced.
+  for (const defaultExt of ['../x', 'a/b', '..', '.png', 'p ng', 'A'.repeat(11), '', null, undefined]) {
+    assert.equal(
+      downloadName({ byteLength: 815, sha256Hex: '403fea4f59a69ea5', defaultExt }),
+      'pskt-815B-403fea4f59a6.bin',
+      'defaultExt=' + JSON.stringify(defaultExt) + ' must not change the default',
+    );
+  }
+});
