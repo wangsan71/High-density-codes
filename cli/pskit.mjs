@@ -651,7 +651,17 @@ async function cmdSend(args) {
   if (modelReports.length) {
     console.log(`  next       slice ${join(outDir, 'page-000.3mf')} (or the .stl), print it, photograph it, then:`);
   } else {
-    console.log(`  next       print ${wantPdf ? join(outDir, 'pack.pdf') : join(outDir, 'page-000.png')} at 100%, scan the pages to PNG, then:`);
+    // Name the page file that actually exists. Until round 277 this said 'page-000.png' whatever was
+    // written, so 'send --format tiff' told the user to print a .png that was never produced (measured
+    // in round 276: the run wrote only page-000.tif). Ask the directory instead of guessing from the
+    // format flags: both png and tiff may be requested, and either is printable.
+    const firstPage = ['png', 'tif', 'tiff']
+      .map((ext) => join(outDir, `page-000.${ext}`))
+      .find((p) => existsSync(p));
+    console.log(
+      `  next       print ${wantPdf ? join(outDir, 'pack.pdf') : firstPage || join(outDir, 'page-000.png')}` +
+        ` at 100%, scan the pages to PNG or TIFF, then:`,
+    );
   }
   console.log(
     `             node cli/pskit.mjs receive <scan or photo dir> --photo --profile ${profileId}` +

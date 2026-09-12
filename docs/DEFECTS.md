@@ -3,6 +3,12 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 277 轮新增（D95 · CLOSED · 修第 276 轮顺手发现的那处）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~**D95**~~ | **`send` 的「下一步」提示按格式写错了文件名 ⇒ 叫用户去打印一个不存在的文件**：`--format tiff` 只产出 `page-000.tif`（第 276 轮实测：3 个 `.tif`、**没有** `.png` ✗），而第 654 行的提示仍写死 `print … page-000.png at 100%` ✗ —— 用户第一次用就会照着去找那个文件 ✗。**修法**：不再从格式旗标推，而是**直接问目录**（按 `png → tif → tiff` 找 `page-000.*` 里真实存在的那个 ✓，因为 png 与 tiff 可以同时产出），并把扫描建议改成「**PNG or TIFF**」（第 276 轮起两个容器在 CLI 与浏览器里都读得了 ✓）。**复验（正反对照）**：`--format tiff` ⇒ `print … page-000.tif at 100%` ✓；默认 ⇒ `print … page-000.png at 100%` ✓；`node --check cli/pskit.mjs` ✓；冒烟第 165 行那条 `$nextOk` 断言（查 `next` + `pskit.mjs receive` + `--profile`）仍 PASS ✓ | `node cli/pskit.mjs send <载荷> --profile P-M1-300 --format tiff --out .tmp/x` ⇒ 看 `next` 行是否指向 `.tif` ✓（改前指向不存在的 `.png` ✗） | **CLOSED** |
+
 ### 第 276 轮新增（D94 · CLOSED · 扩浏览器覆盖面时当场撞上、当场修掉并复验）
 
 | # | 缺陷 | 复现 | 状态 |
