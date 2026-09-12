@@ -33,7 +33,9 @@ const IDEAL_CROSSOVER_EW = 24;
 /** Inner radius of the reference annulus. */
 export const ANNULUS_INNER = 0.38;
 /** Annulus area as a fraction of the cell area: pi*(R^2 - r^2), cell = 1 unit^2. */
-export const ANNULUS_AREA = Math.PI * (ANNULUS_OUTER ** 2 - ANNULUS_INNER ** 2);
+// Module-local, not exported (round 252): its last external importer was core/decode/ideal.js, and that
+// import became an orphan when nominalBandFraction() was deleted in the sweep of round 242.
+const ANNULUS_AREA = Math.PI * (ANNULUS_OUTER ** 2 - ANNULUS_INNER ** 2);
 
 /**
  * Measurement regions, shared by the renderer's self-check and every decoder.

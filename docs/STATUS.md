@@ -127,6 +127,21 @@
 
 ## 已知风险 / 待办
 
+### 第 252 轮（**5 轮一次的死代码复查：3 → 5 → 3 —— 两个「新增」一个是我的回归**（把第 154 轮**故意删掉**的死函数又搬了回来），另一个是我第 242 轮清理的连带后果**）
+
+**① 扫描结果**：`core exports examined` **330**、`never mentioned outside their own file` **5**（上次第 242 轮是 3）⇒ 逐条查出处后处理，回到 **3**。
+
+**② 新面孔之一：`calibrateInkCut`（`core/decode/calibrate.js`）—— 这是我的回归，不是别人的**。台账原文（第 154 轮块）写着：**「删掉 `core/decode/calibrate.js` 的 `calibrateInkCut()`（48 行）… 全仓库只出现一次（就是它的定义），连测试都不用。删除后单测仍 413/413」** ⇒ 它**本来就是被判定为死代码而删掉的**。第 154 轮删得不干净：函数体删了，**文档注释的 `*/` 与签名一起被带走** ⇒ 文件从此语法错误（= D90）。**而我第 249 轮「从 `2cbee43^` 取回原文恢复」时，把整个函数又搬了回来** ✗ —— 那是**把死代码复活**，不是修 D90。**正确修法（本轮）**：完成第 154 轮没做完的删除 —— 连两段悬空注释一起清掉，文件照样解析。
+
+**③ 新面孔之二：`ANNULUS_AREA`（`core/render/glyphs.js`）—— 这是我第 242 轮清理的连带后果**。它唯一的跨文件使用者是 `core/decode/ideal.js` 的那条 `import`，而我第 242 轮把它当作「孤儿 import」删掉了 ⇒ 这个**导出**就没人用了（本文件内仍在用 **6 处**）。按第 237 轮的既定做法**去掉 `export`**（改成模块内 `const`）并在注释里写明原因。⇒ **孤儿 import 与孤儿导出是连着的两头**：删一头要顺手查另一头（第 242 轮的教训只写了前一半）。
+
+**④ 实测**：`node --check core/decode/calibrate.js` ⇒ **exit 0**；复扫 ⇒ **3**（`expectedRho` / `decodePages` / `DEFAULT_PROFILE`，全是「文档即接口」，**不再动**）；`node cli/pskit.mjs calibrate .tmp/usability/pages-scan` ⇒ **exit 0**，油墨比 **0.90x / 1.19x / 1.25x** 与第 249 轮**完全一致** ⇒ 删掉的那个函数确实没人用。
+
+**⑤ 教训（写下来免得再犯）**：**「恢复一个函数」和「修复一个文件」是两件事**。第 249 轮我要的是后者，做的却是前者 —— 而死代码复查这条线**存在的意义正是接住这种事**：我在第 249 轮引入，扫描器在第 252 轮（同一条 5 轮节奏内）把它报了出来。
+
+**⑥ 门限**：`build-web` exit 0 · `check-dist` **0 fail**（15 条断言）· 单测 **433/433** · `verify --gate all`（单独跑、日志 `.tmp/verify-252.log`）⇒ **`VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**、`not evaluated: G4 G6 G9` · `usability.ps1` **全腿 PASS、exit 0** · `pskit calibrate` **exit 0** · `check-docs-tables` clean（**682 rows in 120 tables**）。**本次未评估: G4 G6 G9**（**G7 G8 G10 已退役**）。
+
+**⑦ 下一块砖**：第 **253** 轮是 10 轮一次的 `docs/DONE.md` 更新（上次第 243 轮建立）。
 ### 第 251 轮（**真浏览器验证「离线可用」这条对外承诺：SW 缓存里的字节与磁盘逐字节相同**）
 
 **① 做了什么**：起服务 → 用真浏览器加载服务版接收页 → 等服务工作线程注册并预缓存 → **在页面里**用 `caches.match()` 取回若干条并算 `crypto.subtle` SHA-256，与磁盘同名文件对拍。
