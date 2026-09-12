@@ -3,6 +3,12 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 270 轮新增（D93 · OPEN · 同一份文件的 A/B 钉死的）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D93** | **`--profile auto` 的候选搜索不走照片角标那条路 ⇒ 手机照片上「显式指定档位」不是更快，而是「读得出 vs 读不出」的差别**。同一份文件（`.tmp/pc1one/page-000.png`，`phone-full` + `--modifier clean`，6200×4650，实测 11.2 px/格，无模糊/无 JPEG 损失/无噪声/零姿态）：**`--photo --profile auto` ⇒ `FAIL bootstrap/echo-no-contrast`（98,331 ms）** ✗；**`--photo --profile P-M1-300` ⇒ OK：`page 0 photo marker 34px cover 100% [1258ms]`、`received 1500 bytes`、`sha256 cc7605e7…` 与 manifest 一致** ✓ ⇒ **同一个解码器、同一份字节，只差档位指定方式，结果与耗时差 78 倍**。成因看代码是清楚的：显式档位时 `cli/pskit.mjs:731` 先 `planPage()` 拿到几何，随后走**按已知几何找角标**的照片路径（结果里 `path === 'photo'` ✓）；`--profile auto` 时 `geom = null`（同文件 716–732 行），改由 `core/decode/bootstrap.js` 的候选搜索逐条试几何，而那条搜索里**没有照片角标这一条路** ⇒ 只能靠回显条/页头仲裁 ⇒ 照片条件下判 `echo-no-contrast` ✗。**影响面（对用户是实的）**：手机接收端（浏览器）与 CLI 的自动档都会踩到这一条 ✗；**规避办法已实测有效**：在档位下拉框里显式选你打印的那一档（手册原来只把它写成「可少走十几秒」✗，低估了）。**边界（避免夸大）**：**带退化的**原预设照片即便显式档也仍失败（失败类别变为 `readout/echo-no-contrast`，几何已定位 ✓）⇒ 这一条修好也不会让「反光/模糊/JPEG 很重的照片」变得可读 ✗；修它只是让**条件尚可的照片**在自动档下也能读出来 ✓。**修法与代价**：把照片角标检测接进 `bootstrap.js` 的候选列表（或让 `--photo` 时先试角标路径再退回候选搜索）⇒ 动的是**所有门限都经过的解码引导逻辑** ✗，必须重跑 `verify --gate all` 与 G2 两侧语料 ✓ | `node cli/pskit.mjs receive .tmp/pc1one --photo --profile auto --out .tmp/A.bin`（⇒ FAIL、exit 2、98 s）对照 `node cli/pskit.mjs receive .tmp/pc1one --photo --profile P-M1-300 --out .tmp/B.bin`（⇒ OK、1500 B、1.26 s） | **OPEN** |
+
 ### 第 269 轮新增（D92 · OPEN · 用模拟器的手机预设逐层剥离出来的）
 
 | # | 缺陷 | 复现 | 状态 |
