@@ -349,7 +349,7 @@ const USAGE = [
   '  node tools/density-ladder.mjs --read <扫描目录> --spec .tmp/ladder/density-ladder.json',
   '     读回扫描件：逐条带给 BER / 净 B per page / bit per mm2 / 可用性。',
   '',
-  '  它印的是已知伪随机比特阵（不是完整传输），所以量的是**物理层误码率**：',
+  '  它印的是已知伪随机比特阵（不是完整传输），所以量的是「物理层误码率」：',
   '  BER 远低于 1e-3 才可能在加 20% 校验后仍可用。退出码 0 只表示"跑成了"，不是判决。',
 ].join('\n');
 

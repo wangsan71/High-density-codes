@@ -178,7 +178,7 @@ if (args.includes('--transfer')) {
     process.exitCode = 2;
   } else {
     const wrong = verdicts.filter((v) => v.verdict === 'ACCEPTED-WRONG').map((v) => v.bend);
-    console.log(wrong.length ? `传输级误接受出现在 bend=${wrong.join(',')}px ⇒ **属误接受家族，D21 立刻升为最高优先，且必须回 G5 重验** ✗✗` : '传输级：本探针内卷曲只造成拒绝，不造成误接受 ⇒ D21 的对齐梳属鲁棒性收益，不足以成为改动采样路径（G3/G5/G7 全压其上）的理由 ✓');
+    console.log(wrong.length ? `传输级误接受出现在 bend=${wrong.join(',')}px ⇒ 「属误接受家族，D21 立刻升为最高优先，且必须回 G5 重验」✗✗` : '传输级：本探针内卷曲只造成拒绝，不造成误接受 ⇒ D21 的对齐梳属鲁棒性收益，不足以成为改动采样路径（G3/G5/G7 全压其上）的理由 ✓');
     console.log('注意：这是单页卷曲的同一种形变同时作用于全部页的合成信道，不替代 G4 的真实照片档。');
   }
   process.exit(process.exitCode || 0);

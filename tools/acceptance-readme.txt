@@ -1,4 +1,4 @@
-PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发回来。
+PSKT 验收包 —— 照下面的顺序做，把每一步的「终端输出」发回来。
 
 这个包只装"要打印/拍摄的东西"和"照着敲的命令"。它不假装验过硬件：
 真打印机、真扫描仪、真手机那三步只有你能做（docs/USE.md §5）。
@@ -14,8 +14,8 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
 
 ────────────────────────────────────────────────────────────────────
 第 1 步 · 纸面（验 G2/G3：扫描后逐字节还原）
-  1a. 打印 paper\pack.pdf：选 100% / 实际大小，**关掉**"适应页面"（缩放会破坏几何）
-  1b. 用 300 dpi、彩色扫描，**关掉**自动裁剪/去边界，**存成 PNG 或 TIFF**，放 scans\
+  1a. 打印 paper\pack.pdf：选 100% / 实际大小，关掉"适应页面"（缩放会破坏几何）
+  1b. 用 300 dpi、彩色扫描，关掉自动裁剪/去边界，存成 PNG 或 TIFF，放 scans\
       （两个容器都直接解码：PNG 的黑白/灰度/彩色/调色板/16-bit 变体，以及 TIFF 的
        未压缩/LZW/Deflate/PackBits、二值/灰度/调色板/RGB/16-bit；多页 TIFF 会自动展开。
        只有 JPEG 要先转 PNG，或改用浏览器接收端——它自己解 JPEG）
@@ -28,8 +28,8 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
 
 第 1b 步 · 高密度模块纸面（验新的二进制模块表示）
   1b-a. 依次打印 module-6\pack.pdf、module-5\pack.pdf、module-4\pack.pdf：
-        选 100% / 实际大小，**关掉**"适应页面"
-  1b-b. 每份都用 300 dpi、彩色扫描，**关掉**自动裁剪/去边界，**存成 PNG 或 TIFF**
+        选 100% / 实际大小，关掉"适应页面"
+  1b-b. 每份都用 300 dpi、彩色扫描，关掉自动裁剪/去边界，存成 PNG 或 TIFF
   1b-c. 分别接收（把 4 换成实际模块尺寸）：
           node cli/pskit.mjs receive scans-module-6 --photo --profile P-MX-300-6 --out got-module-6.bin
           node cli/pskit.mjs receive scans-module-5 --photo --profile P-MX-300-5 --out got-module-5.bin
@@ -40,11 +40,11 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
   一条命令批量检查：
         node tools/check-module-scans.mjs --kit 这个验收包目录 --scans 放 scans-module-6/5/4 的父目录
 
-第 2 步 · 密度阶梯（验 PLAN v5 P0：这套打印机+扫描仪**到底能细到多少**）
+第 2 步 · 密度阶梯（验 PLAN v5 P0：这套打印机+扫描仪「到底能细到多少」）
   说明：3D 板材那一条线已被产品负责人取消（PLAN-V5 §3）⇒ 不再打码牌、不再打 MTF 板。
-        这一步量的是**纸**：同一张纸上并排印多种模块间距，扫回来直接给误码率。
+        这一步量的是「纸」：同一张纸上并排印多种模块间距，扫回来直接给误码率。
 
-  2a. 打三张（都在包里，**100% 缩放**，别选"适应页面"）：
+  2a. 打三张（都在包里，「100% 缩放」，别选"适应页面"）：
 {{LADDER_LINES}}
       小纸那两张（A5/A6）如果打印机只吃 A4，就把它打在 A4 纸上 —— PDF 页面尺寸是 A5/A6，
       实际码区就是那个尺寸，多出来的纸边无所谓。
@@ -57,7 +57,7 @@ PSKT 验收包 —— 照下面的顺序做，把每一步的**终端输出**发
         node tools/density-ladder.mjs --read scans-a4 --spec density-a4-300\density-ladder.json
         node tools/density-ladder.mjs --read scans-a5 --spec density-a5-600\density-ladder.json
         node tools/density-ladder.mjs --read scans-a6 --spec density-a6-1200\density-ladder.json
-      把三段输出**原样**发回来。它逐条带打印 BER / 净 B per page / bit per mm² / 可用性。
+      把三段输出「原样」发回来。它逐条带打印 BER / 净 B per page / bit per mm² / 可用性。
   ✗ 如果三张都报 "markers/..."：把扫描件原样发回来（分辨率或裁剪不对是最常见的原因）。
 
 
