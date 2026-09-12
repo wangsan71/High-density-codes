@@ -134,7 +134,20 @@ export async function bootstrapDecode(bitmap, opts = {}) {
       (!opts.nozzleHint || c.nozzle === opts.nozzleHint)
         ? 0
         : 1;
-    scored.sort((a, b) => hintRank(a.c) - hintRank(b.c) || a.s - b.s || a.i - b.i);
+    // Paper profiles keep their group ahead of the plates (DEFECTS D93, round 271). candidatePlans()
+    // already returns paper first -- they are the common case for a scanner, need no nozzle, and carry
+    // their own dpi -- but the size sort above used to override that grouping completely, and a phone
+    // photograph is exactly the input where that goes wrong: 6200x4650 is closest in size to a 600 dpi
+    // *plate* canvas, so the first 64 attempts (the whole maxAttempts budget) were spent on plate/600
+    // candidates and P-M1-300@300 was never tried at all. Measured on .tmp/pc1one/page-000.png
+    // (phone-full + --modifier clean, 11.2 px/cell): the search reported "P-M1-300@300 attempts: 0" and
+    // failed after 98 s, while the same bytes decode byte-exact in 1.26 s once the profile is named.
+    // Ordering can never change a verdict -- a candidate only wins by having the page's own header
+    // declare it, which is the cross-check further down -- so this only decides which candidates fit
+    // inside the budget. The size score still orders candidates *within* each group, which is what round
+    // 65 added it for (a flatbed scan of a paper page must not burn 600 dpi candidates first).
+    const paperRank = (c) => (PROFILES[c.profileId] && PROFILES[c.profileId].medium === 'paper' ? 0 : 1);
+    scored.sort((a, b) => hintRank(a.c) - hintRank(b.c) || paperRank(a.c) - paperRank(b.c) || a.s - b.s || a.i - b.i);
     plans = scored.map((x) => x.c);
   }
   const attempts = [];
