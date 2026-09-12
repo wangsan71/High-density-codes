@@ -244,6 +244,36 @@ PRESETS: dict = {
         nominal={"mtf_mm": 0.05, "defocus_mm": 0.08, "rot_deg": 10.0, "fill": 0.9,
                  "jpeg_q": 78},
     ),
+    # phone photo at full sensor resolution -- the condition docs/USE.md tells the user to aim for
+    # (~12 px per 0.847 mm cell), which no preset could model before round 268. Measured arithmetic, not
+    # a guess: "fill" is the page's fraction of the FRAME HEIGHT, so px/cell = frame_h * fill * 0.847 /
+    # 297mm. Raising a phone's sensor resolution alone therefore does NOT raise px/cell -- round 268
+    # measured 3200x2400 landing at ~5.0 px/cell and still on the documented cliff (page ~1253 px wide),
+    # because the framing widened with it. 6200x4650 at fill 0.9 puts the page at ~14.2 px/mm, i.e.
+    # ~11.2 px/cell (measured on the output, not assumed): the manual's condition. Tolerances are
+    # phone40's unchanged; only the sampling differs.
+    "phone-full": _p(
+        medium="paper", frame=(6200, 4650), focal_ratio=0.80, desk=(58, 56, 52),
+        ranges={
+            "mtf_mm": (0.03, 0.08), "defocus_mm": (0.02, 0.18),
+            "ew_mm": (-0.05, 0.15),
+            "paper_tone_drift": (0.0, 0.02), "paper_grain_amp": (0.0, 2.5),
+            "exposure_ev": (-1.5, 1.5), "vignette": (0.05, 0.25),
+            "glare_amp": (0.0, 0.25), "tone_mix": (0.4, 1.0),
+            "auto_level": (0.45, 0.90),       # phone AE exposes the whole scene
+            "white_ref_scale": (0.90, 1.02),
+            "shot_sigma": (2.0, 5.0), "read_sigma": (1.0, 3.0),
+            "rot_deg": (0.0, 20.0), "yaw_deg": (0.0, 12.0), "pitch_deg": (0.0, 10.0),
+            "shift_x": (-0.04, 0.04), "shift_y": (-0.04, 0.04),
+            "fill": (0.72, 1.0), "crop_frac": (0.0, 0.03),
+            "curl_deg": (0.0, 12.0),          # paper is never flat
+            "motion_px": (0.0, 4.0), "jpeg_q": (60, 88),
+            "bleed_p": (0.0, 0.15), "bleed": (0.0, 0.15),
+            "wb_strength": (0.5, 1.0),
+        },
+        nominal={"mtf_mm": 0.05, "defocus_mm": 0.08, "rot_deg": 10.0, "fill": 0.9,
+                 "jpeg_q": 78},
+    ),
     # phone stress case (G4)
     "phone-hard": _p(
         medium="paper", frame=(1280, 960), focal_ratio=0.80, desk=(52, 50, 47),
