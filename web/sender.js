@@ -521,7 +521,7 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     say(`编好 ${r.pages.length} 页 · ${r.ms} ms · 色板 ${r.paletteId}${r.mono ? '（单色出图）' : ''} · ${r.dpi} dpi${r.plate ? ` · 盘 ${r.plateMm}mm` : ` · 纸 ${r.sheetMm ? r.sheetMm.w + '×' + r.sheetMm.h + 'mm' : ''}`}`);
     say(`页几何字段：${r.geomKeys}`);
     say(`明文 SHA-256 ${r.sourceSha256} —— 接收端只靠这 64 个字符判定成败，不需要文件名，也不需要联网。`);
-    say(r.plate ? `实体码牌 ${r.models.length} 个已过对拍 + STL 自检 + 3MF 自检（三角形 ${r.models.map((m) => m.triangles).join('/')}）。` : '纸面剖面：无实体盘，本页不提供 STL/3MF（3D 板材线第 109 轮已取消；CLI 仍可用显式 --profile PL-G 生成）。与 CLI 相同的拒绝规则）。', 'hint');
+    say(r.plate ? `实体码牌 ${r.models.length} 个已过对拍 + STL 自检 + 3MF 自检（三角形 ${r.models.map((m) => m.triangles).join('/')}）。` : '纸面剖面：无实体盘，本页不提供 STL/3MF（3D 板材线第 109 轮已取消；CLI 仍可用显式 --profile PL-G 生成，拒绝规则与 CLI 相同）。', 'hint');
     for (const id of ['doprint', 'dlpng', 'dlpdf']) $(id).disabled = false;
     $('dl3mf').disabled = $('dlstl').disabled = !r.plate;
     $('dl3mf').hidden = $('dlstl').hidden = !r.plate;
