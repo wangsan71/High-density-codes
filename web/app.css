@@ -196,6 +196,13 @@ body::before {
 .ok    { color: var(--ok); }
 .warn  { color: var(--warn); }
 .err   { color: var(--err); }
+/* The `hidden` attribute only carries the user-agent's `display: none`, which ANY class rule that sets
+   display beats -- so `el.hidden = true` silently did nothing on `label.field` (display: flex) and `.btn`
+   (display: inline-flex). Round 254 measured it the honest way, by rendered size rather than by reading the
+   attribute back: the sender page's nozzle field, its plate-size field and both 3D buttons were on screen
+   the whole time, for paper profiles that can never use them. This one rule makes the attribute mean what
+   the code already assumed it meant, everywhere in both pages. */
+[hidden] { display: none !important; }
 .hide  { display: none !important; }
 
 /* ---------- 卡片 ---------- */

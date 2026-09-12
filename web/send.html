@@ -11,7 +11,7 @@
 
 <header class="appbar">
   <h1><span class="mark" aria-hidden="true"></span> PSKT 发送端</h1>
-  <p class="lede">选文件 → 出可打印页 / <code>pack.pdf</code> / <code>.3mf</code>·<code>.stl</code> 实体码牌。全程在本机浏览器内完成，不上传、不出网、不含任何第三方资源。</p>
+  <p class="lede">选文件 → 出可打印页：每页 PNG 与按真实尺寸摆好的 <code>pack.pdf</code>。全程在本机浏览器内完成，不上传、不出网、不含任何第三方资源。</p>
   <nav class="tabs">
     <a href="./index.html" id="nav-receive">← 接收端（扫描/解码）</a>
   </nav>
@@ -70,7 +70,7 @@
         纸张（由剖面决定）
         <span class="tag mono" id="ssheetinfo">编好后显示在下方日志</span>
       </label>
-      <label class="field">
+      <label class="field" id="splatebox">
         打印幅面 mm
         <input id="splate" type="number" inputmode="numeric" placeholder="剖面默认">
         <span class="hint">板材档：自定义方板边长。纸面档不生效。</span>

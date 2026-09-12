@@ -263,7 +263,7 @@ export async function buildArtifacts(bytes, opts = {}) {
   try {
     layout = pageLayout(t.geom, dpi, { plateMm, sheetMm: plate ? undefined : t.geom.sheetMm });
   } catch (e) {
-    return { ok: false, stage: 'layout', error: e.message, hint: 'dpi 太低或幅面太小：每格至少要有可画的挤出宽度。提高 dpi 或改用粗喷嘴剖面。' };
+    return { ok: false, stage: 'layout', error: e.message, hint: 'dpi 太低或幅面太小：每格至少要有可画的宽度。提高 dpi，或改用更粗的档（纸面档里 P-M1-300 最粗）。' };
   }
 
   const pages = [];
@@ -411,8 +411,14 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
   sel.value = 'P-M1-300';
   const syncEnabled = () => {
     const plate = isPlate(sel.value);
+    // The 3D plate line was cancelled in round 109 and every PL-* profile is retired, so nothing here can
+    // ever produce a plate: the nozzle field, the plate-size field and the two 3D buttons are hidden rather
+    // than left on screen as furniture that can only stay disabled (round 254). The elements stay in the
+    // page because this file reads their values; hiding them is what keeps the read on a valid element.
     $('s3d').hidden = !plate;
+    $('splatebox').hidden = !plate;
     $('sheetbox').hidden = plate;
+    $('dl3mf').hidden = $('dlstl').hidden = !plate;
     $('dl3mf').disabled = $('dlstl').disabled = !plate || !state;
     if (!state) for (const id of ['doprint', 'dlpng', 'dlpdf']) $(id).disabled = true;
     $('opts').setAttribute('data-state', state ? 'ok' : 'idle');
@@ -515,9 +521,10 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     say(`编好 ${r.pages.length} 页 · ${r.ms} ms · 色板 ${r.paletteId}${r.mono ? '（单色出图）' : ''} · ${r.dpi} dpi${r.plate ? ` · 盘 ${r.plateMm}mm` : ` · 纸 ${r.sheetMm ? r.sheetMm.w + '×' + r.sheetMm.h + 'mm' : ''}`}`);
     say(`页几何字段：${r.geomKeys}`);
     say(`明文 SHA-256 ${r.sourceSha256} —— 接收端只靠这 64 个字符判定成败，不需要文件名，也不需要联网。`);
-    say(r.plate ? `实体码牌 ${r.models.length} 个已过对拍 + STL 自检 + 3MF 自检（三角形 ${r.models.map((m) => m.triangles).join('/')}）。` : '纸面剖面：无实体盘，STL/3MF 按钮保持禁用（与 CLI 相同的拒绝规则）。', 'hint');
+    say(r.plate ? `实体码牌 ${r.models.length} 个已过对拍 + STL 自检 + 3MF 自检（三角形 ${r.models.map((m) => m.triangles).join('/')}）。` : '纸面剖面：无实体盘，本页不提供 STL/3MF（3D 板材线第 109 轮已取消；CLI 仍可用显式 --profile PL-G 生成）。与 CLI 相同的拒绝规则）。', 'hint');
     for (const id of ['doprint', 'dlpng', 'dlpdf']) $(id).disabled = false;
     $('dl3mf').disabled = $('dlstl').disabled = !r.plate;
+    $('dl3mf').hidden = $('dlstl').hidden = !r.plate;
     $('opts').setAttribute('data-state', 'ok');
     setPill('send-pill', '已编码', 'ok');
     setPill('preview-pill', `${r.pages.length} 页`, 'ok');

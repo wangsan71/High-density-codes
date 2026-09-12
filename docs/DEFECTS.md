@@ -3,6 +3,11 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 254 轮新增（D91 · CLOSED · 真浏览器量渲染尺寸查出）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D91** | **`hidden` 属性在「有 class 设定 display」的元素上完全无效 ⇒ 网页上两个长期可见的错误**：① **接收页的结果区 `section.card.result#out` 从一开始就显示着**（标记里本来写着 `hidden`，作者意图是解码成功后才出现）；② **发送页的「喷嘴」`label.field#s3d`、「打印幅面」`#splate` 与两个 3D 按钮 `#dl3mf`/`#dlstl`（3D 线第 109 轮已取消、永远只能禁用）一直显示在屏幕上**。根因：`hidden` 只带来 UA 的 `display: none`，**任何** class 里的 `display`（`label.field{display:flex}`、`.btn{display:inline-flex}`）都盖过它；项目里本来有 `.hide{display:none!important}` 的约定，但 JS 用的是**属性** ⇒ 静默失效 | 修前在发送页量 `getBoundingClientRect()`：`s3d`/`splate`/`dl3mf`/`dlstl` **全部有非零尺寸**（而 `.hidden` 读回是 `true`）；修后在**真浏览器**量同一个量：`s3d:false · splatebox:false · dl3mf:false · dlstl:false`，而 `dlpng:true · dlpdf:true · doprint:true`（阳性对照：没把该显示的也藏掉） | **CLOSED**（修法：`web/app.css` 加一条 `[hidden] { display: none !important; }`；同时把发送页的 3D 家具按退役现实隐藏、lede 不再承诺 `.3mf/.stl`、「改用粗喷嘴剖面」的提示改成纸面档措辞）。**复验**：接收页解码前 `#out`/`#outname` **隐藏**、点「开始还原」后**出现**且打出 `已逐字节还原：204,800 字节 · SHA-256 32ec480521da27d2… · 3 页被接受`（真浏览器，第 254 轮） |
 ### 第 249 轮新增（D90 · CLOSED · 新检查第一次运行就抓到）
 
 | # | 缺陷 | 复现 | 状态 |
