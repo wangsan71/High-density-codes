@@ -127,6 +127,20 @@
 
 ## 已知风险 / 待办
 
+### 第 267 轮（**5 轮一次的死代码复查：口径收紧后抓到一个藏了 25+ 轮的真死函数 `glyphMask` 并删除；导出侧新增 `--scope all`（非 core 的导出此前从未被任何一次复查看过）与两个工具的阳性对照**）
+
+**① 导出侧实测**：`node tools/find-dead-exports.mjs` ⇒ core examined **330**、`never` **0**、`tests only` **113**；`--scope all` ⇒ 非 core examined **391**、`never` **4**（逐个查证后全部在自己文件内被调用 ⇒ 只是导出多余，不是死代码）、`tests/` 侧的 2 个按你的指示**不动** ✓。
+
+**② 本轮真正抓到的东西：`core/render/glyphs.js: glyphMask` 是死代码，已删**。它头上的注释写着「raster 渲染器与 mesh 渲染器都用它」，但**两者实际用的都是 `glyphMaskForLevel`** ✗ —— 全仓库（含它自己文件、测试、文档）对 `glyphMask` **一个调用点都没有** ✓（按词边界核过）。**为什么 25+ 轮都没抓到**：旧口径的提及计数用的是**没有边界的** `RegExp(name)` ⇒ 每出现一次 `glyphMaskForLevel` 就被算成 `glyphMask` 的一次提及 ⇒ 死函数看起来一直有人用 ✗。⇒ 删除该函数（连同那条已经不成立的注释）✓，`node --check` 通过 ✓。
+
+**③ 口径说明（免得历史数字被误读）**：那三个「文档即接口」的名字（`expectedRho` / `decodePages` / `DEFAULT_PROFILE`）**本轮从 `never` 桶挪到了 `tests only` 桶** —— 原因是**本轮新建的单测文件点名了它们**（在 core 之外，它们的唯一提及者就是这个测试文件）⇒ 与历史「3」的差别**不是代码变了** ✓。它们「不是死代码」的依据也从「文档即接口」升级成了一条**语义棘轮**：本文件之外无人提及的名字，其本文件必须真的用它 ✓。
+
+**④ 两个新角度 + 阳性对照**：`--scope all`（`tools/` `cli/` `web/` 的导出此前任何一次复查都没看过 ✗）+ `--selftest` ⇒ **`SELFTEST GREEN -- 3 of 3`**（死的要抓、活的要闭嘴、scope 切换与 test 桶都要对）；新增 `tests/unit/dead-exports.test.mjs` **4 条**断言进单测，其中一条就是②那条语义棘轮 ✓。逐个人工查证过的 4 个非 core 候选：`sidecarBytes` / `sampleSet`（`tools/dump-sample-raster.mjs`）、`looksLikeImageFile`（`tools/mtf-matrix.mjs`）、`isPlate`（`web/sender.js`）—— **都在自己文件里被调用** ⇒ 保留（运行时零成本；AGENTS §6.7 也要求这类纯函数保持可测）✓。
+
+**⑤ 门限（本轮动了 `core/`，按 §3 跑满）**：单测 **442/442**（438 + 本轮 4）· `verify --gate all` ⇒ **`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**，门限自己打印 **`not evaluated by this run: G4 G6 G9`**（**G7 G8 G10 已退役**）· `build-web` exit 0（单文件页 **419.2 → 418.7 KiB**，删掉死函数的可见效果 ✓）· `check-dist` **顶层 13 项 + `G9 CHECK` 15 条，0 fail** · `usability.ps1` **全腿 PASS、exit 0** · `check-docs-tables` clean（741 行 / 132 表）✓。
+
+**⑥ 下一块砖**：第 **272** 轮死代码复查（每 5 轮）、第 **273** 轮 `docs/DONE.md`（每 10 轮）；其余是用户硬件验收与那次 `git push`。
+
 ### 第 266 轮（**去补 G9 的「第二个引擎（Edge）」⇒ 结论是**本沙箱根本起不来**；把这个原因量清写下来，免得下一轮再白试一次**）
 
 **① 为什么挑它**：G9 长期挂着「差第二个引擎」；插件不暴露引擎设置 ⇒ 我打算**绕开插件**：用 Node 自带的 `WebSocket` 自己驱动 Edge 的 CDP。二进制已定位到 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` ✓。

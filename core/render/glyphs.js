@@ -123,20 +123,6 @@ export function levelFromRho(rho, thresholds) {
   return thresholds.levels - 1;
 }
 
-/**
- * Is the point (dx, dy) inside the printed part of a glyph of this rho?
- * Used by both the raster renderer and the mesh renderer, so a plate and its
- * paper preview can never disagree about what a glyph *is*.
- */
-export function glyphMask(dx, dy, rho) {
-  const r2 = dx * dx + dy * dy;
-  if (r2 <= ANNULUS_INNER * ANNULUS_INNER) {
-    const rd = dotRadiusForRho(rho);
-    return rd > 0 && r2 <= rd * rd;
-  }
-  return r2 <= ANNULUS_OUTER * ANNULUS_OUTER;
-}
-
 /** Fraction of the cell area that gets printed for a given rho (ink budget). */
 export function printedAreaFraction(rho) {
   return ANNULUS_AREA + Math.PI * dotRadiusForRho(rho) ** 2;
