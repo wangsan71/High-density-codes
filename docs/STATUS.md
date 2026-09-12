@@ -125,6 +125,32 @@
 
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
+## 已知风险 / 待办
+
+### 第 258 轮（**验一个「两个轮次分别做出来、从没一起测过」的组合：`--profile auto` × 加密传输**；顺带把下载命名在真浏览器里量了四种输入）
+
+**① 为什么挑这个组合**：用户手机拍照回来的真实形态是「**照片目录 + 没有 manifest + 可能是加密的**」。第 239 轮做了 `--profile auto`（无 manifest 时让页自己说几何）、加密是更早就有的能力，冒烟里也各有一条腿 —— 但**两者从没一起跑过** ✗。
+
+**② 手工实测（CLI）**：把 `.tmp/usability/enc-scan` 的三张页图拷到一个**没有 `manifest.json`** 的目录里，跑 `receive … --photo --profile auto --passphrase <口令>`：
+
+| 步骤 | 实测 |
+|---|---|
+| 几何 | 每页 `auto geometry P-M1-300 @300 dpi after 10 candidate(s)` ✓（三个候选都读到第 10 个才命中，与既有实测一致） |
+| 载荷 | `received 6000 bytes` ⇒ **与加密夹具的 sha256 完全相同**（`4491cd04246c48c8…`）✓ |
+| 退出码 | **0** ✓ |
+| **反面：不给口令** | **`receive: NEEDS PASSPHRASE -- all 1 data page(s) arrived, but this transfer is encrypted and no key was given`** + `this is not a missing-page problem` + `nothing was written`，**exit 2、不写文件** ✓ |
+
+**③ 把它钉成永久腿（§4j-bis）**：组合是用户真会走的形态，所以加进冒烟 —— 无 manifest 目录 + `--profile auto` + 口令 ⇒ 必须 exit 0、日志里有 `auto geometry`、还原字节 sha256 等于加密夹具；`-SkipCrypto` 时明确 SKIP。实测 **PASS** ✓（`-Skip3D -SkipMultipart -SkipServe` 下 325 s）。
+
+**④ 顺带在真浏览器里量了「下载命名」（手册写明「名字可以自己填」）**，四种输入全部合理：`report.pdf` ⇒ 保留；**`../../evil.png` ⇒ 回退成摘要名**（路径穿越不会变成路径）✓；`a<b>c:d.png` ⇒ `abcd.png`（非法字符剥掉）✓；`中文名字.bin` ⇒ 保留 ✓。命名策略本身**早有单测**（`tests/unit/naming.test.mjs`），本轮补的是**接线**（输入框→提示行的实测）。
+
+**⑤ 门限**：`build-web` exit 0 · `check-dist` **0 fail**（15 条断言）· 单测 **433/433** · `usability.ps1` **全腿 PASS、exit 0**（**436 s**，含新腿 §4j-bis）· `check-docs-tables` clean（**712 rows in 126 tables**）。**本次未评估: G4 G6 G9**（**G7 G8 G10 已退役**）。
+
+**⑥ 这一轮的性质**：**只有验证，没有改产品代码**（改的是冒烟本身：加了一条腿）。§4j-bis 之前，「auto × 加密」这个组合在仓库里**既没有测试也没有腿** —— 而现在它是每轮都会跑的一条腿。
+
+**⑦ 记台账时又抓到自己一个错位**：第 257 轮那块被插到了 `## 已知风险 / 待办` **上面**（前几轮用的是「锚点里带上题头」的写法，只有那一轮用了纯切片、把块放在了题头之前）✗。本轮发现后**把它挪回题头下面**，并插入第 258 轮 ⇒ 现在顺序是 258 → 257 → 256（最新在前）✓。**正确写法**（已补进 `AGENTS.md` §5.4）：把块接在**题头行之后**，`slice(0, i + hdr.length) + block + slice(i + hdr.length)`。
+
+**⑦ 下一块砖**：第 **263** 轮 `docs/DONE.md` 更新（每 10 轮）；其余是用户的硬件验收。
 ### 第 257 轮（**5 轮一次的死代码复查：导出侧仍是 3；补了一个新角度 —— 模块级「非导出孤儿」，查出并清掉 2 个**）
 
 **① 导出侧**：`node tools/find-dead-exports.mjs` ⇒ `core exports examined` **330**、`never mentioned` **3**（`expectedRho` / `decodePages` / `DEFAULT_PROFILE`，全是「文档即接口」）⇒ **与第 252 轮一致，没有新增** ✓（第 254–256 轮改的都是网页与文案，没留死导出）。
@@ -147,8 +173,6 @@
 **⑤bis 本轮我还踩了一个记台账的坑（已写进 `AGENTS.md` §5.4）**：插块时用 `String.replace(anchor, block)`，而**块里正好有一个代码跨度 `` `$` ``** —— 替换串里「美元+反引号」是特殊记号（= 匹配点之前的全部内容）⇒ **文件被自我复制**：STATUS.md 的 125 行导航内容被塞进了我的轮次表格里 ✗。`node tools/check-docs-tables.mjs` **当场报红并点名行号** ✓（这就是那条检查存在的意义）；`git checkout HEAD -- docs/STATUS.md` 还原后**改用切片插入**（`s.slice(0,i) + block + s.slice(i)`）⇒ 表格 clean、文件头只出现一次 ✓。
 
 **⑥ 下一块砖**：第 **263** 轮 `docs/DONE.md` 更新（每 10 轮）；其余是用户的硬件验收。
-
-## 已知风险 / 待办
 
 ### 第 256 轮（**真浏览器把「单文件版」两个产物也验了：单文件接收页逐字节还原、单文件发送页编码 —— 两套 bundle 互证**）
 

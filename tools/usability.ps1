@@ -585,6 +585,32 @@ if (-not $autoOk) { $script:fails++ }
 Write-Host ("{0}  --profile auto reads the geometry off the pages and the bytes come back identical  (exit {1}, {2})" -f $(if ($autoOk) { ' PASS' } else { ' FAIL' }), $autoCode, $(if ($autoGeom) { $autoGeom } else { 'no geometry line' }))
 if (-not $autoOk) { Get-Content $autoLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
 
+# 4j-bis. The combination a phone actually produces: photographs of an ENCRYPTED transfer, no manifest
+#     anywhere -- so the geometry has to come from the pages AND the key has to come from the user. Each half
+#     was covered (4j for the first, 4c for the second) and nothing covered them together; round 258 measured
+#     the combination by hand first, then pinned it here.
+if ($SkipCrypto) {
+  Write-Host ' SKIP  --profile auto on an encrypted folder (-SkipCrypto)'
+} else {
+  $autoEnc = Join-Path $tmp 'auto-enc'
+  $autoEncOut = Join-Path $tmp 'auto-enc.bin'
+  if (Test-Path $autoEnc) { Remove-Item -Recurse -Force $autoEnc }
+  if (Test-Path $autoEncOut) { Remove-Item -Force $autoEncOut }
+  New-Item -ItemType Directory -Force -Path $autoEnc | Out-Null
+  Copy-Item (Join-Path $encScan 'page-*.png') $autoEnc -Force
+  $aeLog = Join-Path $tmp 'step4jbis-auto-enc.log'
+  & node cli/pskit.mjs receive $autoEnc --photo --profile auto --passphrase $encPw --out $autoEncOut *> $aeLog
+  $aeCode = $LASTEXITCODE
+  $aeText = Get-Content $aeLog -Raw
+  $aeOk = ($aeCode -eq 0) -and (Test-Path $autoEncOut) -and ($aeText -match 'auto geometry')
+  if ($aeOk) {
+    $aeOk = ((Get-FileHash -Algorithm SHA256 -Path $autoEncOut).Hash.ToLower() -eq (Get-FileHash -Algorithm SHA256 -Path $encPayload).Hash.ToLower())
+  }
+  if (-not $aeOk) { $script:fails++ }
+  Write-Host ("{0}  --profile auto on an encrypted folder: geometry from the pages + key from the flag, byte-identical  (exit {1})" -f $(if ($aeOk) { ' PASS' } else { ' FAIL' }), $aeCode)
+  if (-not $aeOk) { Get-Content $aeLog -Tail 4 | ForEach-Object { Write-Host ('          ' + ([string]$_).Trim()) } }
+}
+
 # 4k. The image path -- the flow this project was asked for first: a picture goes in, printed pages come out,
 #     they come back through the same channel, and the picture is viewable again. The smoke covered plain
 #     files, split/join and crypto, but never `--image-mode lossy` + unpsk, so the headline path had no
