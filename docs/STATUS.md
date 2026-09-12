@@ -127,6 +127,34 @@
 
 ## 已知风险 / 待办
 
+### 第 282 轮（**5 轮一次的死代码复查：三角度依旧全清、两个探针各自 3/3 自证；顺带把手册里那条 Windows 退路（手机 JPEG → `jpeg-to-png.ps1` → CLI 接收）照原文跑通**）**
+
+**① 复查（三条腿 + 两个自证）**：
+
+| 角度 | 实测 | 与第 277 轮比 |
+|---|---|---|
+| 导出侧 · core | examined **329**、`never` **0** | 一致 ✓ |
+| 导出侧 · 全部非测试文件 | examined **391**、`never` **4** | 同四个（都已查证在自己文件内被调用 ✓）|
+| 模块级 · 产品 / 测试 | **0** / 1（`tiff-read.test.mjs` 的 `SIZES`，按指示不动）| 一致 ✓ |
+| 孤儿工具文件 | **0 of 42** | 一致 ✓ |
+| 两个工具的 `--selftest` | **各 3/3 GREEN** ✓ | —— |
+
+⇒ **无需删除任何东西** ✓；而且**第 278/280/281 轮新加的代码都没留下死面** ✓（`core/naming.js` 的 `defaultExt`、`web/app.js` 的 TIFF 派发与多页展开、`check-module-scans` 的双命名 ✓）—— 这三处正是本轮复查最该看的地方 ✓。
+
+**② 照 D95/D97 的教训，再验一条用户在 Windows 上真会跑的退路**（手册写着「JPEG 先用 `tools\jpeg-to-png.ps1` 转 PNG」✓，它是 G4 在没有 https 站点时的推荐路线 ✓，但**没在 HEAD 上真跑过** ✗）：
+
+| 步骤 | 实测 |
+|---|---|
+| 造手机式文件 | 用 PIL 把 clean 手机量级照片（6200×4650）存成 **JPEG q=88 ⇒ 5,068,435 B** ✓（比 PNG 更接近真机 ✓）|
+| `& .\tools\jpeg-to-png.ps1 -Source … -Out …` | `converted 1 JPEG file(s)` ✓ ⇒ `IMG_0001.png` **18,086,014 B** ✓（System.Drawing 写出的 PNG ⇒ **另一个编码器**，变量更多 ✓）|
+| `node cli/pskit.mjs receive … --photo --profile P-M1-300 --out …` | `IMG_0001.png: page 0 photo marker 34px cover 100% [1212ms]` ⇒ **`received 1500 bytes`**、sha256 **`cc7605e78942548a557cb1dd20fbd926a078c29cab60dddf890574ddff5082d0`** ✓（与期望值一致 ✓）|
+
+⇒ **「手机拍照 JPEG → 转 PNG → CLI 接收」这条退路逐字可用** ✓✓（也就是说：即使手机那条路因为客观条件读不出，你手上还有这条**已被证明**的路 ✓）。
+
+**③ 门限**：单测 **443/443** · `check-dist` 顶层 13 + `G9 CHECK` 15，0 fail · `check-docs-tables` clean · `core/`、`web/` **一行未改** ⇒ `verify`/G2/冒烟与第 278 轮同源 ✓。
+
+**④ 下一块砖**：第 **283** 轮 `docs/DONE.md`（每 10 轮）；其余是用户硬件验收与那次 `git push`。
+
 ### 第 281 轮（**验验收包 README 剩下的那一步（第 2 步·密度梯）；并当场抓到第二个「照文档做却失败」的缺陷（D97）**）**
 
 **① 第 2 步（密度梯）用验收包自己的梯页验**：把 `density-a4-300/density-ladder.png` 过信道（`scan300 --modifier nocrop` ✓）再拿**它自己的** `density-ladder.json` 当规格 `--read` ⇒ 四档 **BER 全 0.000000**、全部 `usable: yes`，净容量 **1,878 / 5,272 / 7,574 / 11,882 B/page** ✓ —— 与第 246 轮的进程内值**一字不差** ✓；README 第 2 步的命令形状（`--read <scans> --spec <…>/density-ladder.json` ✓、每档对应扫描 dpi 300/600/1200 ✓）与工具现状**完全一致** ✓。
