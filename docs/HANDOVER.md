@@ -137,7 +137,8 @@ G6 ② 需要产品负责人定判据。
   `tools/usability.ps1` 的腿或手工命令证明。
 - **`web/`** —— `index.html`（接收页，含最下面「手机连拍」节）、`app.js`（桌面接收，JPEG 走浏览器原生解码）、`capture.js`（连拍取舍，
   **纯收集器 + DOM 半边**，Node 可加载）、`send.html` + `sender.js`（发送页）、`selftest*.js`、`sw.js`。
-- **`tools/`** —— `build-web.mjs`、`check-dist.mjs`（13 项，含气隙/外部 URL 断言与 id 契约）、
+- **`tools/`** —— `build-web.mjs`、`check-dist.mjs`（顶层 13 项 + `G9 CHECK` 15 条，含气隙/外部 URL 断言与 id 契约）、
+  `find-dead-exports.mjs` / `find-dead-locals.mjs`（每 5 轮一次的死代码复查：导出侧 / 模块级 + 孤儿工具文件；`--selftest` 是阳性对照）、
   `check-serve.mjs` / `check-lan.mjs`、`smoke-sender.mjs` / `smoke-capture.mjs`、`soak.mjs`（= `verify --gate G6`）、
   `usability.ps1`（**一条命令的端到端冒烟**，含 4g 扫描仪 PNG 变体腿与 4h TIFF 变体腿）、
   `acceptance-kit.ps1` + `acceptance-readme.txt`（用户硬件验收包，**含 P-MX-300-4/5/6 纸面腿**）、
@@ -196,7 +197,7 @@ node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan300-*'
 | G6 性能 + soak | 🟡 | ① 编码 ✅ ≤5 s；② 解码 **300 dpi ✅ 1373 ms**、**600 dpi ✗ 地板 6192 ms**（判据 ≤2 s/页 ⇒ §8a）；③ soak ✅ 30 min 与 60 min 双过（误接受 0、RSS +3.16% ≤10%），但"无泄漏"**不主张** |
 | G7 单色兜底 100% | ✅ | — |
 | G8 3MF/STL 独立解析 | 🟡 | 进程内等价全绿（STL + 3MF XSD 子集校验器 + 与 vendored 权威 XSD 自动对拍）；**差切片软件真人打开一次** |
-| G9 Web 扫描端 | 🟡 | 产物级全绿（13 项 + `G9 CHECK` 13 断言、零第三方加载点、CSP、SW 清单哈希对上磁盘、bundle 盲解磁盘页摘要相符）；**差真浏览器点一次**。**D43 的 https 半边第 90 轮已闭**（站点见 §14） |
+| G9 Web 扫描端 | 🟡 | 产物级全绿（顶层 13 项 + `G9 CHECK` **15** 断言、零第三方加载点、CSP、SW 清单哈希对上磁盘、bundle 盲解磁盘页摘要相符）；**差真浏览器点一次**。**D43 的 https 半边第 90 轮已闭**（站点见 §14） |
 | G10 喷嘴 × 参数矩阵 | 🟡 | 产物齐：MTF 板（含 3MF/STL 与四角标记）+ 数据板网格角标（D68 闭）+ 验收包；**第 92 轮起有矩阵读数器**（`tools/mtf-matrix.mjs`：四张照片 → 逐张"建议喷嘴 + 判决"，`--selftest` 四条正例 + 两条对照）。**仍差真打印机印一次**（判决不变） |
 
 **总账（不主张完成）**：✅ 5（G0 G1 G3 G5 G7）· 🟡 5（G2 G6 G8 G9 G10）· ⬜ 1（G4）

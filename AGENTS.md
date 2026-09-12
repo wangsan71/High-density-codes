@@ -61,7 +61,7 @@
 | ☐ | 命令 | 期望 |
 |---|---|---|
 | ☐ | `node tools/build-web.mjs` | exit 0（改了 `web/` 或 `core/` 才必须跑） |
-| ☐ | `node tools/check-dist.mjs` | `13 pass / 0 fail` + `G9 CHECK` 全过 |
+| ☐ | `node tools/check-dist.mjs` | `13 pass / 0 fail` + `G9 CHECK: all 15 assertions pass`（两个数字不是一回事：13 是顶层 record 数，15 是 G9 块内的断言数） |
 | ☐ | `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` | exit 0（**条数以 runner 自己打印的汇总为准**） |
 | ☐ | `node cli/pskit.mjs verify --gate all` | `ALL GATES PASS` + 它会列出**本次未评估**的门限（引用时不许省略这半句） |
 | ☐ | `& .\tools\usability.ps1` | 全腿 PASS、exit 0（端到端冒烟，含加密/分片/格式腿） |
@@ -147,13 +147,15 @@
 ```powershell
 # 构建与产物
 node tools/build-web.mjs                 # 重建 web/dist（不进 git，CI 也会重建）
-node tools/check-dist.mjs                # 13 项产物断言（气隙 / CSP / SW 清单 / id 契约）
+node tools/check-dist.mjs                # 顶层 13 项 + G9 CHECK 15 条（气隙 / CSP / SW 清单 / id 契约）
 # 自证
 node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 单测（沙箱内必须这样写）
 node cli/pskit.mjs verify --gate all     # 进程内门限；会打印本次未评估哪些
 & .\tools\usability.ps1                  # 端到端冒烟（一条命令走完 文件→页→模拟扫→还原）
 node tools/check-docs-tables.mjs         # 台账表格自检（提交前必跑）
 node tools/mtf-matrix.mjs --selftest     # G10 矩阵读数器自证（四喷嘴 + 两条对照）
+node tools/find-dead-exports.mjs         # 死代码复查·导出侧（候选清单，不是判决）
+node tools/find-dead-locals.mjs          # 死代码复查·模块级 + 孤儿工具文件（`--selftest` 是阳性对照）
 node tools/check-module-scans.mjs --kit 验收包目录 --scans 扫描父目录   # P-MX-300-6/5/4 一键核对
 # 真实使用
 node cli/pskit.mjs send FILE --profile P-M1-300 --format png,pdf --out DIR
