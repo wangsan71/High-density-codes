@@ -3,6 +3,12 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 269 轮新增（D92 · OPEN · 用模拟器的手机预设逐层剥离出来的）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| **D92** | **模拟器手机预设的照片在手册推荐条件下仍然完全无法定位**：`phone40`（1600×1200，≈5 px/格）与新增的 `phone-full`（6200×4650，实测 **11.2 px/格** = `docs/USE.md` 推荐条件）的照片，`receive --photo --profile auto` 下**每一页都失败**（`bootstrap/no-geometry-matched` / `no-contrast` / `echo-no-contrast`），**具名拒绝、一个字节都不写、exit 2** ✓（失败是安全的）。**已逐层排除**：分辨率（13.19 px/mm，比可用的 300 dpi 平板 11.81 px/mm 更细）、模糊（`--modifier clean` ⇒ blur=0）、噪声、JPEG 损失、姿态（零旋转/零俯仰/零卷曲/零位移）、光度学（眩光、曝光、暗角、白平衡、底色、渗墨全中性或关闭）、以及**背景**（用 `.tmp/white-bg2.mjs` 只把纸**外围**刷白后仍失败 —— 第一版把纸上墨点也刷白了，那是无效夹具，已重做）。⇒ **剩下的差异只在模拟器的有限焦距相机投影（`focal_ratio`）路径，或解码器在此类几何下的真实弱点** ⇒ **性质未定，因此在区分清楚之前不修**（AGENTS §6.4 不许拿推断当事实、§2.6 不许为好看改判据）。**影响面**：真机结论不受影响（模拟器不是真机，G4 仍只能由用户答）；手册不许再用 px/格 单独承诺（第 268 轮已划线更正 ✓）；平板 300 dpi 那条路不受影响（200/200 ✓）。**下一步若有人接手**：先读 `sim/channel.py` 的 `_place()` 与投影、再看 `core/decode/bootstrap.js` 的候选几何生成，判断是「模型不像手机」还是「解码器不够稳」 | `python sim/channel.py --in <页目录> --out .tmp/d92 --seed 5 --preset phone-full` 然后 `node cli/pskit.mjs receive .tmp/d92 --photo --profile auto --out .tmp/d92.bin`（⇒ `INCOMPLETE`、exit 2）；对照：`--modifier clean`、`--off illumination,substrate,wb,bleed`、以及只刷外围白的夹具，**三种都同样失败** | **OPEN** |
+
 ### 第 254 轮新增（D91 · CLOSED · 真浏览器量渲染尺寸查出）
 
 | # | 缺陷 | 复现 | 状态 |
