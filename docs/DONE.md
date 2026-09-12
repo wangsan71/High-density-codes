@@ -17,13 +17,16 @@
 | 手机/无 manifest 接收：`receive --profile auto` | 完成 | 第 239 轮：无 `manifest.json` 的 3 页目录 → 10 个候选后认出 `P-M1-300@300`、逐字节还原；冒烟 §4j |
 | 瓦片页（P4）：写 / 读 / 平移容错 / 剪切 40–80 px / **照片入口** | 完成（工具级） | 第 240 轮：A5 4×6、纸占画面宽 62%、转 2.5° 带梯形 ⇒ **24/24 瓦片、0 孔洞、逐字节一致**（模块 5.45 px 与 9.09 px 两档）；`node tools/make-tile-page.mjs --read photo.png --photo --sheet A5 --out payload.bin` |
 | CLI 具名拒绝 | 完成 | 第 238 轮：`send <目录>` 不再抛 `EISDIR`；失败批量汇总成一行 + 主导类 `do`；冒烟 §4i |
-| 单色兜底 / 3MF / soak | 见 B 节门限 | `--gate G7`、`--gate G8`、`node tools/soak.mjs --minutes 30` |
-| Web 产物（PWA + 两个单文件页） | 产物级全绿 | `node tools/build-web.mjs`（72 文件）· `node tools/check-dist.mjs`（**13 pass / 0 fail**） |
+| 单色兜底 / soak | 见 B 节门限 | `--gate G7`（**已退役**，仍可按需跑）、`node tools/soak.mjs --minutes 30` |
+| Web 产物（PWA + 两个单文件页） | 产物级全绿 | `node tools/build-web.mjs`（72 文件）· `node tools/check-dist.mjs`（**15 条断言 0 fail**） |
+| **真浏览器端到端**（第 249–251 轮，`HeadlessChrome/152`） | 完成（**服务版 http**） | 接收页：三张 300 dpi 页图 → **`已逐字节还原：204,800 字节 · SHA-256 32ec4805… · 3 页被接受`**，逐候选搜索**第 10 次**命中 `P-M1-300@300/INK2`（与 CLI `--profile auto` 的 10 个候选互相印证）· 发送页：3,000 B → `编好 3 页 · 1072 ms · PAPER1 · 300 dpi` + 明文摘要 + 纸面档正确禁用 3D/STL · `?selftest=1` **13/0 → GREEN** · SW 缓存 **71 条**，`pskt-bundle.js`/`index.html`/`capture.js` 缓存字节与磁盘**逐字节相同**（`sw.js` NOT CACHED = 阴性对照） |
+| **两条新产物断言**（第 249 轮） | 完成，**都先证明能红** | ① 服务版页面不得带自己 CSP 不允许的内联脚本（修前点名那个 95 字符 loader）② 每个产物 JS 必须能 `node --check` 通过（**第一次运行就抓出两个真缺陷**：D89、D90） |
+| `pskit calibrate` 读数路径 | 复活（第 249 轮） | **D90**：该文件自第 154 轮起语法就是坏的（删死代码时连函数签名一起删），7 轮无人发现 ⇒ 修后 `calibrate` **exit 0**、逐页 ECC + 油墨比 0.90x/1.19x/1.25x |
 | 文档体检（用户手册每条命令真跑） | 完成 | 第 241 轮：USE.md 里所有本机可跑的命令逐条执行，**全部与文档一致**（含两种具名拒绝） |
 | **密度梯（用户验收第 2 步）** | 完成，**有进程内等价腿** | 第 246 轮：`--make` → 模拟扫描 → `--read` 全流程进冒烟（§4l）；实测 A4@300 四档 BER 0/0/0/**1.26e-3**、净 1,878/5,272/7,574/11,882 B 每页 ⇒ **独立复现第 117 轮的 4 px 悬崖** |
 | 死代码复查 | 完成（这条线到终点） | 第 242 轮：**19 → 3**；剩下 3 个是「文档即接口」⇒ 除非改验收文档否则不会再降 |
 
-**当前基线数字（第 242 轮末，全部本机实测）**：单测 **433/433** · `verify --gate all` ⇒ `ALL GATES PASS -- 6/7 evaluated, 1 skipped`（列出未评估 G4 G6 G9 G10）· `check-dist` 13/0 · `build-web` bundle **389.6 KiB**（单文件页 415.1 / 385.0 KiB）· `usability.ps1` 全腿 PASS（约 330–360 s）。
+**当前基线数字（第 253 轮更新，全部本机实测）**：单测 **433/433** · `verify --gate all` ⇒ `ALL GATES PASS -- 4/5 evaluated, 1 skipped`（列出未评估 G4 G6 G9；另有 `retired: G7 G8 G10`）· `check-dist` **15 条断言 0 fail**（61 个产物 JS 全部可解析）· `build-web` bundle **389.6 KiB** · `usability` 全腿 PASS（约 360–370 s）· 死代码复查 **3**（终点）。（上一版基线写于第 242 轮末，此处按实测更新；`verify` 的 6/7 改成 4/5 是因为第 244 轮把退役的 G7/G8 从 `all` 里摘掉了 —— **判据未放宽，是计数口径修正**。）原始行：`verify --gate all` ⇒ `ALL GATES PASS -- 6/7 evaluated, 1 skipped`（列出未评估 G4 G6 G9 G10）· `check-dist` 13/0 · `build-web` bundle **389.6 KiB**（单文件页 415.1 / 385.0 KiB）· `usability.ps1` 全腿 PASS（约 330–360 s）。
 
 ---
 
@@ -40,7 +43,7 @@
 | G6 性能 + soak | 🟡 | ① 编码 ✅ ≤5 s；② 解码 **300 dpi ✅ 1373 ms** / **600 dpi ✗ 地板 6192 ms**（判据 ≤2 s/页 ⇒ 待产品负责人决定）；③ soak ✅ 30 min 与 60 min 双过 |
 | ~~G7 单色兜底 100%~~ | **RETIRED（第 110 轮）** | ~~✅~~ —— 验的是 3D 板材（PL-D2/D3），产品的负责人第 109 轮**取消了 3D 线** ⇒ **不再作绿/红依据** |
 | ~~G8 3MF/STL 独立解析~~ | **RETIRED（第 110 轮）** | ~~🟡~~ —— 同上（3D 码牌产物）；历史判决原文保留不改写 |
-| G9 Web 扫描端 | 🟡 | 产物级全绿；**差真浏览器点一次** |
+| G9 Web 扫描端 | 🟡 | 产物级全绿 + **第 249–251 轮真浏览器（服务版 http）已跑通发送/接收两条链、`?selftest=1` 13/0、SW 缓存字节与磁盘一致**；**仍差**：可见浏览器（无真人点击）、Edge / Safari、`file://` 单文件版的完整解码、手机 |
 | ~~G10 喷嘴 × 参数矩阵~~ | **RETIRED（第 110 轮）** | ~~🟡~~ —— 同上（3D 打印机喷嘴矩阵） |
 
 **总账（不主张完成）**：**在册** ✅ 4（G0 G1 G3 G5）· 🟡 3（G2 G6 G9）· ⬜ 1（G4）· **已退役 3（G7 G8 G10）**；`verify --gate all` 打印的 `ALL GATES PASS` **每次都会列出本次未评估的门限**，**不得引用成「全部门限通过」**。（`docs/ACCEPTANCE.md` 第 110 轮把 G7/G8/G10 划为 **RETIRED**，依据 `docs/PLAN-V5.md` §3；相应板材档位在 `core/profiles.js` 里已 `retired: true` —— 仍可解码、不再在 CLI/网页提供。）
@@ -56,14 +59,14 @@
 
 | 项 | 怎么做 | 门限 |
 |---|---|---|
-| **G4 手机压力** | `node tools/serve.mjs` → 手机连同一 Wi-Fi 打开局域网地址 → 接收页最下面「手机连拍（自动挑帧）」；或拍成目录后 `node cli/pskit.mjs receive 目录 --photo --profile auto --out 回来的文件` | G4 |
-| **G9 浏览器** | Chrome / Edge / Safari 各开一次发送页与接收页（`file://` 单文件版 + http 版各一次；接收页加 `?selftest=1`） | G9 |
+| **G4 手机压力** | ⚠ **摄像头只在安全上下文可用**（`https://` 或 `localhost`）：`http://192.168.x.x:8123` **不是**，页面会**自己禁用**摄像头按钮（这**不是权限设置问题**，iOS/Android 都没有开关）。三条路：① 手机打开**已部署的 https 接收页** `https://wangsan71.github.io/High-density-codes/pskt-file.html` → 最下面「手机连拍（自动挑帧）」；② **没网**：系统相机拍照 → 接收页「选择文件」，或把照片传回电脑走 `node cli/pskit.mjs receive 目录 --photo --profile auto --out 回来的文件` | G4 |
+| **G9 浏览器** | Chrome / Edge / Safari 各开一次发送页与接收页（`file://` 单文件版 + http 版各一次；**自检只能用服务版**：单文件版按设计不带 loader）；本机若把浏览器插件指向 Edge 就能补第二个引擎 | G9（**服务版 http 那一格已由真浏览器验过**，见 A 节） |
 | **D8 打印缩放** | 打一页量实际尺寸与 PDF 标称是否一致；被缩放就改 100% 再量 | D8 |
-| **G10 喷嘴矩阵** | 同一块 MTF 板用 0.2/0.4/0.6/0.8 各打一次，四张照片按 `n02/n04/n06/n08.png` 命名 → `node tools/mtf-matrix.mjs --dir 目录 --provenance real-print` | G10 |
-| **G8 切片软件** | 用切片软件打开 `pskit send --format 3mf,stl` 写出的 `.3mf` | G8 |
+| ~~**G10 喷嘴矩阵**~~ | **RETIRED（第 110 轮：产品负责人取消 3D 板材线）⇒ 这条不用做**；工具仍在，想跑随时可以：`node tools/mtf-matrix.mjs --dir 目录 --provenance real-print` | — |
+| ~~**G8 切片软件**~~ | ~~用切片软件打开 `pskit send --format 3mf,stl` 写出的 `.3mf`~~ ⇒ **RETIRED（第 110 轮，3D 线已取消）⇒ 不用做** | — |
 | **三条密度梯纸** | 打 `acceptance-kit` 里的 `density-a4-300` / `density-a5-600` / `density-a6-1200` 并扫描回来 | 密度数字目前**只有仿真** |
 
-准备这些的命令：`& .\tools\acceptance-kit.ps1`（生成纸面页、三档模块页、每个喷嘴的码牌、MTF 板与 `README.txt`）。
+准备这些的命令：`& .\tools\acceptance-kit.ps1`（**第 244 轮起生成**：纸面页 `paper\pack.pdf`、三档模块页 `module-6/5/4`、三张密度阶梯页 `density-a4-300`/`a5-600`/`a6-1200`、以及 `README.txt`；**板材码牌与 MTF 板已随 3D 线退役移除**）。
 
 ---
 
@@ -84,13 +87,20 @@
 14. **`tools/soak.mjs` 的假绿已修**：以前允许 `--minutes 1` 用 72 秒打印 `PASS G6`；现在是常量下限 `MINUTES_REQUIRED = 30`（`--minutes` 只能加长、不能缩短判据）⇒ **所有 G6 数字都来自 ≥30 min 的跑**。
 15. **`grep 不到 ≠ 不提供`**（第 60 轮撤回的错判）：网页发送端的档位下拉框是**动态枚举** `PROFILES` 的，grep 静态列表查不到任何档 ⇒ 判「某档未提供」前必须看渲染逻辑。
 16. **同一个门限的两种数字要并列如实写**：G1 的「零误读」在 `docs/ACCEPTANCE.md` 记 **2,692,800 格**、在 `STATUS`/`HANDOVER` 记 **725,913 格**（7 档 × 3 次）—— 两处口径不同，**不要抹平成一个数**。
+17. **摄像头只在安全上下文里可用**（`https://` 或 `localhost`）：局域网 `http://192.168.x.x` 上**没有开关可开** —— 页面会自己禁用摄像头按钮并说明（第 248 轮实测；iOS 与 Android 都没有等价设置）。
+18. **服务版页面的内联 `<script>` 会被它自己的 CSP 拦掉**（`script-src 'self'` 不含 `'unsafe-inline'`）⇒ **加脚本要用 `src` 指到文件**（第 249 轮 D89：`?selftest=1` 的入口就是这么静默失效的）。
+19. **改完 JS 立刻 `node --check`**：第 249 轮我把分号打成逗号，`build-web`/单测/`check-dist` 全绿（那个文件不在任何单文件产物里）⇒ 现在由 `check-dist` 第 15 条「每个产物 JS 必须能解析」盯着。
+20. **「恢复一个函数」不等于「修复一个文件」**：第 249 轮我从历史取回原文去修 D90，实际是把第 154 轮**故意删掉的死代码复活**了；正确做法是**完成那次没做完的删除**（第 252 轮扫描器抓出来的）。
+21. **孤儿 import 与孤儿导出是同一根绳的两头**：删 import 之后要回头查那个导出还有没有人用（第 242 轮只记了前一半，第 252 轮补上 `ANNULUS_AREA`）。
+22. **`& .\tools\x.ps1 > log 2>&1` 会得到 0 字节日志**（脚本以 `exit` 结尾 ⇒ 宿主先退）；`node … > log` 正常。要逐条输出就别用 PS 重定向（第 246 轮）。
+23. **`phoneSafe` 标记已被移除**（第 247 轮）：它原本挂在已退役的 `PL-G` 上、在网页端什么都不显示；**没有真机测过之前不许给任何档加回这个标记**（`tests/unit/profile-picker-warning.test.mjs` 会红）。
 11. **`git push` 仍未做**：需要一次 `danger-full-access` 授权；没批下来就如实记「未推送」，不要绕路。
 
 ---
 
 ## E. 这一页怎么维护
 
-- **每 10 轮**更新一次（首次第 242 轮；下一次第 252 轮）。更新只做三件事：把**新做成**的能力补进 A 节、把**新否掉**的做法补进 D 节、把**新出现**的「只有用户能验证」补进 C 节。
+- **每 10 轮**更新一次（首次第 242 轮建立、**第 253 轮第一次按节奏更新**；下一次第 **263** 轮）。更新只做三件事：把**新做成**的能力补进 A 节、把**新否掉**的做法补进 D 节、把**新出现**的「只有用户能验证」补进 C 节，并把 A 节末的**基线数字**按本轮实测刷新。
 - 与 `docs/STATUS.md` / `docs/ACCEPTANCE.md` 冲突时，**以那两份为准**；本页不改写历史轮次块。
-- **死代码复查每 5 轮**一次（下一次第 247 轮），口径见 D 节第 9 条：只剩 3 个「文档即接口」，**不要再当待办**。
+- **死代码复查每 5 轮**一次（第 242 轮 19 → 3、第 247 轮维持、**第 252 轮 3 → 5 → 3**；下一次第 **257** 轮），口径见 D 节第 9 / 20 / 21 条。
 - 动工顺序建议：`AGENTS.md` §0 → **本页** → `docs/HANDOVER.md` → `docs/STATUS.md` 最上面几块。
