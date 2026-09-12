@@ -10,6 +10,7 @@
  * 把这一点变成「机器断言」而不是「我承诺」。
  */
 import { decodePNG } from './core/decode/png-read.js';
+import { decodeTIFF } from './core/decode/tiff-read.js';
 import { unpackImage } from './core/image/container.js';
 import { encodePNG } from './core/render/png.js';
 import { bootstrapDecode } from './core/decode/bootstrap.js';
@@ -169,24 +170,46 @@ async function run() {
   let accepted = 0;
   let lastHeader = null;
   let i = 0;
+  // One file can hold several pages: a scanner that writes one multi-page TIFF is the normal case, not a
+  // corner case (the CLI has handled it since D82). Until round 276 this page called decodePNG directly,
+  // so a .tif was refused with "decodePNG: not a PNG" while the very next line of its own error message
+  // claimed the kernel read TIFF -- support it did not have. The container is dispatched by magic now, and
+  // EVERY page of a multi-page file is fed: reading only the first would be the silent data loss this
+  // project refuses.
+  const bitmaps = [];
   for (const f of files) {
     i++;
     setStatus(`读第 ${i}/${files.length} 张：${f.name}`);
-    let bmp;
     try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
       const jpegLike = /\.jpe?g$/i.test(f.name) || f.type === 'image/jpeg';
-      bmp = jpegLike ? await decodeBrowserRaster(f) : decodePNG(new Uint8Array(await f.arrayBuffer()));
+      if (jpegLike) {
+        bitmaps.push({ label: f.name, bmp: await decodeBrowserRaster(f) });
+        continue;
+      }
+      const isTiff =
+        bytes.length >= 4 &&
+        ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a) ||
+          (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00));
+      if (!isTiff) {
+        bitmaps.push({ label: f.name, bmp: decodePNG(bytes) });
+        continue;
+      }
+      const { pages } = decodeTIFF(bytes);
+      if (pages.length > 1) log(`  ${f.name}: 这一个文件里有 ${pages.length} 页，逐页收`, 'hint');
+      pages.forEach((bmp, k) => bitmaps.push({ label: pages.length > 1 ? `${f.name} [page ${k}]` : f.name, bmp }));
     } catch (e) {
-      log(`  ${f.name}: 不是能读的图片（${e.message}）—— PNG/TIFF 由内核直读，JPEG 由浏览器解码；TIFF 请先转 PNG`, 'bad');
-      continue;
+      log(`  ${f.name}: 不是能读的图片（${e.message}）—— PNG/TIFF 由内核直读，JPEG 由浏览器解码`, 'bad');
     }
+  }
+  for (const { label: name, bmp } of bitmaps) {
     const t0 = performance.now();
     const boot = await bootstrapDecode(bmp, {
       ...hints,
       onAttempt: (a) => log(`    试 ${a.profileId}@${a.dpi}/${a.paletteId}${a.nozzle ? '/' + a.nozzle : ''} -> ${a.stage}/${a.reason} [${a.ms}ms]`, 'hint'),
     });
     if (!boot.ok) {
-      log(`  ${f.name}: 认不出来（试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`, 'bad');
+      log(`  ${name}: 认不出来（试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`, 'bad');
       const a = adviseOr('no-geometry-matched', '这些图里没有本工具能认出的页码几何（可能被裁掉一角、分辨率过低、或来自另一套剖面）');
       log(`      成因：${a.cause}`);
       log(`      做法：${a.do}`);
@@ -194,7 +217,7 @@ async function run() {
     }
     const h = boot.header;
     lastHeader = h;
-    log(`  ${f.name}: ${boot.profileId}@${boot.dpi}dpi ${boot.paletteId} 第 ${h.pageIndex}/${h.totalPages - 1} 页（${h.kind ? '校验' : '数据'}）· 第 ${boot.attemptCount} 次命中 · ${Math.round(performance.now() - t0)}ms`);
+    log(`  ${name}: ${boot.profileId}@${boot.dpi}dpi ${boot.paletteId} 第 ${h.pageIndex}/${h.totalPages - 1} 页（${h.kind ? '校验' : '数据'}）· 第 ${boot.attemptCount} 次命中 · ${Math.round(performance.now() - t0)}ms`);
     const resc = await feedPageWithRecalibration(asm, boot.page, { geom: boot.geom });
     const fed = resc.fed;
     if (fed.duplicate) { log('      重复页（已去重）'); continue; }
