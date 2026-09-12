@@ -93,7 +93,7 @@
 |---|---|---|
 | `spawn EPERM` | 沙箱禁止**管道 stdio** 的子进程 | 测试用 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"`；门限一律进程内跑。**作用域仅限 node 进程内的管道 stdio**：宿主 shell 跑 `python`/`git`/`node` **是通的**（第 40 轮读窄过一次 ⇒ **D42**）。测试里真要 python：`spawnSync(..., { stdio: 'inherit' })`，并按 `status === 2`（缺 pillow）**明确 skip** |
 | `ERR_UNSUPPORTED_DIR_IMPORT` | `--test` 不吃目录参数 | 必须给 glob 字符串 |
-| `git push` 报 `couldn't create signal pipe, Win32 error 5` | MSYS 传输助手要建 signal pipe | 需要**一次** `danger-full-access` 授权；**授权提示可能超时** ⇒ 没批下来就如实记"未推送"（别改走别的路） |
+| `git push` 失败 | **两种症状、两种原因，先分辨**：① `couldn't create signal pipe, Win32 error 5` = MSYS 要建 signal pipe ⇒ 需要**一次** `danger-full-access` 授权（没批下来就如实记"未推送"）② **第 263 轮实测**：`failed to execute prompt script (exit code 66)` + `could not read Username for 'https://github.com'` = **缺凭据**（`credential.helper=manager` 非交互跑不了、无 `~/.git-credentials`）⇒ **只有用户能推**，升级沙箱没用、也不许投机升级 | 推之前先看是哪种 |
 | `Select-Object -First N` 之后 `$LASTEXITCODE` 变成 `-1` | PS 提前终止上游原生进程（看起来像崩了） | 要判 exit code 就别截断，或先 `*> $null` 再单独读 `$LASTEXITCODE` |
 
 ### 5.2 PowerShell 5.1

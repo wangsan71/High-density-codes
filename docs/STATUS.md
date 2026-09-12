@@ -127,6 +127,30 @@
 
 ## 已知风险 / 待办
 
+### 第 263 轮（**每 10 轮更新 `docs/DONE.md`（第二次按节奏）；并用浏览器插件核对「手机验收要用的那个站」—— 它落后 165 个提交，原因实测为缺 GitHub 凭据、不是沙箱**）
+
+**① `docs/DONE.md` 更新（只增不改写）**：A 节补 3 行（真浏览器的加密/命名/单文件版四格 · 偶发断言普查与 D87/D89/D90/D91 四条闭合 · 死代码复查改成三条腿的命令）· B 节 G2 行补第 262 轮复核、G9 行补第 254–256 轮的补充格 · 基线数字刷新到第 263 轮实测（单测 **438/438**、`check-dist` 顶层 13 + `G9 CHECK` 15、usability **390–436 s**、死代码三角度全清），并把第 253 轮那一版**划线保留** · D 节补 4 条（按构造偶发的断言 / `check-dist` 两个数字不是一回事 / `hidden` 被 class 的 `display` 压掉 / 门限别并发跑），并把第 9、10 条改到与现状一致（**D87 已闭、仍 OPEN 的是 D88**）· E 节节奏改成「本页下次第 **273** 轮、死代码下次第 **267** 轮」。
+
+**② 浏览器复核（本轮第二件事）：已部署站 vs 当前产物，逐文件 FNV-1a（对 `textContent`，与本地同一算法）**：
+
+| 文件 | 部署站 `wangsan71.github.io/High-density-codes/` | 本地（第 263 轮 `build-web`） | 差 |
+|---|---|---|---|
+| `app.css` | len 16,977 · fnv `b68f870f` | len 17,617 · fnv `f42f6d13` | −640 |
+| `app.js` | len 12,577 · fnv `5cec90eb` | len 15,351 · fnv `be1729c7` | −2,774 |
+| `pskt-bundle.js` | len 350,752 · fnv `7a914124` | len 396,086 · fnv `93970b41` | −45,334 |
+
+标记探针（部署站实测）：`[hidden] { display: none !important; }` **没有**（第 261 轮 D91 的修复不在站上）· `PROFILES[id].retired` **没有**（第 254 轮的退役档过滤不在站上）· 第 248 轮的「拍照存成 PNG」提示 **有** ⇒ **站点停在第 248–253 轮之间，而 HEAD 已是第 263 轮**。
+
+**③ 为什么会这样（实测，不是推断）**：`git status -sb` ⇒ **`ahead 165`**，`origin/master` 还停在 `bea7007`。按 AGENTS §5.1 试推 ⇒ **不是沙箱拒绝**（工具自己报 `sandbox denied=false`），而是 `error: failed to execute prompt script (exit code 66)` + `fatal: could not read Username for 'https://github.com'` —— 远端是 HTTPS、`credential.helper=manager`、本机**没有** `~/.git-credentials` ⇒ **需要用户的 GitHub 凭据，升级沙箱权限解决不了**（AGENTS 禁止无凭据的投机升级 ⇒ 本轮**没有**升级授权）。
+
+**④ 对验收的影响（已写进 DONE.md C 节）**：C 节让手机打开**已部署的 https 站**（因为摄像头只在安全上下文可用）⇒ 站点落后 = 手机测到旧代码 ✗。两条出路：① 你推一次（普通终端里 `git push origin master`，凭据助手会弹窗）；② 走**不需要站点**的那条路：手机用系统相机拍照 → 传到电脑 → `node cli/pskit.mjs receive 目录 --photo --profile auto`（第 237 轮的照片入口 + 第 239 轮的 `auto` 已各有证据）。
+
+**⑤ 门限**：单测 **438/438** · `check-dist` **顶层 13 项 + `G9 CHECK` 15 条，0 fail** · `check-docs-tables` clean（727 行 / 129 表）· `build-web` exit 0（重建 72 文件；单文件页 419.2 KiB）· `verify --gate all` 与 G2 **本轮未重跑**：`core/` 与 `web/` 一行未改（本轮只动文档），与第 262 轮同源 ✓。
+
+**⑥ 顺手修正 AGENTS 的一处旧判**：§5.1 原来把 `git push` 的失败写成「MSYS 建 signal pipe 失败 ⇒ 需要一次 `danger-full-access`」；第 263 轮实测是**凭据**问题 ⇒ 两种症状已并列写清（signal pipe 是当年的现象，凭据是本机现在的现象），并注明「只有用户能推、不许投机升级」。
+
+**⑦ 下一块砖**：第 **267** 轮死代码复查（每 5 轮）、第 **273** 轮 `docs/DONE.md`（每 10 轮）；其余是你那边的硬件验收与上面那次推送。
+
 ### 第 262 轮（**5 轮一次的死代码复查：三个角度全清（导出 3 / 模块级 0 / 孤儿工具 0）；把那个「只活在 `.tmp` 里」的模块级探针提升成常驻命令并补上阳性对照；另做 G2 300 dpi 全量复核 = 200/200**）
 
 **① 导出侧**（既有工具 `node tools/find-dead-exports.mjs`）：`core exports examined` **330**、`never mentioned` **3**（`expectedRho` / `decodePages` / `DEFAULT_PROFILE`，全是「文档即接口」）⇒ 与第 252/257 轮一致 ⇒ **第 258–261 轮没有留下死导出** ✓（那几轮动的是测试断言、`web/app.css`、以及 `core/decode/calibrate.js` 的删除）。
