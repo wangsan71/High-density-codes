@@ -330,7 +330,10 @@ if (!secure) {
         }, 'image/png');
       };
     } catch (e) {
-      log(`摄像头不可用：${e.name} ${e.message}`, 'bad');
+      // Name the error AND the way out, the same shape capture.js uses for the burst path: a denied or
+      // missing camera is a dead end only if the page lets it read as one. Round 259 measured both buttons
+      // in a browser and found this one stopped at the error name.
+      log(`摄像头不可用：${e.name} ${e.message}。改走「拍照存成 PNG → 文件选择」，解码不受影响。`, 'bad');
     }
   });
 }
