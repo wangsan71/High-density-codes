@@ -125,6 +125,29 @@
 
 1MB 载荷纸面页数：600dpi 单色 **34+7=41 页**；600dpi 四色 **30+7=37 页**。板材超 255 页会被拒（页间 RS 上限）。
 
+### 第 257 轮（**5 轮一次的死代码复查：导出侧仍是 3；补了一个新角度 —— 模块级「非导出孤儿」，查出并清掉 2 个**）
+
+**① 导出侧**：`node tools/find-dead-exports.mjs` ⇒ `core exports examined` **330**、`never mentioned` **3**（`expectedRho` / `decodePages` / `DEFAULT_PROFILE`，全是「文档即接口」）⇒ **与第 252 轮一致，没有新增** ✓（第 254–256 轮改的都是网页与文案，没留死导出）。
+
+**② 新的角度（本轮补的）**：既有扫描器**只看导出** ⇒ 第 252 轮那个「孤儿 import / 孤儿导出」教训只覆盖了一半。于是我写了个一次性探针（`.tmp/dead-locals.mjs`）：把所有 `.mjs/.js` 里**模块级、非导出**的 `function X(` / `const|let|var X =` 抓出来，再数它**在全仓库出现的总次数** —— 只出现 1 次（就是定义处）即孤儿。
+
+**③ 实测**：首轮报 **4** 个，逐个查清后清了 **2** 个：
+
+| 候选 | 查证 | 处置 |
+|---|---|---|
+| `tools/density-ladder.mjs` 的 `moduleGray()` | 定义一次、**从没被调用**；文件里真正在用的是 `core/decode/transform.js` 的 `sampleBilinear`（`readOne()` 里的局部 `grey`）⇒ 它是**同一件事的本地副本**（第 104 轮改成双线性采样时留下的旧实现），头顶还挂着一条更旧的注释「取模块中心的小窗平均灰度」 | **删除**（连同两段注释；文件仍 `node --check` 通过） |
+| `tools/probe-marker-scale.mjs` 的 `let keysLogged = false;` | 声明一次、**从未被赋值或读取** | **删除**（该探针**必须留**：它是 D24/D26 在台账里的**复现命令**） |
+| `tests/unit/tiff-read.test.mjs` 的 `SIZES` | **测试代码** | 按用户指示**不动** |
+| `web/app.js` 的 `$` | **我的正则假阳性**：`\b` 对非单词字符 `$` 不成立 ⇒ `$('out')` 这类调用数不到 | 记录为探针缺陷，**不是死代码** |
+
+**④ 复扫**：模块级孤儿 **2**（一个测试文件 + 一个假阳性）⇒ **真代码是干净的**；导出侧 **3**（终点）。**这两条合起来才算把「死代码」这一面看到底**：导出侧 19 → 3（第 242 轮起），模块级侧 2 → 0（本轮）。
+
+**⑤ 门限**：`build-web` exit 0 · `check-dist` **0 fail**（15 条断言）· 单测 **433/433** · `verify --gate all`（单独跑、日志 `.tmp/verify-257.log`）⇒ **`VERIFY_EXIT=0`、`ALL GATES PASS -- 4/5 evaluated, 1 skipped`**、`not evaluated: G4 G6 G9` · `usability.ps1` **全腿 PASS、exit 0**（**394 s**），其中 **§4l 密度梯腿 PASS** —— 正好覆盖被删代码所在的那条路 ⇒ **删除没有破坏它** ✓ · `check-docs-tables` clean。**本次未评估: G4 G6 G9**（**G7 G8 G10 已退役**）。
+
+**⑤bis 本轮我还踩了一个记台账的坑（已写进 `AGENTS.md` §5.4）**：插块时用 `String.replace(anchor, block)`，而**块里正好有一个代码跨度 `` `$` ``** —— 替换串里「美元+反引号」是特殊记号（= 匹配点之前的全部内容）⇒ **文件被自我复制**：STATUS.md 的 125 行导航内容被塞进了我的轮次表格里 ✗。`node tools/check-docs-tables.mjs` **当场报红并点名行号** ✓（这就是那条检查存在的意义）；`git checkout HEAD -- docs/STATUS.md` 还原后**改用切片插入**（`s.slice(0,i) + block + s.slice(i)`）⇒ 表格 clean、文件头只出现一次 ✓。
+
+**⑥ 下一块砖**：第 **263** 轮 `docs/DONE.md` 更新（每 10 轮）；其余是用户的硬件验收。
+
 ## 已知风险 / 待办
 
 ### 第 256 轮（**真浏览器把「单文件版」两个产物也验了：单文件接收页逐字节还原、单文件发送页编码 —— 两套 bundle 互证**）

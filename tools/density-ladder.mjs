@@ -194,34 +194,6 @@ function make(args) {
   return 0;
 }
 
-/** 一条带里每个模块的深浅：取模块中心的小窗平均灰度。 */
-/**
- * One module's grey level, sampled at the module CENTRE with bilinear interpolation.
- *
- * Sub-pixel matters here: at 2-3 px per module a half-pixel origin error puts the sample on the
- * module boundary and flips bits by itself. Greyscale of a whole window cannot fix that (the window
- * averages both states), so the sample point is interpolated and the caller searches fractional
- * offsets alongside whole-pixel ones. That makes a pristine re-render read as BER 0 instead of the
- * 1e-3 floor the first version showed -- a floor that would have been mistaken for physics.
- */
-function moduleGray(rectified, b, c, r, ox = 0, oy = 0, fx = 0, fy = 0) {
-  const { pixels, width, height } = rectified;
-  const cx = b.x + c * b.cellPx + b.cellPx / 2 + ox + fx;
-  const cy = b.y + r * b.cellPx + b.cellPx / 2 + oy + fy;
-  const x0 = Math.floor(cx), y0 = Math.floor(cy);
-  const tx = cx - x0, ty = cy - y0;
-  const at = (x, y) => {
-    const xx = Math.min(Math.max(x, 0), width - 1);
-    const yy = Math.min(Math.max(y, 0), (height || Math.floor(pixels.length / (width * 4))) - 1);
-    const o = (yy * width + xx) * 4;
-    if (o + 2 >= pixels.length) return 255;
-    return (pixels[o] + pixels[o + 1] + pixels[o + 2]) / 3;
-  };
-  const top = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx;
-  const bot = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx;
-  return top * (1 - ty) + bot * ty;
-}
-
 function readOne(bitmap, spec) {
   const found = findMarkers(bitmap, {});
   if (!found.ok) return { ok: false, reason: 'markers/' + found.reason };

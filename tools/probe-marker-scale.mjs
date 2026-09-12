@@ -59,7 +59,6 @@ function shrink(f) {
 // the ink fraction of the marker's centre region for every probe radius so the claim is a
 // reading, not an inference: a small window inside the hole, a window that also catches the
 // ring, and the threshold the shipped predicate compares against (0.35).
-let keysLogged = false;
 function explain(f) {
   const bmp = f === 1 ? src : shrink(f);
   const bin = binarize(bmp, {});
