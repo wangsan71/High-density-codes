@@ -61,6 +61,12 @@ const setStatus = (m, state) => {
 // 与发送页共用一份 label 策略（core/profiles.js），所以接收端的下拉也带 D49 警告 + 手机提示，
 // 而不是再手写一份漏掉其中之一。
 for (const id of PROFILE_IDS) {
+  // Retired profiles are not offered here either (round 260): the sender has skipped them since round 110,
+  // and the retirement note in docs/ACCEPTANCE.md says the frozen profiles are 'still decodable, no longer
+  // offered in the CLI or the web pages'. Nothing is lost by hiding them on the receive side, because the
+  // automatic search still tries every profile -- core/decode/bootstrap.js builds its candidates from
+  // PROFILE_IDS without filtering -- so a page printed with an old plate still reads under 自动识别.
+  if (PROFILES[id].retired) continue;
   const o = document.createElement('option');
   o.value = id;
   o.textContent = profileOptionLabel(id, PROFILES[id]);

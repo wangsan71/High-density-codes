@@ -28,7 +28,7 @@
 
 | # | 缺陷 | 复现 | 状态 |
 |---|---|---|---|
-| **D87** | **【第 245 轮补测：200 次隔离重跑 0 失败 ⇒ 不是输入相关】** `for ($i=1; $i -le 200; $i++) { node --test --test-isolation=none "tests/unit/chacha20.test.mjs" }` ⇒ **fails=0 of 200**（该用例每次都用新的 `randomBytes` 做 key/nonce/数据，11 种长度 ⇒ 累计 **2,200 次往返**全部逐字节一致）⇒ **复现条件不在输入里**；结合观察时的 0.39 ms 时长，最可能是**当时正在编辑/并发运行**造成的夹具瞬态。**仍然不划线**（没有修法、也没有复现），但下一次再现时**先留完整输出**。原记录：**`encrypt/decrypt round-trip on random data of assorted lengths` 偶发失败一次、重跑即过**（用了随机长度/随机数据的测试若依赖某个边界，就会这样）。观察到时的现象：`✖ encrypt/decrypt round-trip on random data of assorted lengths (0.3885ms)`，同一份代码立刻重跑 ⇒ `428 · pass 428 · fail 0`。**0.39 ms** 的失败时长像是**导入/夹具层面**的瞬态，而不是断言失败 | 连续跑两次 `node --test --test-isolation=none "tests/unit/**/*.test.mjs"` ⇒ 第一次红、第二次绿（本轮实测） | **OPEN**：需要抓到**失败时的断言文本**才能定性（可能只是随机长度撞上某个边界，也可能是夹具瞬态）。**不要**用重跑掩盖它 —— 下一次复现时**先把完整输出留下来** |
+| ~~D87~~ | **【第 260 轮根因已定 + 已修】** **`encrypt/decrypt round-trip on random data of assorted lengths` 偶发失败的真因是「测试断言本身的统计错误」，不是产品缺陷**：该用例断言「**密文必须不等于明文**」，而**长度为 1 时**密文那一个字节在均匀 keystream 下有 **1/256** 概率恰好等于明文 ⇒ 短样本上这条断言**按构造就会偶发**。**阳性对照（`.tmp/d87-probe.mjs`）**：5000 个 1 字节样本 ⇒ **11 次 `ct == pt`（0.22%，理论 0.39%）**，同一批**往返 5000/5000 全部正确** ✓ ⇒ 加密没问题。**修法**：`len >= 8` 逐步断言（碰撞需 2^-64）、短长度只用整轮聚合断言 `differed > 0`（pass-through 仍会红） | 复验：**修后 `node --test --test-isolation=none "tests/unit/chacha20.test.mjs"` 隔离重跑 250 次 ⇒ 0 失败**；旧断言会红的原文见 `.tmp/verify-260.log`（`FAIL … ciphertext == plaintext at len 1`，该次 `verify --gate all` 的 G0 就是它）| **CLOSED**（第 260 轮；先前第 245 轮那句「200 次重跑 0 失败 ⇒ 不是输入相关」**已被推翻并划线** —— 200 次对 1/256 只是一次抛硬币）|
 ### 第 178 轮闭掉的（D86）
 
 | # | 缺陷 | 复现 | 状态 |

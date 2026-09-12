@@ -284,14 +284,29 @@ test('multi-block stream is the concatenation of consecutive keystream blocks', 
 test('encrypt/decrypt round-trip on random data of assorted lengths', () => {
   const key = randomBytesView(32);
   const nonce = randomBytesView(12);
+  // "the cipher transformed the data" cannot be asserted per sample for short inputs: a one-byte ciphertext
+  // equals its plaintext with probability 1/256, because the keystream byte is uniform. That is exactly what
+  // made this test flake -- D87, open since round 190 and root-caused in round 260, when the failing
+  // assertion was finally captured ('ciphertext == plaintext at len 1') and the rate measured: 11 collisions
+  // in 5000 one-byte samples. My round-245 conclusion that it was 'not input-dependent' was wrong: 200 clean
+  // runs were a coin flip against a 1-in-256 event. So the two jobs are split -- per-length where a collision
+  // is impossible in practice, and once over the whole loop for the short lengths.
+  let differed = 0;
+  let nonEmpty = 0;
   for (const len of [0, 1, 2, 63, 64, 65, 128, 129, 999, 4096, 10001]) {
     const pt = randomBytesView(len);
     const ct = chacha20Encrypt(key, nonce, pt);
     assert.equal(ct.length, len);
     const back = chacha20Decrypt(key, nonce, ct);
     assert.deepEqual(Array.from(back), Array.from(pt), `round trip failed at len ${len}`);
-    if (len > 0) assert.notEqual(toHex(ct), toHex(pt), `ciphertext == plaintext at len ${len}`);
+    if (len === 0) continue;
+    nonEmpty++;
+    if (toHex(ct) !== toHex(pt)) differed++;
+    // 8 bytes and up: a full collision needs 2^-64, so this can be asserted per sample.
+    if (len >= 8) assert.notEqual(toHex(ct), toHex(pt), `ciphertext == plaintext at len ${len}`);
   }
+  // And for the short lengths, the same claim made soundly: a pass-through cipher would collide everywhere.
+  assert.ok(differed > 0, `every one of ${nonEmpty} non-empty lengths encrypted to its own plaintext`);
 });
 
 test('inputs are never mutated, and the output is a fresh buffer', () => {
