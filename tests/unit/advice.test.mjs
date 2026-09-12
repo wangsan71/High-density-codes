@@ -63,3 +63,21 @@ test('advice: an unmapped reason still yields guidance and announces itself', ()
   assert.match(a.cause, /unmapped/);
   assert.ok(a.do.length > 10);
 });
+
+test('advice: no user-facing string carries markdown, because both hosts print it as plain text', () => {
+  // The browser logs through textContent and the CLI writes plain console lines, so **bold** reaches the
+  // user with its asterisks (AGENTS section 6.6). Round 285 found two, both in the Chinese one-liners and
+  // both on paths a phone user actually hits: markers/no-contrast and digest-mismatch.
+  const markdown = /\*\*|__/;
+  // Positive control first: the detector has to be able to fire, or the sweep below proves nothing.
+  assert.ok(markdown.test('但**四个角标必须还在画面里**'), 'the detector must fire on the shape that was shipped');
+  const bad = [];
+  for (const reason of knownReasons()) {
+    const a = advise({ reason });
+    for (const field of ['cause', 'do', 'zh']) {
+      const text = a[field];
+      if (typeof text === 'string' && markdown.test(text)) bad.push(reason + '.' + field);
+    }
+  }
+  assert.deepEqual(bad, [], 'user-facing advice must be plain text; markdown found in: ' + bad.join(', '));
+});
