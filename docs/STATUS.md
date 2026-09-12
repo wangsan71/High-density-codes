@@ -127,6 +127,28 @@
 
 ## 已知风险 / 待办
 
+### 第 288 轮（**补上一块所有浏览器测试都没覆盖、而你一推代码就会碰到的条件：GitHub Pages 是**子路径**托管 ⇒ 在 `…/High-density-codes/` 下整条链重验了一遍**）**
+
+**① 为什么想到它**：此前**所有**浏览器验证都跑在**根路径** `/` 上 ✓ —— 而 Pages 把站点放在 **`/High-density-codes/`** 子路径下 ✗ ⇒ 相对路径、**Service Worker 作用域**、manifest 路径在两种形态下**都可能不一样** ✗，这正是「推完代码才发现站点坏了」的经典成因 ✓。
+
+**② 办法**：`tools/serve.mjs` 支持 `--dir` ✓ ⇒ 搭一个 Pages 形态的暂存根（`.tmp/deploy288/High-density-codes/` = `web/dist` 的副本 ✓ + 一张测试页 ✓），在 `http://127.0.0.1:8131/High-density-codes/index.html` 上验 ✓。（顺带实测一条**工具行为**：`serve.mjs` 在给定目录根下找不到 `index.html` 会**拒绝启动**并给出「先 `build-web`」的提示 ✓ ⇒ 我在暂存根放了占位页 ✓。）
+
+**③ 实测（`HeadlessChrome/152`）**：
+
+| 项 | 结果 |
+|---|---|
+| 页面加载 | **`200`** ✓、标题正确 ✓、URL 就是子路径 ✓ |
+| 资源解析 | `app.js` / `capture.js` / `selftest-loader.js` 全部解析为 **`/High-density-codes/…`** ✓ |
+| manifest | `./manifest.webmanifest` ⇒ 解析为 `/High-density-codes/manifest.webmanifest` ✓ 且 **`fetch` 成功** ✓ |
+| **Service Worker 作用域** | **`http://127.0.0.1:8131/High-density-codes/`** ✓（正是 Pages 需要的 ✓）；刷新后 **`controlled: true`**、控制器 `/High-density-codes/sw.js` ✓ |
+| **解码** | 子路径下喂一张页 ⇒ **`ok-photo.png: P-M1-300@300dpi INK2 第 0/2 页 · 第 1 次命中 · 1343ms`**、**`已逐字节还原：1,500 字节 · SHA-256 cc7605e78942548a…`** ✓ |
+
+⇒ **Pages 形态（子路径 + SW 作用域 + manifest + 解码）整条链验通** ✓✓ —— 也就是说：**你推完代码之后，站点在新形态下是被验证过的** ✓（此前只能说「根路径下没问题」✗）。
+
+**④ 门限**：单测 **445/445** · `check-dist` 顶层 13 + `G9 CHECK` 15，0 fail · `check-docs-tables` clean · **`core/`、`web/` 一行未改**（本轮是纯验证 ✓）⇒ `verify`/G2/冒烟与第 285 轮同源 ✓ · 现场已清（暂存根删除 ✓、服务器关掉 ✓、SW 与缓存清空 ✓）。
+
+**⑤ 下一块砖**：第 **292** 轮死代码复查（每 5 轮）、第 **293** 轮 `docs/DONE.md`（每 10 轮）；其余是用户硬件验收与那次 `git push`。
+
 ### 第 287 轮（**5 轮一次的死代码复查：三角度依旧全清、两个探针各自 3/3 自证；另把「存成什么名字」这条带安全含义的用户路径在真浏览器里从 DOM 走了一遍**）**
 
 **① 复查（三条腿 + 两个自证）**：
