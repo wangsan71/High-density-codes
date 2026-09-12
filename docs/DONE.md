@@ -104,6 +104,7 @@
 25. **`check-dist` 的两个数字不是一回事**：顶层 `13 pass / 0 fail` 与 `G9 CHECK: all 15 assertions pass` 分别数的是顶层 record 与 G9 块内的断言 ⇒ **改文档里的数字之前先量**（第 262 轮我先改错、量完当场改回）。
 26. **`hidden` 属性会被 class 里的 `display` 压掉**（第 261 轮 D91）：只写 `hidden` 而 CSS 给了 `display:flex` 之类 ⇒ 元素照样显示 ⇒ 现在 `web/app.css` 用 `[hidden] { display: none !important; }` 兜底；判「藏没藏」要**量渲染后的可见性**，不是读属性。
 27. **门限别并发跑**：第 258 轮有一次与重活并发的 `verify --gate all` 打印了 `GATE FAILURE` 且没能复现（**D88 OPEN**）⇒ 判决类的跑单独安排、并把**整段输出**留住（别只留自己筛过的那几行）。
+28. **不要在本沙箱里试着起第二个浏览器引擎**（第 266 轮试了三次）：Edge 后台起不来（立刻退出、无输出、无进程）、`--dump-dom` stdout 全空、加 `--no-sandbox` 后崩在 **`crashpad OpenProcess 存取被拒 (0x5)`** ⇒ 与 AGENTS §4 记的「受限沙箱里 Chrome/Edge 起不来」同源。插件里那个 `HeadlessChrome/152` 是**宿主**拉起来的，不代表你自己也能拉。⇒ 「第二个引擎」与 Safari 这两格只能用户做（Safari 在 Windows 上不存在）。
 11. **`git push` 仍未做，而且原因已量清（第 263 轮）**：**不是沙箱**（工具报 `sandbox denied=false`），是 `credential.helper=manager` 在非交互环境里跑不了提示脚本 ⇒ `could not read Username for 'https://github.com'`，本机也没有 `~/.git-credentials` ⇒ **只有用户的 GitHub 凭据能推**。当年那个「MSYS signal pipe / Win32 error 5」是**另一种**症状（真要动沙箱时才是它）⇒ **不要**为此投机升级授权。
 
 ---

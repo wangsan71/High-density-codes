@@ -127,6 +127,24 @@
 
 ## 已知风险 / 待办
 
+### 第 266 轮（**去补 G9 的「第二个引擎（Edge）」⇒ 结论是**本沙箱根本起不来**；把这个原因量清写下来，免得下一轮再白试一次**）
+
+**① 为什么挑它**：G9 长期挂着「差第二个引擎」；插件不暴露引擎设置 ⇒ 我打算**绕开插件**：用 Node 自带的 `WebSocket` 自己驱动 Edge 的 CDP。二进制已定位到 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` ✓。
+
+**② 三种起法与实测（都是本机、同一分钟）**：
+
+| 试法 | 结果 |
+|---|---|
+| `msedge --headless=new --remote-debugging-port=9223 --user-data-dir=.tmp\edge-profile about:blank`（后台任务） | 进程**立刻退出**、exit 0、**无任何输出**、`Get-Process msedge` 计数 **0**；`fetch http://127.0.0.1:9223/json/version` ⇒ **`TypeError: fetch failed`** ✗ |
+| `msedge --headless=new --dump-dom <file://…/.tmp/edge-hello.html>`（最小页面：一个 `<h1>` + 一行 JS 把文本改成 `edge-js-ok 5`） | exit 0、**stdout 全空** ⇒ 既没渲染也没执行 JS ✗ |
+| 同上再加 `--no-sandbox --disable-dev-shm-usage` | 这次有输出，是崩溃日志：**`crashpad_client_win.cc:447] OpenProcess: 存取被拒。(0x5)`** ⇒ 沙箱拒绝 Edge 崩溃处理器的进程访问，浏览器压根没起来 ✗ |
+
+**③ 结论（已写进 `docs/DONE.md` 的「别重做」第 28 条）**：**在本沙箱里起第二个浏览器引擎是死路** —— 与 AGENTS §4 早就记的「Chrome/Edge 在受限沙箱里因命名管道/进程访问被拒（Win32 error 5）」是同一类；插件里那个 `HeadlessChrome/152` 能用，是因为它由宿主用别的方式拉起 ✓。⇒ G9 的「第二个引擎」这一格**只能由你**在自己桌面上做；另外**Safari 在 Windows 上根本不存在**（要么 macOS，要么就是你 iPhone 上的 Safari —— 那正好是手机那一格）✓ ⇒ 这条现已从「没试过」变成「**试过三次、原因是 X**」 ✓。
+
+**④ 门限**：单测 **438/438** · `check-dist` **顶层 13 项 + `G9 CHECK` 15 条，0 fail** · `check-docs-tables` clean · `core/`、`web/` **一行未改** ⇒ `verify`/G2 与第 262 轮同源 ✓。
+
+**⑤ 下一块砖**：第 **267** 轮死代码复查（每 5 轮）、第 **273** 轮 `docs/DONE.md`（每 10 轮）；其余是用户硬件验收与那次 `git push`。
+
 ### 第 265 轮（**把「手机那条路」按手机的条件在真浏览器里走了一遍：不安全上下文（局域网 http）下解码逐字节还原；连拍按钮的拒绝文案也实测到位 ⇒ 量完**不需要**改代码**）
 
 **① 为什么挑它**：第 264 轮我刚把手册 §2 加上「手机上不用任何站点也能收」（局域网 http + 系统相机 + 「选择文件」）。但那条路上页面处在**不安全上下文**（`http://192.168.x.x` ⇒ `isSecureContext=false`），而我此前只在 `localhost`（安全上下文）验过解码 ⇒ **手册那句话当时还没有实测撑腰** ✗，而完成判据正是「用户照 docs 在手机上走一次」⇒ 先把它量准 ✓。
