@@ -221,6 +221,16 @@ async function run() {
     log(p.noSession
       ? '未完成：没有任何一页的头能读出来 —— 这是整批失败，缺页校验也帮不上（几何还没认出来）'
       : `未完成（数据页 ${p.dataHave}/${p.dataNeed}）：${asm.error || '仍缺料'}`, 'bad');
+    // When a passphrase was supplied and the run still failed, the key itself is the first thing to suspect:
+    // a wrong key decrypts to bytes that fail the container's own magic check, which is what the technical
+    // line above reports (round 255 measured it: 'transform-failed: deflate: not a PSZ1 container'). Say the
+    // likely cause out loud -- but as a hint, not a verdict, because a damaged page can fail the same way.
+    // Only when the pages themselves were read: with nothing readable the cause is upstream (geometry,
+    // framing, format), and naming the key there would send the user down the wrong path -- the same
+    // mistake advice.js refuses to make for a mirrored page. Measured both ways in round 255.
+    if ($('pass').value && !p.noSession) {
+      log('      口令可能不对：这一批带着 CIPHER 旗，需要发送时那个口令；口令错时不会给出任何字节（本工具从不产出半成品）。');
+    }
     log('没有写出任何文件：本工具从不产出半成品');
     busy = false;
     setStatus('未完成', 'err');
