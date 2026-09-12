@@ -51,15 +51,24 @@ const t0 = performance.now();
 
 for (const profile of PROFILES) {
   const suffix = profile.slice(-1);
-  const dir = join(scans, `module-${suffix}`);
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
-    failures.push(`${profile}: scan directory missing: ${dir}`);
+  // The kit README tells the user to put the scans in scans-module-6/5/4 -- named that way so they cannot
+  // be confused with the module-6/5/4 directories the kit itself writes -- while this tool used to look
+  // only for plain module-6/5/4. A user who followed the README got "0/3 profiles byte-exact in 0.0s" and
+  // no explanation (DEFECTS D97, round 281). Accept both, the README's name first.
+  const candidates = [join(scans, `scans-module-${suffix}`), join(scans, `module-${suffix}`)];
+  const dir = candidates.find((d) => existsSync(d) && statSync(d).isDirectory());
+  if (!dir) {
+    // Printed, not merely collected: this reason used to appear only in the summary count, which leaves a
+    // user staring at "0/3" with nothing to act on.
+    console.log(`FAIL ${profile}  no scan directory -- looked for ${candidates.join(' and ')}`);
+    failures.push(`${profile}: scan directory missing (looked for ${candidates.join(' and ')})`);
     continue;
   }
   const names = readdirSync(dir)
     .filter((n) => /\.(png|tif|tiff)$/i.test(n))
     .sort();
   if (!names.length) {
+    console.log(`FAIL ${profile}  no PNG/TIFF pages in ${dir}`);
     failures.push(`${profile}: no PNG/TIFF pages in ${dir}`);
     continue;
   }
@@ -106,4 +115,10 @@ for (const profile of PROFILES) {
 }
 
 console.log(`MODULE SCANS: ${PROFILES.length - failures.length}/${PROFILES.length} profiles byte-exact in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
-if (failures.length) process.exit(1);
+if (failures.length) {
+  // Every failure gets its reason spelled out: a bare "0/3" is not something a user can act on.
+  console.log('');
+  console.log('why:');
+  for (const f of failures) console.log('  ' + f);
+  process.exit(1);
+}

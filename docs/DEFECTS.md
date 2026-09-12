@@ -3,6 +3,12 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 281 轮新增（D97 · CLOSED · 照验收包 README 原样跑那条命令时撞上）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~**D97**~~ | **照验收包 README 做，一键核对工具会报 `0/3` 且不说原因**：README 第 43 行叫用户把三个模块档的扫描放在 **`scans-module-6/5/4`** ✓（这样才不会和验收包自己写的 `module-6/5/4` 目录混在一起 ✓），而 `tools/check-module-scans.mjs:54` 只认 **`module-6/5/4`** ✗ ⇒ **完全照文档做的人**只会看到 **`MODULE SCANS: 0/3 profiles byte-exact in 0.0s`（exit 1）** ✗；更糟的是「目录缺失」那两条分支**只把原因塞进失败列表、不打印** ✗ ⇒ 连「为什么 0/3」都无从得知 ✗。**修法**：两种命名都认（**README 的名字优先** ✓），并把每条失败原因**直接打印**出来（原来只有一行汇总计数 ✗）。**复验（正反两个对照）**：README 命名 ⇒ **`3/3 profiles byte-exact in 13.4s`**、exit 0 ✓（三个档摘要都等于 `payload-module.bin` ✓）；旧命名 `module-N` ⇒ 同样 **3/3** ✓（向后兼容 ✓）；空目录 ⇒ 每档一行 `FAIL … no scan directory -- looked for A and B` + `why:` 列表 + exit 1 ✓✓ | `node tools/check-module-scans.mjs --kit .tmp/acceptance-kit --scans <按 README 命名的父目录>`（改前：`0/3 … 0.0s` ✗；改后：`3/3 … 13.4s` ✓）| **CLOSED** |
+
 ### 第 278 轮新增（D96 · CLOSED · 扩浏览器覆盖面时量出来的）
 
 | # | 缺陷 | 复现 | 状态 |
