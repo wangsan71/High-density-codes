@@ -6,6 +6,15 @@
 - 全程气隙：不联网、页面里没有任何外部 URL，数据只走"打印出来的图案" ✓
 - 需要 Node（本机 v24.14.0 ✓）。只有"模拟打印+扫描"那一步需要 Python 3.10 + numpy + opencv（真打印真扫描时不需要）。
 
+**想先跑起来（约 5 分钟，不用打印机）**：
+
+1. **造页**（不需要构建）：`node cli/pskit.mjs send 你的文件 --profile P-M1-300 --out 输出目录` ⇒ 得到页图 + `pack.pdf` ✓
+2. **模拟一次扫描**（不想打印就先这样）：`python sim/channel.py --in 输出目录 --out 模拟扫描 --seed 7 --preset scan300` ✓
+3. **还原**：`node cli/pskit.mjs receive 模拟扫描 --photo --profile P-M1-300 --out 回来的文件` ⇒ 与原文比 sha256 应一致 ✓
+4. **浏览器/手机**：`node tools/build-web.mjs` ⇒ `node tools/serve.mjs` ⇒ 打开它打印的地址 ✓（手机的两种走法见 §2 与 §5）
+
+**要验真硬件**（打印缩放、真扫描仪、手机拍照）⇒ 直接看 §5 的清单 ✓。上面这套是**进程内等价**的跑通 ✓。
+
 ---
 
 ## 0. 第一步：构建客户端页面（**刚 clone 必做**）
