@@ -289,11 +289,13 @@ async function run() {
   // is still the digest the manifest carries.
   let outBytes = asm.result;
   let outType = 'application/octet-stream';
+  let picSize = null; // set only when the payload really decoded into an image
   if (asm.result.length > 4 && asm.result[0] === 0x50 && asm.result[1] === 0x53 && asm.result[2] === 0x4b && asm.result[3] === 0x49) {
     try {
       const pic = unpackImage(asm.result);
       outBytes = encodePNG({ width: pic.width, height: pic.height, pixels: pic.rgba, dpi: 96 });
       outType = 'image/png';
+      picSize = { width: pic.width, height: pic.height };
       log('这是图片载荷：已用同一份解码器还原为 PNG（' + pic.width + '×' + pic.height + '，q' + pic.quality + '，' + outBytes.length + ' B）');
     } catch (e) {
       log('看着像图片载荷但解不开：' + e.message + '（仍按原始字节下载）');
@@ -302,6 +304,11 @@ async function run() {
   const blob = new Blob([outBytes], { type: outType });
   const url = URL.createObjectURL(blob);
   $('download').href = url;
+  // A phone cannot "download" a blob the way a desktop can: iOS Safari ignores `download` on blob: URLs, so
+  // tapping the save button looks like nothing happened -- which is the round-298 report ("上载/下载了图片，
+  // 但是没有东西可以让我下载"). When the payload IS an image, show the image itself: a long-press then saves
+  // it to the photo library, which is what the user actually wanted. Plain text only, no markdown.
+  if (picSize) showImagePreview(url, picSize.width, picSize.height);
   // 文件名由字节导出：页头没有名字字段（frame.js:14-28 只有 magic..digest..crc16），
   // 默认名只能从字节算出来。这是单测钉死的，下面的 userText 只改扩展名/前缀。
   // 监听器在模块加载时挂一次（D73 修的就是「run() 内挂 → 每次多挂一个」），不在 run() 里。
@@ -321,6 +328,33 @@ async function run() {
   busy = false;
   setStatus('完成', 'ok');
   setState('log-wrap', 'ok', 'log-pill', '完成');
+}
+
+/* --------------------------------------------------- 结果区：图片直接显示 ------ */
+function showImagePreview(url, width, height) {
+  const anchor = document.getElementById('download');
+  const old = document.getElementById('img-preview');
+  if (old) old.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'img-preview';
+  wrap.style.margin = '0.6rem 0';
+  const img = document.createElement('img');
+  img.id = 'img-preview-img';
+  img.src = url;
+  img.alt = '还原出的图片';
+  img.style.maxWidth = '100%';
+  img.style.height = 'auto';
+  img.style.border = '1px solid var(--border)';
+  img.style.borderRadius = '6px';
+  const note = document.createElement('p');
+  note.className = 'muted sm';
+  note.textContent =
+    `上面这张就是还原出的图片（${width}×${height}）。电话上：长按图片 → 存储到照片/相册；电脑上：点下面的按钮保存成 PNG。`;
+  wrap.appendChild(img);
+  wrap.appendChild(note);
+  const host = anchor && anchor.parentNode ? anchor.parentNode.parentNode : null;
+  if (host && anchor.parentNode) host.insertBefore(wrap, anchor.parentNode);
+  else if (host) host.appendChild(wrap);
 }
 
 function adviseOr(reason, fallback) {

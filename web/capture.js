@@ -201,6 +201,11 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     }
     video.srcObject = stream;
     await video.play().catch(() => {});
+    // Let the preview actually paint before the first decode. One frame's decode is a long SYNCHRONOUS block
+    // (a full candidate search), so without this the user stares at a frozen page with an empty preview --
+    // exactly what the round-298 phone report described ("卡，摄像头那里也没显示"). Two paints and a short
+    // pause cost nothing and are the difference between "starting" and "hung".
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 120))));
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     setPill('burst-pill', '连拍中…', 'busy');
@@ -221,9 +226,27 @@ if (typeof document !== 'undefined' && typeof document.getElementById === 'funct
     // 重读需要「这一帧认出来的几何」。addFrame 内部总是先 decode 再 feed、且逐帧 await，
     // 所以暂存本帧几何是精确的，不是取巧。
     let frameGeom = null;
+    // The same hints the file route uses (app.js): the picker is a HINT that reorders candidates, and with a
+    // profile picked plus 「只试我指定的组合」 it becomes the ONLY candidate. That is the difference between one
+    // page read per frame (~1 s) and two dozen (~30 s here, minutes on a phone) -- the measured cause of the
+    // round-298 report, where the burst called bootstrapDecode with no hints at all and maxAttempts 24.
+    const pick = (id) => { const el = $(id); return el ? el.value : ''; };
+    const strictEl = document.getElementById('strict');
+    const burstHints = {
+      profileHint: pick('profile') || null,
+      dpiHint: pick('dpi') ? Number(pick('dpi')) : null,
+      paletteHint: pick('palette') || null,
+      onlyHints: !!(strictEl && strictEl.checked),
+    };
+    say(
+      burstHints.profileHint || burstHints.dpiHint || burstHints.paletteHint
+        ? `连拍按你选的剖面来（每帧先试它，快）：${JSON.stringify({ profile: burstHints.profileHint, dpi: burstHints.dpiHint, palette: burstHints.paletteHint, strict: burstHints.onlyHints })}`
+        : '连拍现在是「全自动」：每帧要把各种剖面都试一遍，手机上会明显变慢 —— 在上面「剖面 / DPI / 色板」里选好你打印时用的那一档，会快十几倍。',
+      burstHints.profileHint ? 'hint' : 'bad',
+    );
     const collector = createBurstCollector({
       decode: async (bmp) => {
-        const b = await bootstrapDecode(bmp, { maxAttempts: 24 });
+        const b = await bootstrapDecode(bmp, { ...burstHints, maxAttempts: burstHints.onlyHints ? 4 : 24 });
         if (b.ok) frameGeom = b.geom;
         return b;
       },
