@@ -3,6 +3,12 @@
 > 规则：每条必须能被一条命令复现。**不写"应该没问题"**。性能问题一律不修（用户明示先不管）。
 > 状态标记：`OPEN` 待修 · `CLOSED` 已修并复验 · `NOTABUG` 记录用，非缺陷。
 
+### 第 296 轮新增（D102 · 独立审查的结论 · 记档用）
+
+| # | 缺陷 | 复现 | 状态 |
+|---|---|---|---|
+| ~~**D102**~~ | **独立子代理复核「误接受」红线：未发现可达的误接受路径；另记三处「今天不可达、但形状是『检查在假值处被跳过』」的潜在位置**。① `core/protocol.js:432` —— `rawHeader ? decodeHeader(rawHeader) : { ok: true, header: page.header }`：调用方若传「已解好的 header 对象」而不是 `Uint8Array`，则 **magic/version/CRC16 全不查** ✗，摘要也只能「与它自己一致」✗（仓内所有 `feed` 调用点都传 `Uint8Array` ⇒ 今天不可达 ✓）。② `core/decode/bootstrap.js:217` —— `if (declared.profile && …)`：声明档为**假值**即**跳过**「页头声明 vs 候选几何」交叉核对，只凭 CRC 接受候选 ✗（`decodeHeader` 只在 `PROFILE_BY_CODE` 命中时给出 profile ⇒ 今天不可达 ✓）。③ `core/protocol.js:481` 配 `234-236` 与 `256` —— 页内 RS 的 k/nsym 取自页头且与 geom 无交叉核对，`k > content.length` 时 `blocks=0`、`stats.ok = failedBlocks.length === 0` **空真** ⇒ 零长内容被记为已接受 ✗（需 CRC16 有效的伪造或误码头，且**最终摘要仍会拒** ✓）。**判定：NOTABUG（今天不可达）**，但写明：**将来要动这三处，一律 fail-closed 收紧**（缺值 ⇒ 拒绝，而不是跳过 ✓）。**正面结论（这段才是重点）**：载荷级接受是**单点**的 —— 全仓只有 `core/protocol.js:593` 给 `asm.result` 赋值，它紧跟 `:586-592` 的 **22 字节明文 SHA-256 逐字节比对** ✓；落盘方只认它（`cli/pskit.mjs:880-915` 先写 `.part` 再 rename、`web/app.js:252`、`web/capture.js:258-259` ✓）；帧 CRC 在**必经之路**上（`core/decode/page.js:86` → `core/decode/echo.js:100-101` 只收过 magic+version+CRC16 的头 ✓）；救回重读**不比首读宽**（`recalibrate.js:233` 只在首读 `intra-fail` 时重读、复用同一份 header、仍走同一个摘要门 ✓）；页级 RS 全 fail-closed（`core/rs.js:160/182/193/206/211` ✓）；缺口令不产出任何字节（`protocol.js:565-575` ✓）。**复验**：按上面这些行号重读；或直接看门限 **G5**（10,000 次篡改 + 2,000 次接缝 ⇒ **0 误接受** ✓）| 本轮为**只读审查**（子代理未改任何文件 ✓），行号见左 ✓ | **NOTABUG** |
+
 ### 第 292 轮新增（D100 / D101 · 都 CLOSED · 把第 291 轮的诊断接到手机侧失败路径上时撞到的一对）
 
 | # | 缺陷 | 复现 | 状态 |
