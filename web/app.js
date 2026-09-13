@@ -209,10 +209,25 @@ async function run() {
       onAttempt: (a) => log(`    试 ${a.profileId}@${a.dpi}/${a.paletteId}${a.nozzle ? '/' + a.nozzle : ''} -> ${a.stage}/${a.reason} [${a.ms}ms]`, 'hint'),
     });
     if (!boot.ok) {
-      log(`  ${name}: 认不出来（试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`, 'bad');
-      const a = adviseOr('no-geometry-matched', '这些图里没有本工具能认出的页码几何（可能被裁掉一角、分辨率过低、或来自另一套剖面）');
-      log(`      成因：${a.cause}`);
-      log(`      做法：${a.do}`);
+      // Say WHY in the user's own terms. bootstrapDecode promotes the reason every candidate agreed on and
+      // keeps the generic one in wrappedReason (core/decode/bootstrap.js:258-262); until round 292 this page
+      // threw the promoted one away and always printed "no geometry matched". On the phone's file route that
+      // turned "the photo is washed out, lower the exposure" into "the geometry was not recognised" -- the
+      // diagnosis round 291 measured as correct, discarded one line before it reached the user. The burst
+      // path (capture.js) has always used boot.reason; this is the same reading of the same field.
+      const why = boot.reason || 'no-geometry-matched';
+      log(`  ${name}: 认不出来（${why} · 试了 ${boot.tried ?? boot.attempts.length} 组候选 · ${Math.round(performance.now() - t0)}ms）`, 'bad');
+      const a = adviseOr(why, '这些图里没有本工具能认出的页码几何（可能被裁掉一角、分辨率过低、或来自另一套剖面）');
+      // The zh one-liner exists for exactly this surface -- advice.js documents it as "for the phone UI" --
+      // and the burst path has always preferred it (capture.js:252 renders advice.zh || advice.cause).
+      // Until round 292 this page printed the English cause and do, so a phone user reading a failure on the
+      // file route was handed English. Prefer zh, keep the English pair as the fallback for reasons that
+      // have no Chinese line yet. Both forms are plain text: no markdown reaches textContent (D98).
+      if (a.zh) log(`      ${a.zh}`);
+      else {
+        log(`      成因：${a.cause}`);
+        log(`      做法：${a.do}`);
+      }
       continue;
     }
     const h = boot.header;
