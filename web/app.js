@@ -122,6 +122,9 @@ drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' '
 
 // 上一次完成传输的命名上下文；只存一份，避免 D73 那次的「每跑一次多挂一个监听器」。
 let currentNaming = null;
+// The object URL of the last finished transfer, so 「清除」 can revoke it instead of leaking a blob for the
+// lifetime of the tab. Set in run(), cleared by the reset handler below.
+let lastObjectUrl = null;
 const applyName = () => {
   if (!currentNaming) return;
   const name = downloadName({ ...currentNaming, userText: $('outname').value });
@@ -129,6 +132,41 @@ const applyName = () => {
   $('outname-note').textContent = `将保存为：${name}`;
 };
 $('outname').addEventListener('input', applyName);
+
+// 「清除已选文件 / 重来」. The user report behind it: after picking files there was no way back to a clean
+// state without reloading the page -- and a reload also throws away a running burst and the camera stream.
+// This drops the selection, hides the result, removes the preview, revokes the blob URL, stops the burst if it
+// is running, and clears both logs. Nothing on disk is touched, because the page never wrote anything: it does
+// not upload, and it only produces a file when the user presses save.
+$('reset').addEventListener('click', () => {
+  const files = $('files');
+  if (files) files.value = '';
+  const out = $('out');
+  if (out) out.hidden = true;
+  const prev = document.getElementById('img-preview');
+  if (prev) prev.remove();
+  if (lastObjectUrl) {
+    URL.revokeObjectURL(lastObjectUrl);
+    lastObjectUrl = null;
+  }
+  const stop = $('burststop');
+  if (stop && !stop.hidden) stop.click();
+  const logEl = $('log');
+  if (logEl) logEl.textContent = '';
+  const burstLog = $('burst-log');
+  if (burstLog) burstLog.textContent = '';
+  const burstProg = $('burstprog');
+  if (burstProg) burstProg.textContent = '';
+  if ($('outname')) $('outname').value = '';
+  if ($('pass')) $('pass').value = '';
+  currentNaming = null;
+  // Back to the state the page starts in: with nothing selected, 「开始还原」 has nothing to do and must go
+  // grey again (the round-trip that verified this button caught it staying enabled).
+  if ($('go')) $('go').disabled = true;
+  setStatus('等待文件');
+  setState('log-wrap', 'idle', 'log-pill', '就绪');
+  log('已清除：文件选择、结果、预览和日志都清空了。盘上什么都没写过 —— 这个页面不上传、也不落盘，只有你点「保存」时才产生文件。');
+});
 
 /* ---------------------------------------------------------------- 跑 -------- */
 
@@ -303,6 +341,8 @@ async function run() {
   }
   const blob = new Blob([outBytes], { type: outType });
   const url = URL.createObjectURL(blob);
+  if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+  lastObjectUrl = url;
   $('download').href = url;
   // A phone cannot "download" a blob the way a desktop can: iOS Safari ignores `download` on blob: URLs, so
   // tapping the save button looks like nothing happened -- which is the round-298 report ("上载/下载了图片，
