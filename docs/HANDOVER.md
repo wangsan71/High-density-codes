@@ -287,6 +287,8 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 10. **第 94 轮启动的 600 dpi G2 重跑被"暂停"中止**（150/200 已处理，数据见 §6）；要判决就重跑：
    `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan600-*'`（后台，约 1–2 h）。
 11. **真实照片验收仍是负证据，不是验收结论**：当前手机照片批次不能替代 G4 的 500×8，也不能替代模块档的平板扫描验收。
+13. **线上（GitHub Pages）到底跑的是哪一版 —— 查法与结论（第 301 轮实测）**：站点 `https://wangsan71.github.io/High-density-codes/` 的 `core/deflate.js` 与 `git show 69594bf:core/deflate.js` **逐字节相同**（`27455 B`、sha256 `7d15ee15f309e74b`）⇒ 部署**没有半截**、就是 round 299 ✓；`id="reset"`（D105）与 `onlyHints`（D103）都在线上 ✓；CI 侧最新 `pages` 运行 = `69594bf completed/success`（`build` 含 Assert artifacts / pillow / Unit suite 全绿，`deploy` 的 `actions/deploy-pages@v4` 成功），Pages 部署条目 `env=github-pages sha=69594bf state=success` ✓。**查法**（匿名，Node `fetch` 能出网）：抓站点文件 + 比对源码 sha256、`GET /repos/<slug>/actions/workflows/pages.yml/runs`、`GET /repos/<slug>/deployments` 再取 `statuses_url`；`GET /repos/<slug>/pages`（Pages 配置）**匿名 404**，要鉴权 ✓。
+14. **`git push` 仍然只有用户能做（第 301 轮再次实测）**：本机跑 `git push origin master` ⇒ `failed to execute prompt script (exit code 66)` + `could not read Username for 'https://github.com'`，工具报 `sandbox denied=false` ⇒ **不是沙箱拦的**，是缺凭据（`credential.helper=manager` 非交互跑不了、无 `~/.git-credentials`）⇒ 升级沙箱**没用**、也不许投机升级（AGENTS §5.1 原因②）✓。
 12. **压缩还差一格：结构化 JSON 比 zlib -9 大 5%**（第 300 轮实测：`tests/conformance.json` **1.050×**；而散文 0.973×、源码 1.00×、重复文本 1.00× ⇒ 整体 **0.992×**）。方向是**多块**（每块用自己的 Huffman 统计），**不是换库** —— 用户第 300 轮虽已授权 vendor 开源压缩库，但自研版实测已到 zlib -9 水平 ⇒ 换库收益为负、还会破坏 AGENTS §2.4「自研编解码」。
 
 ---
@@ -354,6 +356,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 
 | 提交 | 轮次 | 做了什么 |
 |---|---|---|
+| `23d44fc` | 300 | **压缩真的做出来了（用户目标：在建立高密度二维码的过程中压缩、尽量保留完整信息）**：`core/deflate.js` 从「只会发固定 Huffman 单块」换成「动态 Huffman（包-合并长度受限码 ≤15 bit、RLE 码长表、完整 HLIT/HDIST/HCLEN 头）与固定块**二选一取小**」+ **惰性匹配** + **链深 64→1024**（3 字节桶饱和时 64 个候选够不到整周期匹配，这是 word soup 的病根）⇒ 同一语料实测 **1.189×zlib -9 → 0.992×**（`node tools/deflate-bench.mjs`；改前用 `git show HEAD:core/deflate.js > .tmp/old-deflate.mjs` + `--encoder`）· `tests/conformance.json`（207,461 B）在 `P-M1-300` 上 **12 页 → 10 页** · 过程中抓到并修掉 **D106**（码长码长度 8 被 RFC 1951 §3.2.7 的 3-bit 字段静默截成 0 ⇒ 表残缺；两家解码器都拒 ⇒ 不是误接受）· 重发射答案卷后 **`python ref/decode.py` ⇒ PASS（310 检查）** · 新增 `tools/deflate-bench.mjs` · **没 vendor 开源库**（自研版已 ≤ zlib -9，换库收益为负）|
 | `9fc41f9` | 246 | **密度梯（用户验收第 2 步）接上冒烟腿**：`--make` → 模拟扫描 → `--read` 全流程（§4l），判据两个方向都要对（粗档 usable、细档 BER > 0）+ 空目录必须拒（阳性对照）；实测 A4@300 四档 BER 0/0/0/**1.26e-3**、净 1,878/5,272/7,574/11,882 B 每页 ⇒ **独立复现第 117 轮的 4 px 悬崖**。另记 `AGENTS` §5.3 新陷阱：`& .\x.ps1 > log`（脚本以 `exit` 结尾）会得到 **0 字节**日志 |
 | `7bb62ab` | 244 | **收尾第 110 轮记下的两条「退役动作」**：① `verify --gate all` 收窄成 G0 G1 G2 G3 G5，退役的 G7/G8/G10 单独打一行、不再列进「未评估」（`--gate G7` 仍可单独跑并 PASS）；② 验收包清掉残留脚手架（空的 `plates/`、`mtf/` 目录、`payload-plate.bin`、README 模板里自相矛盾的两行、跳号），重跑验证 README 与实际内容逐条对上。另记 **D88**（并发跑门限偶发一次 `GATE FAILURE`、未复现；我因**没把输出落盘**而定位不了哪条腿）|
 | `0ba93cc` | 243 | **新建 `docs/DONE.md`**（用户第 132 目标轮要求，每 10 轮更新）：已完成 / **已否掉别重做** / 只有用户能验证 三件事集中一页，并接进 `AGENTS` §0 与 §1、本文件 §3、`STATUS` 表头。**子代理只读抽取当场抓到我的错**：G7/G8/G10 第 110 轮已 **RETIRED**（产品负责人取消 3D 线），导航表却仍按旧判决列 ⇒ 已按 `ACCEPTANCE` 改正；并翻出第 110 轮自己写明、仍未做的两条退役动作（`verify --gate all` 仍跑退役门限、`acceptance-kit` 仍生成板材/MTF 项）|

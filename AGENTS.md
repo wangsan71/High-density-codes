@@ -81,7 +81,7 @@
 - **Node 的 `fetch` 能出网；PowerShell 的 `Invoke-WebRequest` 不能。** 但**先查工作区再上网**：`ref/` 里 vendored 了权威规范（如 `ref/3mf-core-1.4.0.xsd`）—— 第 38 轮拿网上的 **schema 变体**当权威，误判自己"违规"（D40 撤回 / D41 已闭）。
 - **本 harness 的 pwsh 工具实际是 Windows PowerShell 5.1**（不是 pwsh 7）。
 - **工具的 `timeoutMs` 被执行器封顶 600 s**；后台任务（`run_in_background`）**无超时**。
-- 无浏览器可跑：Chrome/Edge 在受限沙箱里因命名管道被拒（`Win32 error 5`）⇒ 真浏览器验收只能由用户做。
+- **浏览器内验证取决于本次会话有没有绑定浏览器插件**（第 301 轮更正这句话）：有绑定就**真跑过**（第 249–280 轮用 `HeadlessChrome/152` 走完真实往返、离线段网、连拍、TIFF 多页）；没绑定（第 301 轮实测 `browser_evaluate` 拿不到）就**只能由用户做** ⇒ **先探一次再决定，别承诺**。自己在本机起 Chrome/Edge 一律不行（命名管道被拒 `Win32 error 5`；Edge 另撞 crashpad `OpenProcess` 0x5）。
 
 ---
 
@@ -125,6 +125,15 @@
 | 用 `String.replace` 往台账里插块 ⇒ 文件被**自我复制**（第 257 轮：STATUS.md 的 125 行导航内容被复制进一张轮次表格里） | 替换串里 `$&`、美元+反引号、`$'`、`$1` 都是**特殊记号** —— 而我的块里正好有 `` `$` ``（一个代码跨度里的美元号）⇒ 展开成了「匹配点之前的全部内容」 | 插块**不要用 replace**：用切片。**锚点要接在题头行之后**：`const hdr = '## 已知风险 / 待办\n\n'; s.slice(0, i + hdr.length) + block + s.slice(i + hdr.length)` —— 只在题头**之前**下刀会把轮次块放到题头上方（第 257 轮就是这么错位的）。非得用 replace 就传**函数**：`replace(anchor, () => block)` |
 | 台账表格整行错列、"看着还像表" | GFM 把**代码跨度里的裸竖线**也当列分隔 | 提交前跑 `node tools/check-docs-tables.mjs`；`--write` 只往代码跨度插反斜杠；**改完台账必须跑单测**（`tests/unit/defects-ledger.test.mjs` 断言每行四列） |
 
+### 5.5 比特流 / 二进制格式（第 300 轮 D106 的教训）
+
+| 症状 | 原因 | 做法 |
+|---|---|---|
+| 改完编码器：**自家解码器与 zlib/独立实现都拒**同一份输出 | 问题在**编码器**侧，不在解码器 | 别先怀疑解码器；写个**独立比特解析器**把头部逐字段读回来跟写入值对比（第 300 轮：写进去的码长 `8`，读回来是 `0`）|
+| 值明明写进去了，接收侧却读成 0（或别的值） | **写入器不检查值装不装得下**：`bw.bits(v, n)` 只发低 n 位（RFC 1951 §3.2.7 的码长字段只有 **3 bit** ⇒ 装不下 8 ⇒ 静默截断 ⇒ 表残缺）| 每个写入点**要么把值域限死**（构造时就传上限，如 `huffmanLengths(clFreq, 7)`）、**要么越界即 `throw`**。静默截断正是「看起来成功但是错」|
+| 改完压缩器后尺寸没变或变小了，但没人能复核 | 一次性探针不入库 | `node tools/deflate-bench.mjs`（**报尺寸前必须过自家解码器 + zlib + `PSZ1` 容器三重往返**）；与改前比：`git show HEAD:core/deflate.js > .tmp/old-deflate.mjs` 再 `--encoder .tmp/old-deflate.mjs` |
+| 改过发射器后单测红在「答案卷对不上」 | `tests/conformance.json` 是给**独立实现**（`ref/decode.py`）当答案的 | `node tools/emit-conformance.mjs` 重发射，**然后必须 `python ref/decode.py` 复判 PASS** —— 别只让 JS 自证 |
+
 ---
 
 ## 6. 台账纪律（破坏它比留一个 bug 更糟）
@@ -139,6 +148,7 @@
 8. 一次性探针放 `.tmp/`，但**台账不得指向不入库的文件**（要有永久等价物，如 `tools/level-diff.mjs`）。
 9. **不要留未提交的工作**：要么补完（腿 + 门限 + 台账 + 提交），要么还原并在 `docs/HANDOVER.md` §9 记清楚。
 10. 每轮收尾按 §3 打勾；**M4 未闭不打 tag**。
+11. **文档里的数字也会过期：引用前先量**（第 300 轮：全仓写了很久的「`ref/decode.py` 309 项检查」其实是 **310** —— 拿 HEAD 版 fixture 对跑**也是 310** ⇒ 那是旧数字、不是当轮改出来的）⇒ 更正时**划线保留**并注明「怎么量的、为什么不是这轮改的」。
 
 ---
 
@@ -153,6 +163,8 @@ node --test --test-isolation=none "tests/unit/**/*.test.mjs"   # 单测（沙箱
 node cli/pskit.mjs verify --gate all     # 进程内门限；会打印本次未评估哪些
 & .\tools\usability.ps1                  # 端到端冒烟（一条命令走完 文件→页→模拟扫→还原）
 node tools/check-docs-tables.mjs         # 台账表格自检（提交前必跑）
+node tools/deflate-bench.mjs             # 压缩对拍：逐例与 zlib -9 比（--encoder <path> 换实现）
+node tools/emit-conformance.mjs          # 重发射答案卷（改过发射器就必须跑，然后 python ref/decode.py 复判）
 node tools/mtf-matrix.mjs --selftest     # G10 矩阵读数器自证（四喷嘴 + 两条对照）
 node tools/find-dead-exports.mjs         # 死代码复查·导出侧（候选清单，不是判决）
 node tools/find-dead-locals.mjs          # 死代码复查·模块级 + 孤儿工具文件（`--selftest` 是阳性对照）

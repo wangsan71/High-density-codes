@@ -127,6 +127,28 @@
 
 ## 已知风险 / 待办
 
+### 第 301 轮（**用户要求：更新文档与 `AGENTS.md`、并铺设上线 ⇒ 本轮只改文档 + 查清线上部署 + 试推送（推送失败，原因已量清）**）**
+
+**① 用户指令（原话）**：「更新文档和AGENT.md文件，并且铺设」+「push」✓ ⇒ 做三件事：**改文档 / `AGENTS.md`** ✓、**查清线上部署** ✓、**试推送** ✓；**`core/` 与 `web/` 一行未改** ✓ ⇒ 第 300 轮的代码与门限数字仍然有效 ✓。
+
+**② 线上部署查清了（全部实测，不是「看着像」）**：
+- 站点 `https://wangsan71.github.io/High-density-codes/` ⇒ **HTTP 200** ✓；线上 `core/deflate.js` 与 `git show 69594bf:core/deflate.js` **逐字节相同**（`27455 B`、sha256 `7d15ee15f309e74b` ✓）⇒ **部署的就是 round 299、没有半截** ✓
+- 内容标记：`id="reset"`（第 299 轮 D105 ✓）**在**、`onlyHints`（第 298 轮 D103 连拍修复 ✓）**在**；**第 300 轮的压缩标记不在** ✓（当时未推 ✓）
+- CI：最新 `pages` 运行 = **`69594bf completed/success`** ✓（`build` 里 `Assert the artifacts` / `pillow` / **`Unit suite`** 全绿，`deploy` 里 `actions/deploy-pages@v4` 成功 ✓）；Pages 部署条目 **`env=github-pages sha=69594bf state=success`**（2026-09-14T14:57:25Z ✓）；前两次 `eb34ecc`、`bea7007` 同样 success ✓
+- 资源逐个 200 ✓：`manifest.webmanifest` · `sw.js` · `pskt-file.html` · `pskt-send-file.html` · `conformance.json`（**208,061 B = 第 300 轮之前那一版答案卷** ✓ 与部署版本自洽）· `icon-192.png` ✓
+- **查不到的两点（如实）**：① `GET /repos/<slug>/pages`（Pages 配置查询）**匿名 404** ⇒ 该端点要鉴权 ✓ ② **本会话没有绑定浏览器插件**（`browser_evaluate` 取不到）⇒「在真浏览器里打开部署站点跑一次」**这一步我做不了** ✓ ⇒ 上面全是 **HTTP 字节级 + CI 级**证据，**不冒充浏览器验证** ✓
+
+**③ 试推送 ⇒ 失败，原因已量清（不是沙箱）**：`git push origin master` ⇒ `failed to execute prompt script (exit code 66)` + `fatal: could not read Username for 'https://github.com'`，工具同时报 **`sandbox denied=false`** ✓ ⇒ 这是 AGENTS §5.1 记的**原因②：缺凭据**（`credential.helper=manager` 非交互跑不了、无 `~/.git-credentials`）⇒ **只有用户能推** ✓、升级沙箱**没用**也**不许投机升级** ✓ ⇒ 本轮**未推送**，`master` 比 `origin/master` **多 1 个提交**（`23d44fc`）✓。
+
+**④ 本轮改的文档**：
+- **`AGENTS.md`**：新增 **§5.5「比特流 / 二进制格式」**（D106 的教训 —— 写入器**不检查**值装不装得下 ⇒ 值域要么限死、要么越界即抛；**两家解码器都拒 ⇒ 先怀疑编码器**；用独立比特解析器逐字段读回；改过发射器必须重发射 + `python ref/decode.py` 复判）✓ · **§6 新增第 11 条**（**文档里的数字也会过期：引用前先量** —— 就是 309→310 那件事）✓ · **§4 更正「无浏览器可跑」**（改成：取决于本次会话有没有绑定浏览器插件 ⇒ **先探一次再决定、别承诺**）✓ · **§7 加两条命令**（`tools/deflate-bench.mjs`、`tools/emit-conformance.mjs`）✓
+- **`docs/HANDOVER.md`**：§13 加第 300 轮落点行 ✓；§9 加两条（**线上到底是哪一版 + 怎么查**；**`git push` 仍只有用户能做**）✓
+- **`docs/DONE.md`**：第 300 轮已按「每 10 轮」更新过（第 300 轮 = 第六次 ✓）⇒ 本轮不再动 ✓
+
+**⑤ 门限**：本轮只动文档 ⇒ 按 §3 跑与文档相关的那些 ✓ —— `check-docs-tables` **clean（898 行 / 169 表）** ✓ · 单测 **445/445** ✓（台账断言在内 ✓）· **`core/` 与 `web/` 未改** ⇒ `build-web` / `check-dist` / `verify` / `usability` 与第 300 轮**同源、本轮不重跑**、也不写新数字 ✓。
+
+**⑥ 还差什么**：**推送 —— 只有用户能做** ✓ ⇒ 推完 CI 会重建并部署 `23d44fc`，届时可再查一次（确认新增 `github-pages` 部署为 `success`、站内出现第 300 轮的压缩标记 ✓）；真机 / 真浏览器（G4 / G9）与 D8 打印缩放仍见 `docs/USE.md` §5 ✓。
+
 ### 第 300 轮（**把压缩做出来：动态 Huffman + 惰性匹配 + 链深 1024 ⇒ 实测比 zlib -9 还小 0.8%；同一份文件少印 2 张；顺带修掉 D106 与一处过期数字**）**
 
 **① 用户目标（原话）**：「尝试建立压缩形式，例如像 zip 的编码，在建立高密度二维码的过程中进行压缩，尽可能的保留完整信息」✓ 追加授权「可以下载开源的项目进行整合压缩」✓ ⇒ **结论：不需要 vendor** ✓（见 ⑩）。
