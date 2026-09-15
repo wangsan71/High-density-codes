@@ -128,7 +128,7 @@ G6 ② 需要产品负责人定判据。
     `advice.js`（**每个 reason 必须有 advice，机器强制**）、
     **`png-read.js`（PNG：位深 1/2/4/8/16、调色板、灰度/RGB/带 alpha，第 95 轮）**、
     **`tiff-read.js`（TIFF 基线：II/MM、多页、条带、1/4/8/16 位、光度 0/1/2/3、自写 LZW 与 PackBits、FillOrder、Predictor 2，第 96 轮）**。
-  - 自研底层：`hash.js`、`chacha20.js`、`deflate.js`（含 `inflateRaw`）、`crc.js`。
+  - 自研底层：`hash.js`、`chacha20.js`、`deflate.js`（**第 300 轮起：压缩侧每份载荷都算「动态 Huffman（包-合并长度受限码 ≤15 bit）」与「固定块」两种成本、发小的那个；解压侧 `inflateRaw` 两种块都吃**）、`crc.js`；对拍工具 `tools/deflate-bench.mjs`（逐例与 `zlib -9` 比，`--encoder <path>` 可换成别的实现来对账）。
   - `render/`：`layout.js`、`raster.js`、`png.js`、`tiff.js`、**`pdf.js`（D78 后图像流为裸 RGB 行、无 predictor 参数）**、`stl.js`、`threeMF.js`、`sheet.js`、`glyphs.js`、**`modules.js`（模块 timing 图案）**。
   - `calibrate/`：`mtfplate.js`（板规格 + 外观光栅）、`readmtf.js`（读者 + 推荐）。
   - `mesh/`：`solids.js`、`stl.js`、`rectilinear.js`、`mtfplate.js`、`plate.js`。
@@ -287,6 +287,7 @@ soak 口径 = `decodePNG` + `bootstrapDecode`）：
 10. **第 94 轮启动的 600 dpi G2 重跑被"暂停"中止**（150/200 已处理，数据见 §6）；要判决就重跑：
    `node cli/pskit.mjs verify --gate G2 --root .tmp --match 'sc-scan600-*'`（后台，约 1–2 h）。
 11. **真实照片验收仍是负证据，不是验收结论**：当前手机照片批次不能替代 G4 的 500×8，也不能替代模块档的平板扫描验收。
+12. **压缩还差一格：结构化 JSON 比 zlib -9 大 5%**（第 300 轮实测：`tests/conformance.json` **1.050×**；而散文 0.973×、源码 1.00×、重复文本 1.00× ⇒ 整体 **0.992×**）。方向是**多块**（每块用自己的 Huffman 统计），**不是换库** —— 用户第 300 轮虽已授权 vendor 开源压缩库，但自研版实测已到 zlib -9 水平 ⇒ 换库收益为负、还会破坏 AGENTS §2.4「自研编解码」。
 
 ---
 

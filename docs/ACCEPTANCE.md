@@ -20,8 +20,10 @@
 
 ### ✅ G0 · 规格可独立实现
 `docs/PLAN.md` 是绑定契约；独立实现只需文本即可产出一致结果。
-复现：`python ref/decode.py` → `conformance.json: PASS with 4 spec gap(s)`（309 项检查）
+复现：`python ref/decode.py` → `conformance.json: PASS with 4 spec gap(s)`（**310** 项检查 —— 第 300 轮实测；原写 309，**拿 HEAD 版 fixture 对跑同样是 310** ⇒ 那是旧数字，不是第 300 轮改出来的 ✓）
 4 个 GAP 是 `geometry-*`：闭合它们要把决策 6 的整套 EW 量化搜索搬进规格文本，代价不划算；改由 G8/G10 用实物几何证据兜住（理由记在 `ref/README.md`）。
+
+**压缩这一条的现状（第 300 轮实测，用户目标「在建立高密度二维码的过程中压缩、尽可能保留完整信息」）**：容器 `PSZ1` 的 DEFLATE 载荷**改前**只发固定 Huffman 单块 ⇒ 实测 **1.189×zlib -9**（同一语料 906,145 B vs 761,927 B）；**改后**发动态 Huffman（包-合并长度受限码 ≤15 bit）+ 惰性匹配 + 链深 1024 ⇒ **0.992×zlib -9**（755,719 B）✓。复现一条命令：`node tools/deflate-bench.mjs`（改前的数字用 `git show HEAD:core/deflate.js > .tmp/old-deflate.mjs` 再 `--encoder .tmp/old-deflate.mjs` ✓）。产品级：`tests/conformance.json`（207,461 B）在 `P-M1-300` 上 **12 页 → 10 页**（`send … --format pdf`）✓。**仍未闭合**：结构化 JSON 仍比 zlib 大 **5%**（`tests/conformance.json` 1.050×）⇒ 方向是多块（每块用自己的统计），**本轮不做**；所以**不主张「压缩已到最优」** ✓。
 
 ### ✅ G1 · 渲染—读回零误读
 纸面/板材/双色/单色全剖面的渲染图经**同一份**读格代码回读。

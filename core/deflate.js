@@ -462,92 +462,340 @@ const HASH_BITS = 16;
 const HASH_SIZE = 1 << HASH_BITS;
 const HASH_MASK = HASH_SIZE - 1;
 const PREV_MASK = HASH_SIZE - 1;
-const MAX_CHAIN = 64;
+// Chain depth is what finds the LONG-RANGE match on periodic input: with 64, "word0 word1 ..."
+// saturates the 3-byte bucket and the in-window period match is never reached (2x worse than
+// zlib -9 on that shape). 1024 is where our output stops differing from zlib -9's on every
+// stress shape measured by tools/deflate-bench.mjs, at ~8 MB/s.
+const MAX_CHAIN = 1024;
 
 function hash3(b, i) {
   return ((b[i] << 10) ^ (b[i + 1] << 5) ^ b[i + 2]) & HASH_MASK;
 }
 
+/* ------------------------------------------------------------------ */
+/* Compressor: LZ77 with lazy matching, then the SMALLER of a fixed or  */
+/* a dynamic Huffman block (both legal RFC 1951, BFINAL=1). The dynamic */
+/* one closes most of the gap on repetitive input: under a fitted tree  */
+/* each length/distance symbol costs 3-5 bits instead of 7-8 fixed.     */
+/* ------------------------------------------------------------------ */
+
+/** Length-limited Huffman code lengths (package-merge; RFC 1951 allows at most 15 bits). */
+function huffmanLengths(freq, limit) {
+  const n = freq.length;
+  const len = new Uint8Array(n);
+  const active = [];
+  for (let s = 0; s < n; s++) if (freq[s] > 0) active.push(s);
+  if (active.length === 0) return len;
+  if (active.length === 1) {
+    len[active[0]] = 1;
+    return len;
+  }
+  const leaves = active.map((s) => ({ w: freq[s], syms: [s] })).sort((a, b) => a.w - b.w);
+  let list = leaves;
+  for (let level = 1; level < limit; level++) {
+    const packaged = [];
+    for (let i = 0; i + 1 < list.length; i += 2) {
+      packaged.push({ w: list[i].w + list[i + 1].w, syms: list[i].syms.concat(list[i + 1].syms) });
+    }
+    const merged = [];
+    let a = 0;
+    let b = 0;
+    while (a < leaves.length || b < packaged.length) {
+      if (b >= packaged.length || (a < leaves.length && leaves[a].w <= packaged[b].w)) merged.push(leaves[a++]);
+      else merged.push(packaged[b++]);
+    }
+    list = merged;
+  }
+  const need = 2 * active.length - 2;
+  const counts = new Uint32Array(n);
+  for (let i = 0; i < need && i < list.length; i++) for (const s of list[i].syms) counts[s]++;
+  for (const s of active) len[s] = counts[s];
+  return len;
+}
+
+/** Bit-reversed canonical codes: what the LSB-first writer needs. */
+function reversedCodes(lengths) {
+  const codes = canonicalCodes(lengths);
+  const rev = new Uint16Array(lengths.length);
+  for (let s = 0; s < lengths.length; s++) rev[s] = lengths[s] ? reverseBits(codes[s], lengths[s]) : 0;
+  return rev;
+}
+
+/** Bits this token stream costs under these tables, excluding the block header. */
+function tokenCost(sym, lenVal, distVal, count, litLen, distLen) {
+  let bits = litLen[256];
+  for (let t = 0; t < count; t++) {
+    const s = sym[t];
+    bits += litLen[s];
+    if (s > 256) {
+      const li = s - 257;
+      bits += LEN_EXTRA[li];
+      const di = DIST_CODE[distVal[t]];
+      bits += distLen[di] + DIST_EXTRA[di];
+    }
+  }
+  return bits;
+}
+
+/* RFC 1951 sec. 3.2.7 order in which the code-length code lengths are sent. */
+const CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+/** Longest code-length code the 3-bit header field can carry (RFC 1951 sec. 3.2.7). */
+const CL_BITS = 7;
+
+/** Run-length encode the concatenated code lengths: triples of [code, extraValue, extraBits]. */
+function rleCodeLengths(all) {
+  const out = [];
+  let i = 0;
+  while (i < all.length) {
+    const v = all[i];
+    let run = 1;
+    while (i + run < all.length && all[i + run] === v) run++;
+    if (v === 0) {
+      let left = run;
+      while (left >= 11) {
+        const take = Math.min(138, left);
+        out.push([18, take - 11, 7]);
+        left -= take;
+        i += take;
+      }
+      while (left >= 3) {
+        const take = Math.min(10, left);
+        out.push([17, take - 3, 3]);
+        left -= take;
+        i += take;
+      }
+      while (left > 0) {
+        out.push([0, 0, 0]);
+        left--;
+        i++;
+      }
+    } else {
+      out.push([v, 0, 0]);
+      i++;
+      let left = run - 1;
+      while (left >= 3) {
+        const take = Math.min(6, left);
+        out.push([16, take - 3, 2]);
+        left -= take;
+        i += take;
+      }
+      while (left > 0) {
+        out.push([v, 0, 0]);
+        left--;
+        i++;
+      }
+    }
+  }
+  return out;
+}
+
+/** Everything a BTYPE=10 header needs, plus the exact header bit count. */
+function buildDynamic(sym, lenVal, distVal, count) {
+  const litFreq = new Uint32Array(286);
+  const distFreq = new Uint32Array(30);
+  litFreq[256] = 1; // end of block always appears
+  for (let t = 0; t < count; t++) {
+    const s = sym[t];
+    litFreq[s]++;
+    if (s > 256) distFreq[DIST_CODE[distVal[t]]]++;
+  }
+  const litLen = huffmanLengths(litFreq, MAX_BITS);
+  const distLen = huffmanLengths(distFreq, MAX_BITS);
+  // A dynamic block must still declare a usable distance tree: with no matches at all, one code of
+  // length 1 keeps the header legal (RFC 1951 sec. 3.2.7) where all-zero lengths would not.
+  let distUsed = 1;
+  for (let d = 0; d < distLen.length; d++) if (distLen[d] > 0) distUsed = d + 1;
+  if (distUsed === 1 && distLen[0] === 0) distLen[0] = 1;
+
+  let litUsed = 257;
+  for (let s = 0; s < litLen.length; s++) if (litLen[s] > 0) litUsed = s + 1;
+
+  const all = new Array(litUsed + distUsed);
+  for (let s = 0; s < litUsed; s++) all[s] = litLen[s];
+  for (let d = 0; d < distUsed; d++) all[litUsed + d] = distLen[d];
+  const rle = rleCodeLengths(all);
+
+  const clFreq = new Uint32Array(19);
+  for (const [c] of rle) clFreq[c]++;
+  // RFC 1951 sec. 3.2.7 sends each code-length code length in a 3-BIT field, so the code-length
+  // code may not be longer than 7 bits: a length of 8 is silently truncated to 0 by the field and
+  // the receiving side then sees a broken (incomplete) code-length table. Measured: the seeded
+  // property case mixedTextThenRandom/12375 hit length 8 and was rejected by both decoders.
+  const clLen = huffmanLengths(clFreq, CL_BITS);
+  for (let s = 0; s < 19; s++) {
+    if (clLen[s] > CL_BITS) throw new Error('deflate: code-length code exceeds the 3-bit header field');
+  }
+  let clUsed = 4;
+  for (let i = 0; i < 19; i++) if (clLen[CL_ORDER[i]] > 0) clUsed = i + 1;
+
+  let headerBits = 5 + 5 + 4 + clUsed * 3;
+  for (const [c, , bits] of rle) headerBits += clLen[c] + bits;
+
+  return {
+    litLen,
+    litRev: reversedCodes(litLen),
+    distLen,
+    distRev: reversedCodes(distLen),
+    hlit: litUsed,
+    hdist: distUsed,
+    hclen: clUsed,
+    clLen,
+    clRev: reversedCodes(clLen),
+    rle,
+    headerBits,
+  };
+}
+
 /**
- * One fixed-Huffman (BTYPE=01) block with BFINAL=1: LZ77 over `bytes` using hash
- * chains, literals/lengths/distances emitted with the RFC 1951 fixed code table.
- * The result is a legal RFC 1951 stream, so inflateRawSync() accepts it.
+ * LZ77 with a 16-bit 3-byte hash, hash chains and LAZY matching: a match at i is deferred when i+1
+ * starts a strictly longer one. Greedy emitted the shorter match and could not reach the longer one.
+ *
+ * Tokens are three parallel arrays: sym[t] is a literal byte or 257+lengthIndex; lenVal[t] the raw
+ * match length (only read when sym[t] > 256); distVal[t] the match distance (0 for literals).
  */
-function deflateFixed(bytes) {
+function lz77Tokens(bytes) {
   const n = bytes.length;
   const win = n < MAX_WINDOW ? n : MAX_WINDOW;
-  const bw = new BitWriter(n + (n >> 3) + 64);
-
-  bw.bits(1, 1); // BFINAL = 1
-  bw.bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-  if (n === 0) {
-    bw.hcode(FIXED_LIT_REV[256], FIXED_LIT_LEN[256]);
-    return bw.finish();
-  }
-
+  const sym = new Uint16Array(n + 1);
+  const lenVal = new Uint16Array(n + 1);
+  const distVal = new Uint16Array(n + 1);
+  let count = 0;
   const head = new Int32Array(HASH_SIZE).fill(-1);
   const prev = new Int32Array(HASH_SIZE).fill(-1);
   let inserted = 0;
-  let i = 0;
 
-  while (i < n) {
-    // Index every position strictly before i (a start needs a full 3-byte read).
-    // Positions covered by a just-emitted match are indexed on the next round,
-    // so chains stay dense without a second pass over the input.
-    while (inserted < i && inserted + MIN_MATCH <= n) {
+  const indexUpTo = (limit) => {
+    while (inserted < limit && inserted + MIN_MATCH <= n) {
       const h = hash3(bytes, inserted);
       prev[inserted & PREV_MASK] = head[h];
       head[h] = inserted;
       inserted++;
     }
-    if (inserted < i) inserted = i; // tail: no further indexable starts
+    if (inserted < limit) inserted = limit;
+  };
 
+  const findMatch = (i, floor) => {
     let bestLen = 0;
     let bestDist = 0;
     const maxAvail = n - i < MAX_MATCH ? n - i : MAX_MATCH;
     if (maxAvail >= MIN_MATCH) {
       const h = hash3(bytes, i);
-      let cand = head[h]; // only positions < i are ever indexed, so dist >= 1
+      let cand = head[h];
       const lower = i - win;
       let chain = MAX_CHAIN;
+      let need = floor;
       while (cand > lower && chain-- > 0) {
-        // cheap prune: the byte that would extend the current best must match
-        if (bytes[cand + bestLen] === bytes[i + bestLen]) {
+        if (bytes[cand + need] === bytes[i + need]) {
           let l = 0;
           while (l < maxAvail && bytes[cand + l] === bytes[i + l]) l++;
           if (l > bestLen) {
             bestLen = l;
             bestDist = i - cand;
+            need = l;
             if (l >= maxAvail || l >= MAX_MATCH) break;
           }
         }
         cand = prev[cand & PREV_MASK];
       }
     }
+    return [bestLen, bestDist];
+  };
 
+  let i = 0;
+  while (i < n) {
+    indexUpTo(i);
+    let [bestLen, bestDist] = findMatch(i, 0);
+    if (bestLen >= MIN_MATCH && bestLen < MAX_MATCH && i + 1 < n) {
+      indexUpTo(i + 1);
+      const [nextLen, nextDist] = findMatch(i + 1, bestLen);
+      if (nextLen > bestLen) {
+        sym[count] = bytes[i];
+        lenVal[count] = 0;
+        distVal[count] = 0;
+        count++;
+        i++;
+        bestLen = nextLen;
+        bestDist = nextDist;
+      }
+    }
     if (bestLen >= MIN_MATCH) {
-      const li = LEN_CODE[bestLen];
-      bw.hcode(FIXED_LIT_REV[257 + li], FIXED_LIT_LEN[257 + li]);
-      bw.bits(bestLen - LEN_BASE[li], LEN_EXTRA[li]);
-      const di = DIST_CODE[bestDist];
-      bw.hcode(FIXED_DIST_REV[di], FIXED_DIST_LEN[di]);
-      bw.bits(bestDist - DIST_BASE[di], DIST_EXTRA[di]);
+      sym[count] = 257 + LEN_CODE[bestLen];
+      lenVal[count] = bestLen;
+      distVal[count] = bestDist;
+      count++;
       i += bestLen;
     } else {
-      const b = bytes[i];
-      bw.hcode(FIXED_LIT_REV[b], FIXED_LIT_LEN[b]);
+      sym[count] = bytes[i];
+      lenVal[count] = 0;
+      distVal[count] = 0;
+      count++;
       i++;
     }
   }
+  return { sym, lenVal, distVal, count };
+}
 
-  bw.hcode(FIXED_LIT_REV[256], FIXED_LIT_LEN[256]); // end of block
+/** Write one block (BFINAL = final) with the given tables. */
+function emitBlock(bw, tok, litRev, litLen, distRev, distLen, final, dyn) {
+  bw.bits(final ? 1 : 0, 1);
+  if (!dyn) {
+    bw.bits(1, 2);
+  } else {
+    bw.bits(2, 2);
+    bw.bits(dyn.hlit - 257, 5);
+    bw.bits(dyn.hdist - 1, 5);
+    bw.bits(dyn.hclen - 4, 4);
+    for (let i = 0; i < dyn.hclen; i++) bw.bits(dyn.clLen[CL_ORDER[i]], 3);
+    for (const [c, extra, bits] of dyn.rle) {
+      bw.hcode(dyn.clRev[c], dyn.clLen[c]);
+      if (bits) bw.bits(extra, bits);
+    }
+  }
+  for (let t = 0; t < tok.count; t++) {
+    const s = tok.sym[t];
+    bw.hcode(litRev[s], litLen[s]);
+    if (s > 256) {
+      const li = s - 257;
+      if (LEN_EXTRA[li]) bw.bits(tok.lenVal[t] - LEN_BASE[li], LEN_EXTRA[li]);
+      const di = DIST_CODE[tok.distVal[t]];
+      bw.hcode(distRev[di], distLen[di]);
+      if (DIST_EXTRA[di]) bw.bits(tok.distVal[t] - DIST_BASE[di], DIST_EXTRA[di]);
+    }
+  }
+  bw.hcode(litRev[256], litLen[256]); // end of block
+}
+
+/**
+ * One block, BFINAL=1, coded with whichever of fixed / dynamic Huffman is smaller. The choice is a
+ * strict improvement: both code the SAME token stream, so the decoder cannot tell the difference
+ * beyond the block type, and the fixed table remains the fallback for inputs where fitting a tree
+ * costs more than it saves.
+ */
+function deflateBest(bytes) {
+  const n = bytes.length;
+  const bw = new BitWriter(n + (n >> 3) + 128);
+
+  if (n === 0) {
+    bw.bits(1, 1);
+    bw.bits(1, 2);
+    bw.hcode(FIXED_LIT_REV[256], FIXED_LIT_LEN[256]);
+    return bw.finish();
+  }
+
+  const tok = lz77Tokens(bytes);
+  const fixedBits = tokenCost(tok.sym, tok.lenVal, tok.distVal, tok.count, FIXED_LIT_LEN, FIXED_DIST_LEN) + 3;
+  const dyn = buildDynamic(tok.sym, tok.lenVal, tok.distVal, tok.count);
+  const dynBits =
+    tokenCost(tok.sym, tok.lenVal, tok.distVal, tok.count, dyn.litLen, dyn.distLen) + 3 + dyn.headerBits;
+
+  if (dynBits < fixedBits) emitBlock(bw, tok, dyn.litRev, dyn.litLen, dyn.distRev, dyn.distLen, 1, dyn);
+  else emitBlock(bw, tok, FIXED_LIT_REV, FIXED_LIT_LEN, FIXED_DIST_REV, FIXED_DIST_LEN, 1, null);
   return bw.finish();
 }
 
-/** Raw RFC 1951 DEFLATE stream (no PSKT header), fixed Huffman. */
+/** Raw RFC 1951 DEFLATE stream (no PSKT header): dynamic or fixed, whichever is smaller. */
 export function deflateRaw(input) {
-  return deflateFixed(toBytes(input));
+  return deflateBest(toBytes(input));
 }
 
 /**
@@ -563,7 +811,7 @@ export function compress(input) {
   }
 
   let method = METHOD_DEFLATE;
-  let payload = deflateFixed(src);
+  let payload = deflateBest(src);
   // incompressible input (>= 98% of the original size) -> stored, exactly:
   //   payload.length >= n * 98 / 100   <=>   payload.length * 50 >= n * 49
   if (payload.length * 50 >= n * 49) {
